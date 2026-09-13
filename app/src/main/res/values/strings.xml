@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- HyperPods for Moondrop — default (English) strings -->
+<resources>
+    <string name="app_name">HyperPods for Moondrop</string>
+    <string name="pod_info">Device</string>
+    <string name="about">About</string>
+
+    <!-- waiting page -->
+    <string name="waiting_for_pod">Waiting for Moondrop earbuds…</string>
+    <string name="waiting_for_pod_hint">Connect your Moondrop earbuds in Bluetooth settings. The module takes over the control channel once they are connected.</string>
+
+    <!-- device hero card -->
+    <string name="unknown_model">Moondrop earbuds</string>
+    <string name="conn_connected">Connected</string>
+    <string name="conn_disconnected">Not connected</string>
+    <string name="model_verified">Verified</string>
+    <string name="transport">Transport</string>
+    <string name="active_codec">Active codec</string>
+    <string name="unknown_value">Unknown</string>
+
+    <!-- battery -->
+    <string name="battery_title">Battery</string>
+    <string name="batt_left">Left</string>
+    <string name="batt_right">Right</string>
+    <string name="batt_case">Case</string>
+    <string name="batt_whole">Earbuds</string>
+    <string name="batt_charging">Charging</string>
+    <string name="batt_unknown">Reading battery…</string>
+
+    <!-- ANC -->
+    <string name="anc_title">Noise control</string>
+    <string name="anc_mode_off">Off</string>
+    <string name="anc_mode_nc">Noise Cancelling</string>
+    <string name="anc_mode_transparency">Transparency</string>
+    <string name="anc_mode_anti_wind">Anti-Wind</string>
+    <string name="anc_mode_adaptive">Adaptive</string>
+    <string name="anc_mode_live">Live</string>
+
+    <!-- gain / LED / prompt tone -->
+    <string name="gain_title">Gain</string>
+    <string name="led_title">LED indicator</string>
+    <string name="led_summary">Turn the earbud LED indicator on or off</string>
+    <string name="prompt_tone_title">Prompt tone</string>
+    <string name="prompt_tone_summary">Voice prompts when connecting or switching modes</string>
+    <string name="prompt_volume_title">Prompt volume</string>
+    <string name="prompt_volume_caption">Prompt volume</string>
+
+    <!-- codec / connection features -->
+    <string name="lhdc_title">LHDC high-definition audio</string>
+    <string name="lhdc_summary">Uses basic codecs such as AAC/SBC when off (off by default)</string>
+    <string name="dual_connection_title">Dual device connection</string>
+    <string name="dual_connection_summary">Keep two devices connected at the same time</string>
+    <string name="low_latency_title">Low latency mode</string>
+    <string name="low_latency_summary">Provided by the HyperOS system Bluetooth stack</string>
+
+    <!-- refresh -->
+    <string name="refresh">Refresh</string>
+    <string name="refresh_summary">Re-read the full state from the earbuds</string>
+
+    <!-- about -->
+    <string name="about_version">Version %1$s</string>
+    <string name="about_credits_title">Credits</string>
+    <string name="about_credits_summary">HyperOS integration architecture based on Art-Chen/HyperPods; protocol data from bqj6666/FxxkMoondrop and MegaSuite/moondrop-link-desktop; references: lingbai-rong/PuddingPods, Leaf-lsgtky/OppoPods.</string>
+    <string name="about_license_title">License</string>
+    <string name="about_license_value">GPL-3.0</string>
+</resources>

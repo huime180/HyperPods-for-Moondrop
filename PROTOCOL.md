@@ -1,0 +1,549 @@
+# 协议参考（PROTOCOL）
+
+> 本文描述水月雨（MOONDROP）耳机使用的 **Qualcomm GAIA（QTIL）业务协议**，以及本模块额外用到的
+> **中科蓝讯 9ECA 私有协议** 与 **Classic Bluetooth RFCOMM/SPP 传输切帧**。
+>
+> 文中每个十六进制字节都可以在源码里找到出处：
+> `core/Gaia.kt`（帧与命令）、`core/BatteryCodec.kt`（电量）、`core/GaiaFramer.kt`（RFCOMM 切帧）、
+> `core/SrcProtocol.kt`（9ECA）、`pods/MoondropLink.kt`（读写接线）、
+> 以及单测 `core/GaiaProtocolTest.kt` / `core/BatteryCodecTest.kt` 逐字节锁定的期望值。
+> 上游来源见文末「来源与推导」。**未真机验证的条目已单独标注 ⚠。**
+
+---
+
+## 1. 传输层
+
+| 传输 | 适用 | 服务 / UUID | payload 封装 |
+|---|---|---|---|
+| **GAIA V3 over BLE GATT** | 大多数 QCC / 蓝讯系水月雨耳机（EDGE、梦回2、太空漫游2 …） | Service `00001100-d102-11e1-9b23-00025b00a5a5`；Command `...1101`（写）；Response `...1102`（通知）；Data `...1103`（通知） | **裸帧**：无 SOF、无长度、无校验、无序列号（identity formatter） |
+| **GAIA V4 over Classic BT RFCOMM/SPP** | 布丁 PUDDING（MD-TWS-056）等 | SPP `00001101-0000-1000-8000-00805f9b34fb` | 两种：官方 `TransportProtocol.Rfcomm` 传输帧（SOF `0xFF`）或裸帧（`00 1D` 开头），见第 7 节 |
+| **中科蓝讯 9ECA 私有协议** | 蓝讯主控机型（猫饼、太空漫游2、音乐胶囊 …） | Service `9eca0000-7f3a-4f32-9a38-a91b2c6e0100`（`...0001` 写 / `...0002` 回 / `...0003` 通知 / `...0004` 能力 / `...0005` 固件） | 固定在同一个 GATT 连接内，与 GAIA 并存，见第 8 节 |
+
+* BLE 的 CCCD 是标准 `00002902-0000-1000-8000-00805f9b34fb`，对 `1102` 与 `1103` 写 `0x0001` 打开通知。
+* 上游 moondrop-link 记录 EDGE 的 BLE 命令特征**必须 write-with-response**；本模块发的是
+  `WRITE_TYPE_NO_RESPONSE`（GAIA 帧本身无序列号，靠 feature 关联响应）。
+* 9ECA 服务的 UUID 基址是 `7f3a-4f32-9a38-a91b2c6e0100`（与 `1100-d102-11e1-9b23-00025b00a5a5` 不同）。
+
+---
+
+## 2. GAIA 线格式
+
+```
+[vendor u16 BE][commandValue u16 BE][payload ...]
+commandValue = (feature << 9) | (type << 7) | (command & 0x7F)
+```
+
+| 字段 | 位宽 | 说明 |
+|---|---|---|
+| `vendor` | 16 bit，**大端** | `0x001D` = Qualcomm QTIL V3（现代功能命令）；`0x000A` = QTIL V1/V2（仅版本探测包） |
+| `commandValue` | 16 bit，**大端** | `bits 15..9` = feature(7b)；`bits 8..7` = type(2b)；`bits 6..0` = command(7b) |
+| `type` | 2 bit | `0`=COMMAND、`1`=NOTIFICATION、`2`=RESPONSE、`3`=ERROR |
+| `payload` | 余下 | 可以为空 |
+
+多字节字段大端这一点有硬证据：官方 App 的 native `BytesUtils`（`libutils-lib.so`）按
+`byte[0] << 8 | byte[1]` 组装 16 位字段（moondrop-link `constants.py` / `packet.py` 记录）。
+
+**版本探测**用 V1/V2 包，vendor `0x000A`，cmd `0x0300`：
+
+```
+版本探测   TX 00 0A 03 00     （RX cmd 0x8300 = 0x0300 | ACK，payload [status][protocol][gaiaMajor][minor]）
+```
+
+探测确认设备 GAIA 版本为 3 之后，功能命令才走 vendor `0x001D`。
+⚠ 本模块 `Gaia.getApiVersion()` 已实现该帧，但**连接流程没有调用它**（见 [README.md](README.md) 第六节）。
+
+---
+
+## 3. 逐字节示例（全部已由源码/单测锁定）
+
+约定：下表 `TX` 均为 **COMMAND**（type=0）帧。type 编码变化见每行说明。
+
+| 操作 | Hex | 出处 / 校验 |
+|---|---|---|
+| 版本探测 | `00 0A 03 00` | `Gaia.getApiVersion()`；单测 `版本探测帧与注册通知帧` |
+| BASIC 读能力位图 | `00 1D 00 01` | feature 0 / cmd 1 |
+| BASIC 读能力位图（翻页） | `00 1D 00 02` | cmd 2 = GET_SUPPORTED_FEATURES_NEXT |
+| BASIC 读应用版本 | `00 1D 00 05` | cmd 5 |
+| BASIC 注册通知（ANC_V2） | `00 1D 00 07 20` | cmd 7 + payload `[feature]`；单测锁定 |
+| BASIC 取消通知（ANC_V2） | `00 1D 00 08 20` | cmd 8 + `[feature]` |
+| 电量：查询支持哪些电池 | `00 1D 1A 00` | feature `0x0D`/cmd 0；单测 `电量查询命令与协议文档字节一致` |
+| 电量：查询左耳+右耳 | `00 1D 1A 01 01 02` | cmd 1 + payload `[1,2]`；单测锁定 |
+| 电量：查询左右+盒 | `00 1D 1A 01 01 02 03` | 单测 `cmd1 带类型列表的查询帧与协议文档一致` |
+| 电量：查询全部 4 类 | `00 1D 1A 01 00 01 02 03` | `FALLBACK_QUERY_IDS = [0,1,2,3]` |
+| 电量：老固件查全部（无 payload） | `00 1D 1A 01` | `Gaia.batteryGetAll()` |
+| 提示音：读开关 | `00 1D 1C 01` | feature `0x0E`/cmd 1 ⚠ 命令号未证实 |
+| 提示音：开开关 | `00 1D 1C 02 01` | cmd 2 + `01` ⚠ 命令号未证实 |
+| 提示音：读音量 | `00 1D 1C 03` | cmd 3 ⚠ 命令号未证实 |
+| 提示音：写音量 | `00 1D 1C 04 07` | cmd 4 + raw `07` ⚠ 命令号未证实 |
+| 增益：读 | `00 1D 1E 01` | feature `0x0F`/cmd 1 |
+| 增益：写 0 | `00 1D 1E 02 00` | cmd 2 + 设备码 |
+| LHDC：读 | `00 1D 20 05` | feature `0x10`/cmd 5；单测 `LHDC 编解码开关命令` |
+| LHDC：开 | `00 1D 20 06 01` | cmd 6 + `01`；单测锁定 |
+| LHDC：关 | `00 1D 20 06 00` | cmd 6 + `00` |
+| LDAC：读 | `00 1D 20 02` | cmd 2（未接线） |
+| LC3：读 | `00 1D 20 01` | cmd 1（未接线） |
+| 指示灯：读 | `00 1D 26 01` | feature `0x13`/cmd 1 |
+| 指示灯：开 | `00 1D 26 02 01` | cmd 2 + `01` |
+| 双设备连接：读状态 | `00 1D 28 01` | feature `0x14`/cmd 1；单测锁定 |
+| 双设备连接：开 | `00 1D 28 02 01` | cmd 2 + `01`；单测锁定 |
+| 双设备连接：关 | `00 1D 28 02 00` | cmd 2 + `00` |
+| 双设备连接：读超时 | `00 1D 28 03` | cmd 3（秒） |
+| 双设备连接：写超时 | `00 1D 28 04 0A` | cmd 4 + 秒（示例 10 s） |
+| 双设备连接：设备列表 | `00 1D 28 05` | cmd 5（首页）；单测锁定 |
+| 双设备连接：设备列表翻页 | `00 1D 28 06` | cmd 6；单测锁定 |
+| 双设备连接：断开某台 | `00 1D 28 07 01 AA BB CC DD EE FF 50 61 64` | cmd 7 + `[num:1][addr:6][name utf8]`（示例 num=1、`AA:BB:CC:DD:EE:FF`、名字 `Pad`）；单测 `断开已连接设备的 payload…` |
+| ANC V1：读状态 | `00 1D 04 01` | feature 2/cmd 1 |
+| ANC V1：写状态 | `00 1D 04 02 01` | cmd 2 + `0/1` |
+| AudioCuration：读当前模式 | `00 1D 10 03` | feature 8/cmd 3 |
+| AudioCuration：设为关 | `00 1D 10 04 01` | cmd 4 + **位掩码** `01` |
+| AudioCuration：设为降噪 | `00 1D 10 04 02` | 位掩码 `02` |
+| AudioCuration：设为通透 | `00 1D 10 04 04` | 位掩码 `04` |
+| ANC V2：读当前模式 | `00 1D 40 03` | feature 32/cmd 3；单测 `ANC V2 读写与文档一致` |
+| ANC V2：设模式 4 | `00 1D 40 04 04` | cmd 4 + 模式码 |
+| ANC V2：读切换配置 | `00 1D 40 29` | cmd 41 |
+| ANC V2：写切换配置 | `00 1D 40 2A 01 01 01 01 00` | cmd 42 + `[STATE][ANC_ON][ANC_OFF][TRANSPARENT][ORDER]` |
+| 空间音频：读 | `00 1D 24 01` | feature 18/cmd 1（未接线） |
+| 左右声道反转：读 | `00 1D 3C 01` | feature 30/cmd 1（未接线） |
+| 关机 | `00 1D 30 01` | feature 24/cmd 1（未接线） |
+
+### 回包 / 通知 / 错误帧的形态
+
+| 方向 | 帧 | 说明 |
+|---|---|---|
+| 电量响应（分体） | `00 1D 1B 01 01 50 02 4B` | feature 13、type 2(RESPONSE)、cmd 1，payload `[1,80][2,75]`；单测 `parse 解析响应帧` 用 `00 1D 1B 01 02 01 50 02 4B` 同族数据 |
+| 电量通知 | `00 1D 1A 81 00 3C` | feature 13、type 1(NOTIFICATION)、cmd 1，payload `[0,60]`（type 0 整机 60%） |
+| ANC V2 响应 | `00 1D 41 03 02` | type 2、cmd 3，payload `[mode]` |
+| ANC V2 通知 | `00 1D 40 83 02` | type 1、cmd 3，payload `[mode]` |
+| PUDDING ANC 回包 | `00 1D 41 04 <mode>` | 与上面同族（cmd 4 的 RESPONSE） |
+| 错误帧 | `00 1D 05 81 00` | type 3(ERROR)，`payload[0]` = 错误码 |
+
+> ⚠ `Gaia.kt` 只定义了 `TYPE_COMMAND/TYPE_NOTIFICATION/TYPE_RESPONSE` 三个常量，**没有 `TYPE_ERROR` 常量**；
+> `parse()` 会把 type 3 原样解析出来，客户端目前不专门处理 ERROR 帧。
+
+### GAIA V3 错误码（`payload[0]`，来源 moondrop-link `constants.py`）
+
+| 值 | 含义 |
+|---|---|
+| 0 | FEATURE_NOT_SUPPORTED |
+| 1 | COMMAND_NOT_SUPPORTED |
+| 2 | NOT_AUTHENTICATED |
+| 3 | INSUFFICIENT_RESOURCES |
+| 4 | AUTHENTICATING |
+| 5 | INVALID_PARAMETER |
+| 6 | INCORRECT_STATE |
+| 7 | IN_PROGRESS |
+
+---
+
+## 4. Feature ID 表
+
+`core/Gaia.kt` 里定义的全部 feature 常量（十进制 / 十六进制）：
+
+| ID | 常量名 | 含义 | 本模块使用 |
+|---:|---|---|---|
+| 0 | `F_BASIC` | 基础（版本、能力、序列号、通知注册） | ✅ 能力探测 |
+| 1 | `F_EARBUD` | 耳塞信息 | — |
+| 2 | `F_ANC` | ANC V1 | ✅ 探测路径之一 |
+| 3 | `F_VOICE_UI` | 语音 UI | — |
+| 4 | `F_DEBUG` | 调试 | — |
+| 5 | `F_MUSIC_PROCESSING` | 音乐处理 / EQ | — |
+| 6 | `F_UPGRADE` | 固件升级（本项目明确不做 OTA） | — |
+| 7 | `F_HANDSET_SERVICE` | 手柄 / 通话服务 | — |
+| 8 | `F_AUDIO_CURATION` | AudioCuration（降噪/通透/风噪等） | ✅ 探测路径之一 |
+| 9 | `F_EARBUD_FIT` | 佩戴检测 | — |
+| 10 | `F_VOICE_PROCESSING` | 语音处理 | — |
+| 11 | `F_GESTURE_CONFIGURATION` | 手势配置 | — |
+| 12 | `F_STATISTICS` | 统计 | — |
+| 13 | `0x0D` `F_BATTERY` | 电量 | ✅ |
+| 14 | `0x0E` `F_VOICE` | 提示音（voice prompt） | ⚠ 命令号待验证 |
+| 15 | `0x0F` `F_DAC_GAIN` | 增益 | ✅ |
+| 16 | `0x10` `F_CODEC_TYPE` | 编解码（LC3 / LDAC / LHDC） | ✅ LHDC（LC3/LDAC 未接线） |
+| 17 | `F_LIGHT_SENSOR` | 光线传感器 | — |
+| 18 | `F_SPATIAL_AUDIO` | 空间音频 | ⚠ 仅档案标记，未接线 |
+| 19 | `0x13` `F_LED` | 指示灯 | ✅ |
+| 20 | `0x14` `F_ONEBRINGTWO` | 双设备连接 / 一拖二 | ✅ |
+| 21 | `F_BT_ADDRESS` | 蓝牙地址 | — |
+| 22 | `F_TOUCHV2` | 触控 V2 | — |
+| 23 | `F_AUDIO_RESOURCE` | 音频资源 | — |
+| 24 | `F_POWER_CONTROL` | 电源控制（关机） | 已实现未接线 |
+| 25 | `F_POWER_TIMEOUT` | 自动关机超时 | — |
+| 26 | `F_TOUCHV3` | 触控 V3 | — |
+| 27 | `0x1B` `F_DYBASS` | 动态低音 | — |
+| 29 | `0x1D` `F_AUDIO_FILE_STORAGE` | 音频文件存储 | — |
+| 30 | `0x1E` `F_LR_CHANNEL` | 左右声道反转 | 已实现未接线 |
+| 32 | `0x20` `F_ANC_V2` | ANC V2 | ✅ 探测路径之一 |
+
+> 28、31 在 `Gaia.kt` 中没有定义。上游 moondrop-link `constants.py` 只列出
+> `BASIC(0x00) / EARBUD(0x01) / ANC(0x02) / AUDIO_CURATION(0x08) / BATTERY(0x0D) /
+> ONEBRINGTWO(0x14) / DYBASS(0x1B) / AUDIO_FILE_STORAGE(0x1D) / LR_CHANNEL(0x1E) / ANC_V2(0x20)`，
+> 与本表一致（其余常量来自官方 App 内嵌 `com.qualcomm.qti.gaiaclient` 的插件命名）。
+
+### 能力位图（`GET_SUPPORTED_FEATURES`）
+
+```
+TX 00 1D 00 01                 （第 2 页用 cmd 2：00 1D 00 02）
+RX 00 1D 00 81 <payload...>    （feature 0 / type 1? → 实际为 COMMAND 的 RESPONSE：00 1D 00 <0x81=0x01|0x80?>）
+```
+
+* 端侧分页标志：`payload[0] & 0x01` == 1 表示「还有下一页」（moondrop-link 与本项目一致）；
+* **正文编码两派读法（未裁决）**：
+  * 本项目 `Gaia.parseSupportedFeatures()`：把正文当 **32-bit word 位图**（大端），
+    word `i` 覆盖 feature `32*i .. 32*i+31`，`bit b` 置位即支持 feature `wordIdx*32 + b`；
+  * 上游 moondrop-link `features.py::get_supported_features()`：把正文当 **`(featureId, version)` 字节对**序列。
+* `Gaia.isFeaturePayloadTruncated()`（payload 长度非 4 倍数 → 末位 word 丢失）已实现但**未被调用**。
+
+---
+
+## 5. 电量协议（feature `0x0D` / 13）
+
+### 5.1 两条命令
+
+| 步骤 | TX | RX |
+|---|---|---|
+| ① 问「你有哪些电池」 | `00 1D 1A 00`（cmd 0，无 payload） | payload = type 列表，例如 `01 02 03` |
+| ② 问这些电池的电量 | `00 1D 1A 01 <type...>`（cmd 1，payload = 要查的 type 列表） | payload = `[type, level]` 对，例如 `01 50 02 4B` |
+
+老固件（GAIA V3，如 GA2）也可以用「cmd 1 + 无 payload」一次问全部：`00 1D 1A 01`。
+
+### 5.2 电池 type
+
+| type | 含义 |
+|---:|---|
+| 0 | **单设备（整机电量）** |
+| 1 | 左耳 |
+| 2 | 右耳 |
+| 3 | 充电盒 |
+| 255 | 固件表示「该组件无数据」（`BATTERY_LEVEL_UNKNOWN`） |
+
+上游 moondrop-link `constants.py` 的命名对照：`BAT_SINGLE_DEVICE=0 / BAT_LEFT_DEVICE=1 /
+BAT_RIGHT_DEVICE=2 / BAT_CHARGER_CASE=3 / BAT_LEVEL_UNKNOWN=255`，names 为
+`device / left / right / case`。
+
+### 5.3 关键实测事实
+
+* **Moondrop EDGE 只回 type 0（单设备）**，不回 1/2 —— 上游 moondrop-link 在真机（60%）验证。
+* 布丁 PUDDING 三路齐全：type 1=左耳、2=右耳、3=充电盒（PuddingPods 文档），查询用
+  `00 1D 1A 00` 或 `00 1D 1A 01 01 02`，回包 `00 1D 1B ...`；
+* 梦回2（GA2）实测**只有左右耳，没有充电盒电量**（FxxkMoondrop）。
+
+### 5.4 解析规则（`BatteryCodec.parse`）
+
+| payload 形态 | 处理 |
+|---|---|
+| `[type, level, type, level, …]` | 标准：按对读取 |
+| `[count, type, level, …]` | 仅当 `(size-1) % 2 == 0`、`count == 剩余对数`、`count ∈ 1..8` 时跳过头字节 |
+| `[level]` | 单值：仅当给了 `hintType`（且 0..100）才成对 |
+
+* 合法 type 仅 `0..3`，合法电量仅 `0..100`；不合法/未知 type **只忽略，不位移**；
+* `255`（无数据）被丢弃。
+
+### 5.5 状态归并（`BatteryState`）
+
+* `single`（type 0）/ `rawLeft`（1）/ `rawRight`（2）/ `rawCase`（3）各自保留最近一次有效值；
+* 对外 `currentLeft = rawLeft.known ? rawLeft : single`，`currentRight = rawRight.known ? rawRight : single`
+  → **只回 type 0 的机型左右耳都能显示**，显式分体值优先；
+* `systemLevel()` 取左右耳较小者，供系统蓝牙栈使用；
+* `fallbackFromSystem(level)` 系统单值兜底**同时写左右耳与整机**（只兜左耳就是「右耳不显示」的成因）；
+* `usesSingleDeviceBattery()` = 有 type 0 且无任何显式 1/2 值。
+
+完整根因分析见 [ADAPTATION.md](ADAPTATION.md) 第七节。
+
+---
+
+## 6. 命令目录（按 feature 分组）
+
+### BASIC（0）
+
+| 命令 | 值 | 用途 |
+|---|---:|---|
+| GET_GAIA_VERSION | 0 | — |
+| GET_SUPPORTED_FEATURES | 1 | 能力位图首页 |
+| GET_SUPPORTED_FEATURES_NEXT | 2 | 能力位图翻页 |
+| GET_SERIAL_NUMBER | 3 | — |
+| GET_VARIANT | 4 | — |
+| GET_APPLICATION_VERSION | 5 | RX payload = 版本串 |
+| REGISTER_NOTIFICATION | 7 | payload `[feature]`，例如 ANC_V2 → `00 1D 00 07 20` |
+| CANCEL_NOTIFICATION | 8 | payload `[feature]` |
+| GET_EARBUD_COLOR / LANG / SN_L / SN_R | 18 / 19 / 20 / 21 | — |
+| GET_TWS_CONNECTION_STATUS | 22 | — |
+
+### ANC V1（2）
+
+| 命令 | 值 |
+|---|---:|
+| GET_ANC_STATE / SET_ANC_STATE | 1 / 2 |
+| GET_NUM_ANC_MODES / GET_CURRENT_ANC_MODE / SET_ANC_MODE | 3 / 4 / 5 |
+| GET_CONFIGURED_LEAKTHROUGH_GAIN / SET_LEAKTHROUGH_GAIN | 6 / 7 |
+
+### AUDIO_CURATION（8）
+
+命令 0..42，`Gaia.kt` 全部列出（`C_AC_*`）。本模块实际只用到 **3 GET_CURRENT_MODE** 与 **4 SET_MODE**；
+上位机 moondrop-link 额外标注 `GET_TOGGLE_CONFIGURATION=8`、`GET_WIND_NOISE_DETECTION_STATE=23`、
+`GET_CURRENT_ANC_SWITCH_CONF=41`、`SET_ANC_SWITCH_CONF=42`。
+
+**EDGE 的 SET_MODE payload 是位掩码**（真机听感确认）：`0x01`=关闭降噪、`0x02`=ANC、`0x04`=通透；
+而**读回是 0-based 索引** `0`=关 / `1`=ANC / `2`=通透。
+
+### ANC V2（32）
+
+| 命令 | 值 | 说明 |
+|---|---:|---|
+| GET_CURRENT_MODE | 3 | `00 1D 40 03` → payload `[mode]` |
+| SET_CURRENT_MODE | 4 | `00 1D 40 04 <mode>` |
+| GET_CURRENT_ANC_SWITCH_CONF | 41 | `00 1D 40 29` → 5 字节 |
+| SET_ANC_SWITCH_CONF | 42 | `00 1D 40 2A` + `[STATE][ANC_ON][ANC_OFF][TRANSPARENT][ORDER]` |
+
+ANC V2 模式枚举（官方 `AncV2Handler` / moondrop-link `constants.py` 一致）：
+
+| 值 | 含义 |
+|---:|---|
+| 0 | OFF |
+| 1 | ON（ANC） |
+| 2 | TRANSPARENT（通透） |
+| 3 | ANTI_WIND（抗风） |
+| 4 | ADAPTIVE（自适应） |
+| 5 | LIVE |
+
+⚠ 布丁 PUDDING 在同一 feature 上使用**不同的枚举**（PuddingPods 文档）：
+`0`=关、`1`=自适应降噪、`2`=通透、`3`=抗风噪、`4`=基础降噪。
+所以 `Gaia.kt` 额外定义了 `PUDDING_ANC_*` 常量，并在档案里用映射表 `[0,4,2,3,1]` 转换
+（**不能**直接把官方枚举当通用值）。
+
+### BATTERY（13）
+
+见第 5 节。常量：`C_BATT_GET_BATTERY_LEVELS=1`、`C_BATT_GET_BATTERY_LEVELS_V4=0`、
+`C_BATT_GET_SUPPORTED_BATTERIES=0`（后两者同值，语义分别是「V4 无 payload 查全部」与「查支持的 type」）。
+
+### VOICE（14，提示音）⚠
+
+| 命令 | 本项目默认值 | 说明 |
+|---|---:|---|
+| GET_ENABLE | 1 | 未证实 |
+| SET_ENABLE | 2 | 未证实 |
+| GET_VOLUME | 3 | 未证实 |
+| SET_VOLUME | 4 | 未证实 |
+
+上游（moondrop-link 逆向自官方 App 内嵌 `gaiaclient`）只保留了 **feature id `0x0E`**，
+**没有保留命令号**。本项目按水月雨自家其它开关（DAC/LED/SPATIAL/DYBASS）一致的
+「GET=1 / SET=2」惯例给出默认值，并在档案里留了 `cmdVoiceGetEnable/SetEnable/GetVolume/SetVolume`
+四个覆盖字段（对应设置键 `HyperPodsPrefsKey.VOICE_CMD_*`），UI 是否展示则由能力位图决定。
+**这几个命令号必须真机验证后才能确信。**
+
+### DAC_GAIN（15）/ LED（19）/ SPATIAL_AUDIO（18）/ LR_CHANNEL（30）/ POWER_CONTROL（24）/ DYBASS（27）
+
+| feature | GET / SET | payload |
+|---|---|---|
+| 15 增益 | 1 / 2 | 设备码（含义由机型 `gainMap` 决定） |
+| 19 指示灯 | 1 / 2 | `0`=关 / `1`=开 |
+| 18 空间音频 | 1 / 2（开关）；3 / 4（头动追踪） | `0/1` |
+| 30 声道反转 | 1 / 2 | — |
+| 24 电源 | SET_PWR_OFF = 1 | — |
+| 27 动态低音 | 1 / 2 | — |
+
+### CODEC_TYPE（16）
+
+| 命令 | 值 | 帧 |
+|---|---:|---|
+| GET_LC3_STATE / SET_LC3_STATE | 1 / 3 | `00 1D 20 01` |
+| GET_LDAC_STATE / SET_LDAC_STATE | 2 / 4 | `00 1D 20 02` |
+| GET_LHDC_STATE / SET_LHDC_STATE | 5 / 6 | `00 1D 20 05` / `00 1D 20 06 01` |
+
+**LHDC 出厂默认关闭**：实测（连接中的耳机）主机侧广告 LHDCv5 / LHDC_V3 / LHDC_V2 / LDAC / aptX-adaptive，
+而耳机实际活动编码是 **AAC**。所以「默认跑 AAC/SBC」是正常出厂状态，开关打开后能否稳定协商需真机验证。
+
+### ONEBRINGTWO（20，双设备连接）
+
+| 命令 | 值 | 帧 | 说明 |
+|---|---:|---|---|
+| GET_STATE | 1 | `00 1D 28 01` | 读开关 |
+| SET_STATE | 2 | `00 1D 28 02 01` | 写开关，payload `[0|1]` |
+| GET_TIMEOUT | 3 | `00 1D 28 03` | 「暂停回连」超时秒数 |
+| SET_TIMEOUT | 4 | `00 1D 28 04 <sec>` | |
+| GET_DEVICES | 5 | `00 1D 28 05` | 首页 |
+| GET_DEVICES_NEXT | 6 | `00 1D 28 06` | 翻页 |
+| DISCONNECT | 7 | `00 1D 28 07 …` | payload `[num:1][addr:6][name utf8]` |
+
+设备条目解析（`Gaia.parseLinkedDevice`）：`num = payload[0]`，
+`addr = payload[1..6]` 按 `%02X:` 拼接，`name = payload[7..]` UTF-8；长度 < 7 返回 `null`。
+
+> 上游 moondrop-link 的注意事项：**一个 GAIA 响应只带一个 DeviceInfo**；
+> 设备列表读完时固件会**重复最后一条**，因此按「地址+名字」去重，重复即当作列表结束
+> （`features.py::get_current_devices`：先 cmd 5，再 cmd 6 ×3）。本项目只提供了解析器与命令构造，
+> 没有实现该去重循环。
+> 真机验证状态（上游原文）：读取与开关已验证；**写入 / 断开单台需双机场景实测**。
+
+---
+
+## 7. RFCOMM / SPP 切帧（`core/GaiaFramer.kt`）
+
+GAIA V4 设备在 Classic Bluetooth RFCOMM/SPP 上存在两种封装：
+
+### 7.1 传输帧（官方 `TransportProtocol.Rfcomm`，SOF = `0xFF`）
+
+```
+FF | Version(1B) | Flags(1B) | Length(1B 或 2B) | PDU(Length+4) | [Checksum(1B)]
+```
+
+| 字段 | 说明 |
+|---|---|
+| SOF | `0xFF` |
+| Version | `≥ 4` 时才允许长度扩展 |
+| Flags | `bit0 = CHECKSUM(0x01)`：PDU 之后随附 1 字节校验和；`bit1 = LENGTH_EXTENSION(0x02)`：Length 为 2 字节 |
+| Length | **PDU 的 payload 字节数**；PDU 总长 = `Length + 4`（vendor 2B + cmdValue 2B） |
+| PDU | 就是第 2 节的裸 GAIA 帧 |
+| Checksum | 仅当 Flags bit0 置位时存在 |
+
+切帧：`total = headerLen + pduLen + (hasChecksum ? 1 : 0)`；缓冲不足则**保留半截帧等下一批字节**；
+若算出的 `total < headerLen + 4`（明显非法）则丢 1 字节重新扫描。
+
+### 7.2 裸 PDU（部分固件直发）
+
+```
+00 1D | cmdValue(2B) | payload...
+```
+
+无长度字段 → 只能靠流中**下一个帧起始**（`0xFF` 或 `00 1D`）或 **burst 结束**
+（`inputStream.available() == 0`）来定界。
+
+已知局限（源码注释里写明）：若 payload 内部恰好出现 `FF` 或 `00 1D`，会被误判为下一帧起始。
+实测水月雨设备单 burst 单帧且 payload 很短，不受影响。其它垃圾字节按 1 字节步进跳过。
+
+### 7.3 两种 SPP UUID（不要混）
+
+| UUID | 用途 |
+|---|---|
+| `00001101-0000-1000-8000-00805f9b34fb` | **本项目使用**：PuddingPods 文档记录的 GAIA V4 over SPP |
+| `00001107-d102-11e1-9b23-00025b00a5a5` | moondrop-link `constants.py` 标注的「legacy GAIA/SPP」；其 BLE 客户端不使用 |
+
+本模块在 `createRfcommSocketToServiceRecord` 失败时会退到反射调用 `createRfcommSocket(1)`（channel 1）。
+
+---
+
+## 8. 中科蓝讯 9ECA 私有协议（`core/SrcProtocol.kt`）
+
+服务 `9eca0000-7f3a-4f32-9a38-a91b2c6e0100`，与 GAIA 服务在**同一个 GATT 连接内并存**，
+用于音源切换 / EQ / MIC 增益 / SN（FxxkMoondrop 记录）。
+
+### 8.1 帧
+
+```
+[A5][01][frameType][commandId][seq][payloadLen][payload ≤ 14B]
+```
+
+| 字段 | 值 |
+|---|---|
+| MAGIC | `0xA5` |
+| VERSION | `0x01` |
+| frameType | 1=COMMAND、2=RESPONSE、3=NOTIFICATION |
+| seq | 序列号（请求/回包匹配用） |
+| payloadLen | ≤ 14（`MAX_PAYLOAD`） |
+| payload | 变长 |
+
+### 8.2 特征
+
+| 用途 | UUID |
+|---|---|
+| Command（写） | `9eca0001-…` |
+| Response（通知） | `9eca0002-…` |
+| Notification（通知） | `9eca0003-…` |
+| Capability（直读） | `9eca0004-…` |
+| Firmware Info（直读） | `9eca0005-…` |
+| CCCD | `00002902-0000-1000-8000-00805f9b34fb` |
+
+### 8.3 命令 / 通知 / 音源
+
+| 命令 | 值 | | 通知 | 值 |
+|---|---:|---|---|---:|
+| GET_AUDIO_SOURCE | 1 | | NOTIF_AUDIO_SOURCE_CHANGED | 129 |
+| SET_AUDIO_SOURCE | 2 | | NOTIF_SWITCH_STATE_CHANGED | 130 |
+| GET_CAPABILITY | 3 | | NOTIF_CAPABILITY_CHANGED | 131 |
+| GET_FW_VERSION | 4 | | NOTIF_VOLUME_CHANGED | 133 |
+| GET_DEVICE_VOLUME | 5 | | NOTIF_PRESET_EQ_CHANGED | 134 |
+| SET_DEVICE_VOLUME | 6 | | NOTIF_PEQ_COMMITTED | 135 |
+| GET_PRESET_EQ | 7 | | NOTIF_MIC_GAIN_CHANGED | 136 |
+| SET_PRESET_EQ | 8 | | | |
+| GET_PEQ_CONFIG | 9 | | | |
+| SET_PEQ_PREGAIN | 10 | | | |
+| GET_PEQ_POINT | 11 | | | |
+| SET_PEQ_POINT | 12 | | | |
+| COMMIT_PEQ | 13 | | | |
+| GET_MIC_GAIN | 14 | | | |
+| SET_MIC_GAIN | 15 | | | |
+| PING | 127 | | | |
+
+音源 ID：`0` 蓝牙、`1` USB Audio、`2` 2.4G 无线、`3` AUX Line-In、`4` 光纤 SPDIF、`5` 同轴、
+`6` HDMI ARC、`7` 本地播放、`127` 自动选择、`254` 无信号。
+切换选项位掩码：`1` 持久化为默认、`4` 切换期间静音、`8` 不自动恢复蓝牙。
+
+⚠ 本项目**只实现了帧构造/解析与少量高层构造器**（音源、能力页、固件版本、音量、预设 EQ、MIC 增益、PING），
+**没有任何 UI 调用方，也没有真机验证**（上游 FxxkMoondrop 同样标注「9ECA 协议客户端已实现但未经实机验证」）。
+
+---
+
+## 9. ANC 路径选择
+
+```
+探测顺序（优先级由高到低）：
+  AudioCuration(8)  →  ANC V2(32)  →  ANC V1(2)  →  未知
+```
+
+* 依据：`Gaia.ancPathFrom(features)`（位图命中即选）；
+* 位图给不出结论时退回型号档案的 `anc.path`（例如 PUDDING 档案锁定 ANC_V2）；
+* 读写命令按路径分派：ANC V2 用 cmd 3/4；AudioCuration 用 cmd 3/4（写位掩码）；ANC V1 用 cmd 1/2。
+
+| 路径 | GET 帧 | SET 帧 | 读回值域 |
+|---|---|---|---|
+| AudioCuration(8) | `00 1D 10 03` | `00 1D 10 04 <位掩码>` | EDGE：0-based `0..2`；GA2/太空漫游2：`0..3`（0-based） |
+| ANC V2(32) | `00 1D 40 03` | `00 1D 40 04 <mode>` | 官方 `0..5`；PUDDING `0..4`（不同枚举） |
+| ANC V1(2) | `00 1D 04 01` | `00 1D 04 02 <0/1>` | `0`=关，非 0=开 |
+
+> 上游 FxxkMoondrop 记录：`AudioCuration cmd 41`（GET_CURRENT_ANC_SWITCH_CONF）在 GA2 上**回包不稳定**，
+> 曾导致 `ancPath` 卡死在 `-1`；他们的修复是回退到 cmd 3（GET_MODE）。本项目同样只用 cmd 3。
+
+---
+
+## 10. 「低延迟模式」不是一条 GAIA 命令
+
+低延迟是 **HyperOS 系统侧功能**（系统蓝牙设备详情页上的「低延迟」开关），
+由系统 A2DP 会话的低延迟配置能力决定，**没有**对应的 GAIA feature/命令。
+本模块把它当作系统侧状态透出（`PodCapabilities.hasLowLatency` 只看型号档案，
+`PodSnapshot.lowLatencyOn` 由系统侧回调），**不发送任何 GAIA 帧**。
+PuddingPods 文档也把它归类为 `BluetoothDeviceDetailsFragment` 提供的系统 Profile/厂商控制能力。
+
+---
+
+## 11. 来源与推导
+
+| 结论 | 来源文件 |
+|---|---|
+| BLE GATT UUID 族、CCCD、裸帧格式、大端字节序（native `BytesUtils`） | `_refs/moondrop-link/pc/moondrop_link/gaia/constants.py`、`packet.py`、`docs/summary.md` |
+| 版本探测 `00 0A 03 00`、vendor `0x000A`/`0x001D`、V3 command word 位布局、type 枚举 | 同上（`packet.py::v3_command_word`、`summary.md`「帧格式」） |
+| BATTERY cmd 0/1 与 type 0..3、255 哨兵；**EDGE 只回 type 0** | `constants.py`、`features.py::BatteryFeature`、`summary.md`「命令目录」 |
+| ONEBRINGTWO cmd 1..7 的真实语义与**设备列表重复即结束** | `features.py::OneBringTwoFeature`、`summary.md` |
+| AudioCuration 命令表与 EDGE 位掩码 SET / 0-based GET | `features.py::AudioCurationFeature`（`set_state` 注释「live-verified」）、`summary.md` |
+| ANC V2 cmd 3/4/41/42 与模式枚举 0..5 | `features.py::AncV2Feature`、`constants.py` |
+| GAIA V3/V4、三条 ANC 路径与探测条件、9ECA 服务帧与命令表、GA2 双地址连接经验 | `_refs/FxxkMoondrop/ADAPTATION.md` |
+| GA2 / 太空漫游2 的实测 SET/GET 映射与增益反向 | `_refs/FxxkMoondrop/src/com/fxxkmoondrop/secret/AncProfileLib.kt` |
+| PUDDING：RFCOMM/SPP + GAIA V4、ANC V2 五档枚举、三路电量、增益、指示灯、Device ID `01010607` | `_refs/PuddingPods/PUDDING_ADAPTATION.md`（仓库根 `PuddingPods/`） |
+| HyperOS 设置页伪装原生耳机（`HeadsetIDConstants`、`IMiuiHeadsetService$Stub$Proxy`） | `_refs/OppoPods/app/src/main/java/moe/chenxy/oppopods/hook/SettingsHeadsetHook.kt` |
+| 融合设备中心设备卡点击（`deviceType == "third_headset"`）、`AdapterService.setBatteryLevel` | `_refs/HyperPods/app/src/main/java/moe/chenxy/hyperpods/hook/DeviceCardHook.kt`、`pods/L2CAPController.kt` |
+| 逐字节期望值（回归锁定） | `app/src/test/java/moe/chenxy/hyperpods/core/GaiaProtocolTest.kt`、`BatteryCodecTest.kt` |
+
+> 上游 moondrop-link 的 `constants.py` 里还写着一句「legacy GAIA/SPP `00001107-d102-…`
+> （classic transport, not used by this BLE client）」；本项目 GAIA V4 用的是 PuddingPods 记录的
+> 标准 SPP UUID `00001101-0000-1000-8000-00805f9b34fb`，两者不是同一个。
+
+---
+
+## 12. 仍未确定（写在这里避免被当成已确认）
+
+1. **提示音（0x0E）命令号**：默认 GET=1/SET=2，未证实（见第 6 节 VOICE）。
+2. **能力位图正文编码**：32-bit word 位图 vs `(featureId, version)` 字节对，两派冲突，未裁决。
+3. **EDGE / 恒等档案的 ANC 读回值域**：AudioCuration 读回若是 0-based，`getMap=null` 的档案
+   （`setMap.indexOf()` 反查）会得到 `-1`；需要真机确认后补 `getMap`。
+4. **GAIA 版本探测**：`Gaia.getApiVersion()` 未被连接流程调用；未知设备是否必须先探测。
+5. **LHDC 打开后的稳定性**、**双设备连接的写入/断开单台**（需双机）、**9ECA 全部功能**、
+   **空间音频/头动追踪**、**充电位解析**：均未验证。
+6. 上游 FxxkMoondrop 表中把三条 ANC 路径的探测条件写成「BASIC 特性位图含 bit1 / bit3 / bit5」，
+   与 feature ID（2 / 8 / 32）不是同一套编号；本项目按 feature ID 在 32-bit word 位图中取位，
+   即 `bit 2`、`bit 8`、`bit 32` 对应的位。**哪套读法正确同样取决于第 2 条。**

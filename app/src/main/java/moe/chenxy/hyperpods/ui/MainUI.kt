@@ -6,6 +6,9 @@
  *   ① 进程内 [PodEvent]（[MoondropLink.init] 注册的 [PodListener]）—— 主状态源，字段最全；
  *   ② 跨进程广播（本模块跨 4 个进程，广播只带简单 extra）—— 只当作「触发器」：
  *      收到就调用 [MoondropLink.refreshAll] 让本进程重新读一次设备状态。
+ *
+ * 设备发现：优先用 PODS_CONNECTED 广播里的 EXTRA_MAC 精确命中（多台水月雨耳机时不会连错），
+ * 冷启动没有广播时退回「已配对设备里按型号名匹配、优先上次连接地址」。
  */
 package moe.chenxy.hyperpods.ui
 
@@ -76,9 +79,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 private const val TAG = "MoondropMainUI"
 
 /**
- * UI 侧的本地偏好：只保存「上一次连接过的耳机地址」用于优先重连。
- * 注意：这里刻意不复用 [moe.chenxy.hyperpods.utils.data.HyperPodsPrefsKey]——
- * 那个契约里没有「上次连接地址」键，且 utils/data 不允许改动。
+ * UI 侧的本地偏好：只保存「上一次连接过的耳机地址」用于冷启动时的优先重连。
+ * 注意：这里刻意不复用 HyperPodsPrefsKey —— 那份契约里没有「上次连接地址」键，
+ * 而 utils/data/ 不允许改动。
  */
 private const val UI_PREFS = "hyperpods_moondrop_ui"
 private const val KEY_LAST_ADDRESS = "last_connected_address"
@@ -106,8 +109,10 @@ fun MainUI() {
     }
 
     var snapshot by remember { mutableStateOf(MoondropLink.snapshot()) }
-    // 收到「耳机已连接（新设备）」时自增，驱动下面 LaunchedEffect 重新做设备发现并连接
+    // 收到「耳机已连接」广播时，把目标设备信息记下来并自增信号，驱动下面 LaunchedEffect 连接
     var connectSignal by remember { mutableIntStateOf(0) }
+    var pendingMac by remember { mutableStateOf("") }
+    var pendingName by remember { mutableStateOf("") }
 
     // ── 状态源 ①（进程内事件） + 状态源 ②（跨进程广播触发器） ──────────────
     DisposableEffect(context) {
@@ -123,14 +128,18 @@ fun MainUI() {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(receiverContext: Context?, intent: Intent?) {
                 when (intent?.action) {
-                    // 系统蓝牙进程报告耳机已连接：先发现目标设备（下面 LaunchedEffect），
-                    // 再由 MoondropLink 建立 GAIA 控制通道。
+                    // 系统蓝牙进程报告耳机已连接（只对水月雨设备广播）：记下目标后建立 GAIA 通道
                     HyperPodsAction.PODS_CONNECTED -> {
+                        pendingMac = intent.getStringExtra(HyperPodsAction.EXTRA_MAC).orEmpty()
+                        pendingName = intent.getStringExtra(HyperPodsAction.EXTRA_DEVICE_NAME).orEmpty()
                         connectSignal++
                         MoondropLink.refreshAll()
                     }
 
                     HyperPodsAction.PODS_DISCONNECTED -> {
+                        pendingMac = ""
+                        pendingName = ""
+                        MoondropLink.disconnect()
                         snapshot = MoondropLink.snapshot()
                     }
 
@@ -176,6 +185,7 @@ fun MainUI() {
 
         onDispose {
             runCatching { context.unregisterReceiver(receiver) }
+            // 解绑监听：避免 Activity 销毁后旧的状态对象仍被回调
             MoondropLink.init(context.applicationContext, object : PodListener {
                 override fun onEvent(event: PodEvent) = Unit
             })
@@ -184,9 +194,9 @@ fun MainUI() {
 
     // ── 设备发现 + 连接 ────────────────────────────────────────────────────
     LaunchedEffect(connectSignal) {
-        val target = findMoondropBondedDevice(context)
+        val target = resolveTargetDevice(context, pendingMac, pendingName)
         if (target == null) {
-            Log.i(TAG, "no bonded Moondrop device found")
+            Log.i(TAG, "no Moondrop device to connect (bonded scan + broadcast mac both empty)")
         } else {
             val current = MoondropLink.snapshot()
             if (!current.connected || current.deviceAddress != target.address) {
@@ -339,20 +349,39 @@ fun AppHorizontalPager(
 }
 
 /**
- * 找到已配对的、能被型号档案识别的水月雨耳机。
- * 优先取偏好里记录的「上次连接地址」，否则取第一个命中的设备。
+ * 解析要连接的目标设备。
  *
- * 需要 BLUETOOTH_CONNECT 权限（未授予时返回 null，UI 走等待页）。
+ * ① [macFromBroadcast] 非空（来自 PODS_CONNECTED 的 EXTRA_MAC）时精确命中；
+ * ② 否则退回已配对设备扫描：只取型号档案能识别的设备，优先偏好里记录的地址；
+ * ③ 一个都没有就返回 null，UI 显示等待页（不是错误）。
  */
 @SuppressLint("MissingPermission")
 @Suppress("DEPRECATION")
-private fun findMoondropBondedDevice(context: Context): BluetoothDevice? {
+private fun resolveTargetDevice(
+    context: Context,
+    macFromBroadcast: String,
+    nameFromBroadcast: String,
+): BluetoothDevice? {
     if (context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
         Log.w(TAG, "BLUETOOTH_CONNECT not granted; skip device discovery")
         return null
     }
-    val adapter = runCatching { BluetoothAdapter.getDefaultAdapter() }.getOrNull()
-    if (adapter == null || !adapter.isEnabled) return null
+    val adapter = runCatching { BluetoothAdapter.getDefaultAdapter() }.getOrNull() ?: return null
+    if (!adapter.isEnabled) return null
+
+    if (macFromBroadcast.isNotEmpty() && BluetoothAdapter.checkBluetoothAddress(macFromBroadcast)) {
+        val device = runCatching { adapter.getRemoteDevice(macFromBroadcast) }.getOrNull()
+        if (device != null) {
+            val deviceName = runCatching { device.name }.getOrNull()
+            val names = listOfNotNull(
+                deviceName?.takeIf { it.isNotEmpty() },
+                nameFromBroadcast.takeIf { it.isNotEmpty() }
+            )
+            // 广播只对水月雨设备发出；名字读不到时信任来源，读到名字则必须是可识别型号
+            if (names.isEmpty() || names.any { MoondropModels.match(it) != null }) return device
+        }
+    }
+
     val bonded = runCatching { adapter.bondedDevices }.getOrNull() ?: return null
     val preferred = context.getSharedPreferences(UI_PREFS, Context.MODE_PRIVATE)
         .getString(KEY_LAST_ADDRESS, null)

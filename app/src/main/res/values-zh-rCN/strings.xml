@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- HyperPods for Moondrop — 简体中文 -->
+<resources>
+    <string name="app_name">HyperPods for Moondrop</string>
+    <string name="pod_info">耳机</string>
+    <string name="about">关于</string>
+
+    <!-- 等待页 -->
+    <string name="waiting_for_pod">等待水月雨耳机连接…</string>
+    <string name="waiting_for_pod_hint">请在系统蓝牙设置中连接水月雨耳机，连接后本模块会自动接管控制通道。</string>
+
+    <!-- 机型卡 -->
+    <string name="unknown_model">水月雨耳机</string>
+    <string name="conn_connected">已连接</string>
+    <string name="conn_disconnected">未连接</string>
+    <string name="model_verified">已验证</string>
+    <string name="transport">传输通道</string>
+    <string name="active_codec">当前编码</string>
+    <string name="unknown_value">未知</string>
+
+    <!-- 电量 -->
+    <string name="battery_title">电量</string>
+    <string name="batt_left">左耳</string>
+    <string name="batt_right">右耳</string>
+    <string name="batt_case">充电盒</string>
+    <string name="batt_whole">整机</string>
+    <string name="batt_charging">充电中</string>
+    <string name="batt_unknown">正在读取电量…</string>
+
+    <!-- 降噪 -->
+    <string name="anc_title">降噪</string>
+    <string name="anc_mode_off">关闭</string>
+    <string name="anc_mode_nc">降噪</string>
+    <string name="anc_mode_transparency">通透</string>
+    <string name="anc_mode_anti_wind">抗风</string>
+    <string name="anc_mode_adaptive">自适应</string>
+    <string name="anc_mode_live">直播</string>
+
+    <!-- 增益 / 指示灯 / 提示音 -->
+    <string name="gain_title">增益</string>
+    <string name="led_title">指示灯</string>
+    <string name="led_summary">控制耳机指示灯开关</string>
+    <string name="prompt_tone_title">提示音</string>
+    <string name="prompt_tone_summary">连接或切换模式时的语音提示</string>
+    <string name="prompt_volume_title">提示音音量</string>
+    <string name="prompt_volume_caption">提示音音量</string>
+
+    <!-- 编码 / 连接功能 -->
+    <string name="lhdc_title">LHDC 高清音频</string>
+    <string name="lhdc_summary">关闭时使用 AAC/SBC 等基础编码（默认关闭）</string>
+    <string name="dual_connection_title">双设备连接</string>
+    <string name="dual_connection_summary">同时保持两台设备连接</string>
+    <string name="low_latency_title">低延迟模式</string>
+    <string name="low_latency_summary">由 HyperOS 系统蓝牙提供</string>
+
+    <!-- 刷新 -->
+    <string name="refresh">刷新</string>
+    <string name="refresh_summary">重新读取耳机的全部状态</string>
+
+    <!-- 关于 -->
+    <string name="about_version">版本 %1$s</string>
+    <string name="about_credits_title">致谢</string>
+    <string name="about_credits_summary">基于 Art-Chen/HyperPods 的 HyperOS 集成架构；协议数据来自 bqj6666/FxxkMoondrop 与 MegaSuite/moondrop-link-desktop；参考 lingbai-rong/PuddingPods、Leaf-lsgtky/OppoPods。</string>
+    <string name="about_license_title">许可协议</string>
+    <string name="about_license_value">GPL-3.0</string>
+</resources>

@@ -48,6 +48,7 @@ import moe.chenxy.hyperpods.core.GaiaFramer
 import moe.chenxy.hyperpods.core.MoondropModel
 import moe.chenxy.hyperpods.core.MoondropModels
 import moe.chenxy.hyperpods.core.PodTransport
+import moe.chenxy.hyperpods.core.SrcProtocol
 import java.util.UUID
 
 private const val TAG = "MoondropLink"
@@ -689,10 +690,6 @@ object MoondropLink {
     fun srcSetAudioSource(seq: Int, sourceId: Int) =
         write(SrcProtocol.setAudioSource(seq, sourceId))
 
-    companion object {
-        /** 供 hook 进程判断电量是否要写进系统蓝牙栈 */
-        fun systemBatteryLevel(): Int = BatteryStateAccess.systemLevel
-    }
 }
 
 /** 让 hook 进程读到当前系统电量，避免直接暴露内部对象。 */
