@@ -19,3 +19,6 @@
 # Python
 __pycache__/
 *.pyc
+
+# CI 诊断日志
+/_ci_log*.txt
