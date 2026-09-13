@@ -84,6 +84,13 @@ object SettingsHeadsetHook : HookContext() {
     private var currentAddress: String? = null
     private var currentName: String? = null
 
+    /**
+     * 当前打开的「水月雨耳机页」对应的设备地址。
+     * 只有非空时才允许放行**无参**代理调用（getDeviceInfo / isSupportAudioSwitch 在 HyperOS 上没有
+     * 设备参数，无法按参数判定），避免在别的蓝牙设备页面误伤。
+     */
+    private var activePageAddress: String? = null
+
     /** 当前降噪档位，取值 = 本模块 UI 下标（MoondropModels.AncMode 顺序：0 关/1 降噪/2 通透/3 抗风/4 自适应/5 直播）。 */
     private var currentAncUi: Int = 0
 
@@ -155,7 +162,8 @@ object SettingsHeadsetHook : HookContext() {
         intent.putExtra(EXTRA_SUPPORT, FAKE_SUPPORT)
         intent.putExtra(EXTRA_COME_FROM, intent.getStringExtra(EXTRA_COME_FROM) ?: COME_FROM_DEFAULT)
         intent.putExtra(EXTRA_DEVICE_ID, FAKE_DEVICE_ID)
-        Log.i(TAG, "$who intent patched: $EXTRA_DEVICE_ID=$FAKE_DEVICE_ID address=$address")
+        activePageAddress = address.ifEmpty { currentAddress.orEmpty() }
+        Log.i(TAG, "$who intent patched: $EXTRA_DEVICE_ID=$FAKE_DEVICE_ID address=$address (active page=$activePageAddress)")
     }
 
     private fun hookActivityStringGetter(className: String, methodName: String, value: () -> String) {
@@ -164,7 +172,7 @@ object SettingsHeadsetHook : HookContext() {
             hookAfter(method) {
                 if (!activityIsMoondrop(instance)) return@hookAfter
                 result = value()
-                Log.d(TAG, "$className.$methodName forced=${value()}")
+                Log.d(TAG, "$className.$methodName forced=$result")
             }
         }.onFailure { Log.w(TAG, "hook $className.$methodName skipped", it) }
     }
@@ -268,7 +276,9 @@ object SettingsHeadsetHook : HookContext() {
             hookBefore(method) {
                 val device = args.firstOrNull { it is BluetoothDevice } as? BluetoothDevice
                 val addressArg = args.lastOrNull { it is String } as? String
-                if (!isMoondropDevice(device) && !isMoondropAddress(addressArg)) return@hookBefore
+                val ours = isMoondropDevice(device) || isOursToken(addressArg) ||
+                    (device == null && addressArg == null && activePageAddress != null)
+                if (!ours) return@hookBefore
                 result = provide(args)
                 Log.d(TAG, "proxy $methodName forced result=$result address=${SystemApisUtils.deviceAddress(device)}")
             }
@@ -280,7 +290,7 @@ object SettingsHeadsetHook : HookContext() {
             val method = findMethod(CLS_PROXY, methodName, String::class.java)
             hookBefore(method) {
                 val address = args.getOrNull(0) as? String
-                if (!isMoondropAddress(address)) return@hookBefore
+                if (!isOursToken(address)) return@hookBefore
                 result = provide()
                 Log.d(TAG, "proxy $methodName forced result=$result address=$address")
             }
@@ -336,14 +346,14 @@ object SettingsHeadsetHook : HookContext() {
     private fun hookFragmentState() {
         runCatching {
             val onCreateView = findMethodByParamCount(CLS_FRAGMENT, "onCreateView", 3)
-            hookAfter(onCreateView) { onFragmentAlive("onCreateView") }
+            hookAfter(onCreateView) { onFragmentAlive(this, "onCreateView") }
             Log.d(TAG, "hooked $CLS_FRAGMENT#onCreateView")
         }.onFailure { Log.w(TAG, "hook $CLS_FRAGMENT.onCreateView skipped", it) }
 
         runCatching {
             val onServiceConnected = findMethodByParamCountOrNull(CLS_FRAGMENT, "onServiceConnected", 0)
             if (onServiceConnected != null) {
-                hookAfter(onServiceConnected) { onFragmentAlive("onServiceConnected") }
+                hookAfter(onServiceConnected) { onFragmentAlive(this, "onServiceConnected") }
                 Log.d(TAG, "hooked $CLS_FRAGMENT#onServiceConnected")
             }
         }.onFailure { Log.w(TAG, "hook $CLS_FRAGMENT.onServiceConnected skipped", it) }
@@ -384,15 +394,15 @@ object SettingsHeadsetHook : HookContext() {
         }
     }
 
-    private fun onFragmentAlive(reason: String) {
-        registerStatusReceiver(runCatching { getObjectField(instance, "mActivity") as? Context }.getOrNull())
-        val podFragment = isMoondropFragment(instance)
-        Log.d(TAG, "fragment.$reason ${fragmentDebug(instance)} isMoondrop=$podFragment")
+    private fun onFragmentAlive(param: HookParam, reason: String) {
+        registerStatusReceiver(runCatching { getObjectField(param.instance, "mActivity") as? Context }.getOrNull())
+        val podFragment = isMoondropFragment(param.instance)
+        Log.d(TAG, "fragment.$reason ${fragmentDebug(param.instance)} isMoondrop=$podFragment")
         if (!podFragment) return
-        instance?.let { headsetFragments[it] = true }
+        param.instance?.let { headsetFragments[it] = true }
         requestAppStatus("fragment-$reason")
         startPeriodicRefresh()
-        injectFragmentStatus(instance)
+        injectFragmentStatus(param.instance)
     }
 
     private fun hookFragmentAncCommand(methodName: String, vararg parameterTypes: Class<*>, uiIndex: (List<Any?>) -> Int) {
@@ -451,11 +461,12 @@ object SettingsHeadsetHook : HookContext() {
         }
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(receiverContext: Context?, intent: Intent?) {
-                val action = intent?.action ?: return
+                val received = intent ?: return
+                val action = received.action ?: return
                 when (action) {
                     HyperPodsAction.PODS_CONNECTED -> {
-                        val address = intent.getStringExtra(HyperPodsAction.EXTRA_MAC)
-                        val name = intent.getStringExtra(HyperPodsAction.EXTRA_DEVICE_NAME)
+                        val address = received.getStringExtra(HyperPodsAction.EXTRA_MAC)
+                        val name = received.getStringExtra(HyperPodsAction.EXTRA_DEVICE_NAME)
                         if (!address.isNullOrEmpty()) {
                             currentAddress = address
                             knownMoondropAddresses += address.uppercase()
@@ -466,16 +477,20 @@ object SettingsHeadsetHook : HookContext() {
                         updateFragments()
                     }
                     HyperPodsAction.PODS_DISCONNECTED -> {
-                        Log.d(TAG, "pods disconnected address=${intent.getStringExtra(HyperPodsAction.EXTRA_MAC)}")
+                        val address = received.getStringExtra(HyperPodsAction.EXTRA_MAC)
+                        if (address.isNullOrEmpty() || address.equals(activePageAddress, ignoreCase = true)) {
+                            activePageAddress = null
+                        }
+                        Log.d(TAG, "pods disconnected address=$address")
                         updateFragments()
                     }
                     HyperPodsAction.ANC_CHANGED -> {
-                        currentAncUi = intent.getIntExtra(HyperPodsAction.EXTRA_STATUS, currentAncUi)
+                        currentAncUi = received.getIntExtra(HyperPodsAction.EXTRA_STATUS, currentAncUi)
                         saveState(appContext)
                         updateFragments()
                     }
                     HyperPodsAction.BATTERY_CHANGED -> {
-                        batteryRaw = SystemApisUtils.readBatteryExtras(intent)
+                        batteryRaw = SystemApisUtils.readBatteryExtras(received)
                         saveState(appContext)
                         updateFragments()
                     }
@@ -582,6 +597,14 @@ object SettingsHeadsetHook : HookContext() {
             return true
         }
         return false
+    }
+
+    /** 参数可能是 MAC，也可能是我们改写进去的伪装 Device ID / 能力串。 */
+    private fun isOursToken(value: String?): Boolean {
+        if (value.isNullOrEmpty()) return false
+        if (value == FAKE_DEVICE_ID) return true
+        if (value.startsWith(FAKE_DEVICE_ID)) return true
+        return isMoondropAddress(value)
     }
 
     private fun isMoondropAddress(address: String?): Boolean {

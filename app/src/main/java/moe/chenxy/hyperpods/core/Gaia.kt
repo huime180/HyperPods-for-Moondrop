@@ -551,7 +551,45 @@ object Gaia {
     fun ancV2GetSwitchConf(): ByteArray = command(F_ANC_V2, C_ANC2_GET_CURRENT_ANC_SWITCH_CONF)
 
     /**
-     * 解析 `GET_SUPPORTED_FEATURES` 的响应位图。
+     * 解析 `GET_SUPPORTED_FEATURES` 响应。
+     *
+     * ⚠ 上游两派对响应体的解读不一致，且**互斥**：
+     *   · moondrop-link-desktop（真机跑通）：`[moreFlag:1][featureId:1][version:1]...`
+     *   · FxxkMoondrop（官方 App 逆向）：32-bit word 位图，word i 覆盖 feature 32*i..32*i+31
+     * 本实现**两种都试**：先按字节对解析，若得到的结果落在已知 feature 范围内则采用；
+     * 否则回退位图。这样无论固件用哪种编码都能正确选择 ANC 路径。
+     */
+    data class FeatureEntry(val feature: Int, val version: Int)
+
+    /** 按 `[more][featureId][version]...` 解析；长度不足以构成有序对时返回空。 */
+    fun parseFeatureEntries(payload: ByteArray?): Pair<Boolean, List<FeatureEntry>> {
+        val p = payload ?: return false to emptyList()
+        if (p.size < 3) return false to emptyList()
+        val more = (p[0].toInt() and 0x01) != 0
+        val out = ArrayList<FeatureEntry>(8)
+        var i = 1
+        while (i + 1 < p.size) {
+            val fid = p[i].toInt() and 0xFF
+            val ver = p[i + 1].toInt() and 0xFF
+            // feature id 落在 QTiL 已知范围内（0..63）才认为这是有效条目
+            if (fid in 0..63) out.add(FeatureEntry(fid, ver)) else return false to emptyList()
+            i += 2
+        }
+        return more to out
+    }
+
+    /**
+     * 综合解析：优先字节对，失败回退位图。
+     * @return 支持的能力集合
+     */
+    fun parseSupportedFeaturesSmart(payload: ByteArray?): Set<Int> {
+        val (_, entries) = parseFeatureEntries(payload)
+        if (entries.isNotEmpty()) return entries.map { it.feature }.toSet()
+        return parseSupportedFeatures(payload)
+    }
+
+    /**
+     * 解析 `GET_SUPPORTED_FEATURES` 的响应位图（备用解释）。
      * 响应 = 32-bit word 序列（大端），word i 覆盖 feature 32*i .. 32*i+31。
      */
     fun parseSupportedFeatures(payload: ByteArray?): Set<Int> {

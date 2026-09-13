@@ -152,7 +152,9 @@ object SystemApisUtils {
         val bundle = runCatching { intent.getBundleExtra(HyperPodsAction.EXTRA_BATTERY) }.getOrNull()
         if (bundle != null && readFromBundle(bundle, out)) return out
 
-        val parcelable = runCatching { intent.getParcelableExtra<Any>(HyperPodsAction.EXTRA_BATTERY) }.getOrNull()
+        // 用 Bundle.get 而不是 getParcelableExtra<T>()：泛型上界是 Parcelable，
+        // 这里要读的是「任意对象」，用 extras 取更安全（也避免 API 33 才有的重载）。
+        val parcelable = runCatching { intent.extras?.get(HyperPodsAction.EXTRA_BATTERY) }.getOrNull()
         if (parcelable != null && readFromParcelable(parcelable, out)) return out
 
         val level = intent.getIntExtra(HyperPodsAction.EXTRA_LEVEL, BATTERY_LEVEL_UNKNOWN)
@@ -180,7 +182,12 @@ object SystemApisUtils {
             val part = runCatching { callMethod(payload, getter) }.getOrNull() ?: return@forEach
             found = true
             if (part is Int) {
-                out[index] = encode(part, false)
+                // 直接给 Int 时拿不到充电位：0..100 视为电量，负数=未知，其余原样保留（可能已是 |128 编码）。
+                out[index] = when {
+                    part in 0..100 -> encode(part, false)
+                    part < 0 -> BATTERY_RAW_UNKNOWN
+                    else -> part
+                }
                 return@forEach
             }
             val level = listOf("getBattery", "getLevel", "getBatteryLevel")

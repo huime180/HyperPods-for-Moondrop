@@ -185,11 +185,12 @@ object HeadsetStateDispatcher : HookContext() {
         }
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
-                when (intent?.action) {
+                val received = intent ?: return
+                when (received.action) {
                     // 注意：GET_PODS_MAC 与 PODS_MAC_RECEIVED 是同一个 action 字符串，
                     // 靠 setPackage 的方向区分（请求发到本进程，应答发到 com.android.systemui）。
                     HyperPodsAction.GET_PODS_MAC -> replyMac(ctx ?: appCtx)
-                    HyperPodsAction.UPDATE_SYSTEM_BATTERY -> runCatching { applySystemBattery(intent) }
+                    HyperPodsAction.UPDATE_SYSTEM_BATTERY -> runCatching { applySystemBattery(received) }
                         .onFailure { Log.w(TAG, "applySystemBattery failed", it) }
                 }
             }

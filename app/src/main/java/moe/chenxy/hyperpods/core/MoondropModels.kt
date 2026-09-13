@@ -192,8 +192,18 @@ object MoondropModels {
     private fun anc4Identity() =
         AncProfile(ANC_4, intArrayOf(1, 2, 3, 4), null, AncPathKind.AUDIO_CURATION)
 
-    /** 3 档（关/降/透），AudioCuration 位掩码，EDGE 真机确认。 */
-    private fun anc3Ac() = AncProfile(ANC_3, intArrayOf(1, 2, 4), null, AncPathKind.AUDIO_CURATION)
+    /**
+     * 3 档（关/降/透），EDGE 真机确认。
+     * SET 侧走 AudioCuration **位掩码** 1=关 / 2=降噪 / 4=通透；
+     * GET 侧固件回读的是 **0-based 索引** 0..2，因此必须给出独立的 getMap，
+     * 否则 deviceToUi(0) 反查失败会得到 -1（降噪状态显示未知）。
+     */
+    private fun anc3Ac() = AncProfile(
+        ANC_3,
+        intArrayOf(1, 2, 4),
+        intArrayOf(0, 1, 2),
+        AncPathKind.AUDIO_CURATION,
+    )
 
     /** 布丁 PUDDING 五档：UI[关,降,透,抗,自适应] → dev [0,4,2,3,1]，走 ANC_V2 恒等读回。 */
     private fun ancPudding() = AncProfile(

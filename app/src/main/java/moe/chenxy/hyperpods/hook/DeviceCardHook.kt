@@ -102,9 +102,10 @@ object DeviceCardHook : HookContext() {
         val handler = if (started) Handler(thread.looper) else Handler(context.mainLooper)
         val broadcastReceiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
-                if (intent?.action != HyperPodsAction.PODS_MAC_RECEIVED) return
-                cachedMac = intent.getStringExtra(HyperPodsAction.EXTRA_MAC).orEmpty()
-                cachedName = intent.getStringExtra(HyperPodsAction.EXTRA_DEVICE_NAME).orEmpty()
+                val received = intent ?: return
+                if (received.action != HyperPodsAction.PODS_MAC_RECEIVED) return
+                cachedMac = received.getStringExtra(HyperPodsAction.EXTRA_MAC).orEmpty()
+                cachedName = received.getStringExtra(HyperPodsAction.EXTRA_DEVICE_NAME).orEmpty()
                 Log.i(TAG, "pods mac=$cachedMac name=$cachedName pendingCardId=$pendingCardId")
             }
         }

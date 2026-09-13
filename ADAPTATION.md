@@ -65,6 +65,37 @@ data class MoondropModel(
 
 ---
 
+## 二·五、机型号档案速查表（ANC / 增益 / 指示灯 / 电量）
+
+逐条对应 `MODELS`（17 条）+ `FALLBACK`；「电量」列写的是**已知的上报形态**，
+未标注者表示**未实测**，只能等连接后的 `BATTERY cmd 0` 探测结果。
+
+| id | ANC 路径 / 档位（SET / GET 映射） | 增益 `gainMap`（UI 低中高 → 设备码） | 指示灯 | 电量（证据） | verified |
+|---|---|---|---|---|---|
+| `edge` | AudioCuration / 3 档：SET `[1,2,4]`，GET `null`（反查） | `[0,1,2]` | — | **只回 type 0 单设备**（moondrop-link 真机 60%） | ✅ 实测 |
+| `pudding` | ANC V2 / 5 档：SET `[0,4,2,3,1]`，GET 同 | `[0,1,2]` | ✅ | **三路** 1=左 2=右 3=盒（PuddingPods 文档） | ✅ 实测 |
+| `golden_ages_2` | AudioCuration / 4 档：SET `[1,2,4,3]`，GET `[0,1,2,3]` | `[2,1,0]` | — | 仅左右耳，**无充电盒**（FxxkMoondrop 实测） | ✅ 实测 |
+| `space_travel_2` | AudioCuration / 4 档：SET `[1,2,4,3]`，GET `[0,1,2,3]` | `[2,1,0]` | — | 未实测 | ✅ 实测 |
+| `golden_ages` | AudioCuration / 4 档：同 GA2 | `[2,1,0]` | — | 未实测 | 推断 |
+| `moca` | AudioCuration / 4 档恒等 `[1,2,3,4]` | `[0,1,2]` | ✅ | 未实测 | 推断 |
+| `nekocake` | AudioCuration / 4 档恒等 | `[0,1,2]` | — | 未实测 | 推断 |
+| `pill` | AudioCuration / 4 档恒等 | `[0,1,2]` | — | 未实测 | 推断 |
+| `ultrasonic` | AudioCuration / 4 档恒等 | `[0,1,2]` | — | 未实测 | 推断 |
+| `robin` | AudioCuration / 4 档恒等 | `[0,1,2]` | — | 未实测 | 推断 |
+| `alice` | AudioCuration / 4 档恒等 | `[0,1,2]` | — | 未实测 | 推断 |
+| `sparks` | AudioCuration / 4 档恒等 | `[0,1,2]` | — | 未实测 | 推断 |
+| `voyager` | AudioCuration / 4 档恒等 | `[0,1,2]` | — | 未实测 | 推断 |
+| `block` | AudioCuration / 4 档恒等 | 不展示（`DcProfile()`） | — | 未实测 | 推断 |
+| `space_travel` | AudioCuration / 4 档恒等 | `[0,1,2]` | — | 未实测 | 推断 |
+| `edge2` | AudioCuration / 3 档：SET `[1,2,4]`，GET `null`（反查） | `[0,1,2]` | — | 未实测 | 推断 |
+| `space_travel_2_ultra` | AudioCuration / 4 档：同 GA2 | `[2,1,0]` | — | 未实测 | 推断 |
+| `fallback` | AudioCuration / 4 档恒等 | 不展示（`DcProfile()`） | — | 完全由探测决定 | 兜底 |
+
+> 说明：`GET null（反查）` 表示 `AncProfile.getMap = null`，回包按 `setMap.indexOf(deviceCode)` 反查；
+> 若该型号固件读回是 0-based 值域（像 EDGE 那样），反查会失败（得到 `-1`）—— 见第九节第 3 条。
+
+---
+
 ## 三、`AncProfile`：降噪档案
 
 ```kotlin
@@ -204,8 +235,8 @@ data class FeatureProfile(
 
 | 机型 | promptTone | promptVolume | lhdc | dualConnection | lowLatency |
 |---|---|---|---|---|---|
-| `edge` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `edge2` | — | — | ✅ | ✅ | ✅ |
+| `edge` | ✅ | ✅ | ✅ | ✅ | ✅ 实测 |
+| `edge2` | — | — | ✅ | ✅ | ✅ 实测 |
 | `pudding` | — | — | ✅ | — | — |
 | `golden_ages_2` / `golden_ages` | — | — | ✅ | — | — |
 | `alice` / `sparks` / `voyager` | — | — | ✅ | — | — |
@@ -356,3 +387,29 @@ data class FeatureProfile(
   `BatteryState.setCharging()` 当前无调用方（部分有单测）。
 * `connect()` 里 `useRfcomm` 只看 `transports` **首项**；双模机型（如猫咖）首项是 BLE，
   只有在 BLE 上找不到 GAIA 服务时才会回退到 SPP。
+
+---
+
+## 十一、系统集成层：适配新机型时会碰到的接线点
+
+协议能读写耳机，不代表 HyperOS 界面上就能看到。系统集成层在 `hook/` 与 `ui/`：
+
+| 组件 | 作用 | 与机型适配的关系 |
+|---|---|---|
+| `hook/HeadsetStateDispatcher.kt` | `com.android.bluetooth`：A2DP 连接感知 + 电量写回系统蓝牙栈 + MAC 应答 | 连接判定统一走 `MoondropModels.match()`；**新机型的蓝牙名必须能命中 `aliases`，否则整条链路不会启动** |
+| `hook/SystemUIPluginHook.kt` + `hook/DeviceCardHook.kt` | 融合设备中心耳机卡点击接管 | 只认 `deviceType == "third_headset"` 的卡片；卡片 id 与耳机 MAC 比较，不改机型档案 |
+| `hook/MiBluetoothToastHook.kt` | `com.xiaomi.bluetooth` 电量通知 | 三路电量由 `SystemApisUtils.readBatteryExtras()` 统一读；单设备机型走 `EXTRA_LEVEL` 兜底 |
+| `hook/SettingsHeadsetHook.kt` | 设置页伪装原生耳机（`01010607`）+ 状态注入 | 伪装 ID 对应「小米四档 ANC 模板」，与真实机型 ANC 档位数不同，需要映射；ANC 改动回传走 `ANC_SELECT` 广播 |
+| `ui/PodDetailPage.kt` | 模块自己的详情页 | 开关行由 `PodCapabilities` **硬门控**（能力 false 即不进入组合树）；新增功能必须同时接能力字段与 UI 行 |
+
+**已知接线缺口（截至 1.0.0，源码 grep 确认）**：
+
+* `UPDATE_SYSTEM_BATTERY`（→ 系统蓝牙栈电量）、`SEND_STRONG_TOAST` / `UPDATE_PODS_NOTIFICATION` /
+  `CANCEL_PODS_NOTIFICATION`（→ 通知）**只有接收端，应用进程没有发送端**；
+* `ANC_SELECT`（设置页 → 应用进程）与 `LOW_LATENCY_SELECT`（详情页）**没有接收端**；
+* 空间音频 / 头动追踪（`Gaia.spatialGet/Set`、`headTracking*`）未接到客户端；
+* `SettingsHeadsetHook` 的 `updateAtUiInfo / updateAncUi / refreshStatus` 调用签名按 OppoPods 在 HyperOS
+  上的用法书写，**需实机核对**；`MiuiHeadsetBattery` 电量控件注入未实现。
+
+这些是**接线**而不是**协议**问题：新增机型时，只要档案能被匹配、能力位图/回包能被解析，
+协议层就能工作；要让它在系统界面上出现，还需要把上面的链路补齐。

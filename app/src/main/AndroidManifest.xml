@@ -27,6 +27,32 @@
             </intent-filter>
         </activity>
 
+        <!--
+          应用侧跨进程控制桥（pods/ControlBridge.kt）。
+          由 manifest 声明，因此系统各进程用显式广播即可唤醒本应用进程处理控制命令，
+          不要求用户先打开本应用。显式广播（setPackage）不受 Android 8+ 隐式广播限制。
+        -->
+        <receiver
+            android:name=".pods.ControlReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="chen.action.hyperpods.moondrop.pods_connected" />
+                <action android:name="chen.action.hyperpods.moondrop.pods_disconnected" />
+                <action android:name="chen.action.hyperpods.moondrop.ui_init" />
+                <action android:name="chen.action.hyperpods.moondrop.request_battery" />
+                <action android:name="chen.action.hyperpods.moondrop.request_capabilities" />
+                <action android:name="chen.action.hyperpods.moondrop.anc_select" />
+                <action android:name="chen.action.hyperpods.moondrop.gain_select" />
+                <action android:name="chen.action.hyperpods.moondrop.led_select" />
+                <action android:name="chen.action.hyperpods.moondrop.prompt_tone_select" />
+                <action android:name="chen.action.hyperpods.moondrop.prompt_volume_select" />
+                <action android:name="chen.action.hyperpods.moondrop.lhdc_select" />
+                <action android:name="chen.action.hyperpods.moondrop.dual_connection_select" />
+                <action android:name="chen.action.hyperpods.moondrop.low_latency_select" />
+            </intent-filter>
+        </receiver>
+
         <!-- LSPosed / libxposed 模块声明 -->
         <meta-data android:name="xposedmodule" android:value="true" />
         <meta-data

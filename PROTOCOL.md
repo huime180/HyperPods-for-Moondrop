@@ -348,7 +348,7 @@ ANC V2 模式枚举（官方 `AncV2Handler` / moondrop-link `constants.py` 一�
 | GET_LDAC_STATE / SET_LDAC_STATE | 2 / 4 | `00 1D 20 02` |
 | GET_LHDC_STATE / SET_LHDC_STATE | 5 / 6 | `00 1D 20 05` / `00 1D 20 06 01` |
 
-**LHDC 出厂默认关闭**：实测（连接中的耳机）主机侧广告 LHDCv5 / LHDC_V3 / LHDC_V2 / LDAC / aptX-adaptive，
+**LHDC 出厂默认关闭**：上游实测（连接中的耳机）主机侧广告 LHDCv5 / LHDC_V3 / LHDC_V2 / LDAC / aptX-adaptive，
 而耳机实际活动编码是 **AAC**。所以「默认跑 AAC/SBC」是正常出厂状态，开关打开后能否稳定协商需真机验证。
 
 ### ONEBRINGTWO（20，双设备连接）
@@ -547,3 +547,10 @@ PuddingPods 文档也把它归类为 `BluetoothDeviceDetailsFragment` 提供的�
 6. 上游 FxxkMoondrop 表中把三条 ANC 路径的探测条件写成「BASIC 特性位图含 bit1 / bit3 / bit5」，
    与 feature ID（2 / 8 / 32）不是同一套编号；本项目按 feature ID 在 32-bit word 位图中取位，
    即 `bit 2`、`bit 8`、`bit 32` 对应的位。**哪套读法正确同样取决于第 2 条。**
+7. **跨进程接线缺口**（源码 grep 确认，截至 1.0.0）：`UPDATE_SYSTEM_BATTERY` /
+   `SEND_STRONG_TOAST` / `UPDATE_PODS_NOTIFICATION` / `CANCEL_PODS_NOTIFICATION` 已定义并有接收端
+   （分别位于 `hook/HeadsetStateDispatcher.kt`、`hook/MiBluetoothToastHook.kt`），但**应用进程没有发送端**；
+   `ANC_SELECT`（设置页 → 应用进程）与 `LOW_LATENCY_SELECT`（详情页）**没有接收端**。
+   也就是说：协议层能读写耳机，但「系统侧展示 / 系统侧操作回传」这条链路尚待接通。
+8. **本版本没有构建 APK、没有真机测试**：本文所有协议结论要么来自本仓库源码 + 单测，
+   要么来自上游项目的真机记录，没有一条来自本模块的真机运行。

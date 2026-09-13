@@ -147,6 +147,16 @@ fun MainUI() {
                         coroutineScope.launch { MoondropLink.refreshBattery() }
                     }
 
+                    // 设置页 / 系统侧向「持有协议客户端的应用进程」要一次全量状态（只读请求）
+                    HyperPodsAction.UI_INIT,
+                    HyperPodsAction.REQUEST_CAPABILITIES -> {
+                        MoondropLink.refreshAll()
+                    }
+
+                    HyperPodsAction.REQUEST_BATTERY -> {
+                        coroutineScope.launch { MoondropLink.refreshBattery() }
+                    }
+
                     // 其余状态动作只带简单 extra，统一「重新读一次」即可（快照里字段更全）
                     HyperPodsAction.ANC_CHANGED,
                     HyperPodsAction.GAIN_CHANGED,
@@ -176,6 +186,10 @@ fun MainUI() {
             addAction(HyperPodsAction.DUAL_CONNECTION_CHANGED)
             addAction(HyperPodsAction.LOW_LATENCY_CHANGED)
             addAction(HyperPodsAction.CAPABILITIES_CHANGED)
+            // 只读的状态重放请求（应用进程是 MoondropLink 的宿主）
+            addAction(HyperPodsAction.UI_INIT)
+            addAction(HyperPodsAction.REQUEST_CAPABILITIES)
+            addAction(HyperPodsAction.REQUEST_BATTERY)
         }
         context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
 

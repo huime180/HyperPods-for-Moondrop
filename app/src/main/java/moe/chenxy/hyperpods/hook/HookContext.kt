@@ -27,7 +27,16 @@ import moe.chenxy.hyperpods.utils.data.HyperPodsPrefsKey
 abstract class HookContext {
     lateinit var module: XposedModule
     lateinit var appClassLoader: ClassLoader
-    lateinit var prefs: SharedPreferences
+
+    /**
+     * 远程设置（LSPosed getRemotePreferences）。
+     *
+     * 与原版 OppoPods `HookContext` 的唯一差异：这里允许为 null（原版是 `lateinit var`）。
+     * 原因：框架未实现远程首选项时 `getRemotePreferences` 会失败，`lateinit` 会在首次读取时抛
+     * UninitializedPropertyAccessException；本模块的 prefs 只用于读「模块总开关」，
+     * 因此改成可空 + 容错读取（读不到 = 保持开启），避免为一个开关引入崩溃点。
+     */
+    var prefs: SharedPreferences? = null
     private val hookHandles = mutableListOf<XposedInterface.HookHandle>()
 
     /** 注册本进程需要的全部 hook；调用方（XposedEntry / SystemUIPluginHook）负责整体 runCatching。 */
@@ -40,7 +49,7 @@ abstract class HookContext {
      * 换目标 ClassLoader 再挂一次（SystemUI 的 miui.systemui.plugin 插件 ClassLoader 专用）。
      * 与普通 HookContext 的区别只是解析目标类用的 ClassLoader 不同。
      */
-    fun bind(module: XposedModule, classLoader: ClassLoader, prefs: SharedPreferences) {
+    fun bind(module: XposedModule, classLoader: ClassLoader, prefs: SharedPreferences?) {
         this.module = module
         this.appClassLoader = classLoader
         this.prefs = prefs
@@ -55,8 +64,11 @@ abstract class HookContext {
     }
 
     /** 模块总开关（HyperPodsPrefsKey.ENABLE，默认 true；prefs 不可用时也不阻塞功能）。 */
-    fun isEnabled(): Boolean =
-        runCatching { prefs.getBoolean(HyperPodsPrefsKey.ENABLE, true) }.getOrDefault(true)
+    fun isEnabled(): Boolean = prefBoolean(HyperPodsPrefsKey.ENABLE, true)
+
+    /** 容错读取布尔型首选项：prefs 为 null / 类型不符 / 框架异常都回落到 [def]。 */
+    fun prefBoolean(key: String, def: Boolean): Boolean =
+        runCatching { prefs?.getBoolean(key, def) ?: def }.getOrDefault(def)
 
     fun findClass(name: String): Class<*> = Class.forName(name, false, appClassLoader)
 
@@ -139,9 +151,10 @@ abstract class HookContext {
 
     fun reloadRemotePrefs() {
         runCatching {
-            prefs.javaClass.methods.firstOrNull {
+            val store = prefs ?: return
+            store.javaClass.methods.firstOrNull {
                 it.name == "reload" && it.parameterTypes.isEmpty()
-            }?.invoke(prefs)
+            }?.invoke(store)
         }
     }
 }

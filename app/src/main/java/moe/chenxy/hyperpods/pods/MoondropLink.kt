@@ -63,7 +63,8 @@ object MoondropLink {
     private val writeLock = Mutex()
 
     @Volatile private var appContext: Context? = null
-    @Volatile private var listener: PodListener? = null
+    /** 允许多个监听者：应用 UI 与「跨进程状态转发器」同时消费事件 */
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<PodListener>()
 
     @Volatile private var device: BluetoothDevice? = null
     @Volatile private var model: MoondropModel = MoondropModels.FALLBACK
@@ -104,8 +105,19 @@ object MoondropLink {
 
     fun init(context: Context, listener: PodListener) {
         appContext = context.applicationContext
-        this.listener = listener
+        addListener(listener)
     }
+
+    /** 注册监听者（幂等：同一个实例重复注册只会存在一份） */
+    fun addListener(l: PodListener) {
+        if (!listeners.contains(l)) listeners.add(l)
+    }
+
+    fun removeListener(l: PodListener) {
+        listeners.remove(l)
+    }
+
+    fun isInitialized(): Boolean = appContext != null
 
     fun sniffModel(deviceName: String?): MoondropModel? = MoondropModels.match(deviceName)
 
@@ -144,11 +156,16 @@ object MoondropLink {
     )
 
     private fun emit(e: PodEvent) {
-        mainHandler.post { listener?.onEvent(e) }
+        if (listeners.isEmpty()) return
+        mainHandler.post { for (l in listeners) runCatching { l.onEvent(e) } }
     }
 
     private fun emitState() {
-        mainHandler.post { listener?.onEvent(PodEvent.Connected(snapshot())) }
+        if (listeners.isEmpty()) return
+        mainHandler.post {
+            val snap = snapshot()
+            for (l in listeners) runCatching { l.onEvent(PodEvent.Connected(snap)) }
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -382,6 +399,9 @@ object MoondropLink {
 
     private suspend fun afterConnected() {
         emitState()
+        // GAIA 版本探测：设备 GAIA 版本为 3 时，功能命令才走 vendor 0x001D。
+        // 真机确认必须先发 `00 0A 03 00`（V1/V2 包，vendor 0x000A）。
+        runCatching { request(Gaia.getApiVersion(), ANC_TIMEOUT_MS) }
         probeCapabilities()
         refreshAll()
         startPolling()
@@ -397,7 +417,7 @@ object MoondropLink {
             // 位图分页：payload[0] bit0 = 还有下一页
             val more = (p.isNotEmpty() && (p[0].toInt() and 0x01) != 0)
             val body = if (p.isNotEmpty()) p.copyOfRange(1, p.size) else p
-            feats.addAll(Gaia.parseSupportedFeatures(body))
+            feats.addAll(Gaia.parseSupportedFeaturesSmart(body))
             if (!more) break
             cmd = Gaia.C_BASIC_GET_SUPPORTED_FEATURES_NEXT
         }
@@ -427,6 +447,11 @@ object MoondropLink {
         ancModes = model.anc?.modes ?: emptyList()
         emit(PodEvent.CapabilitiesChanged(capabilities))
         Log.i(TAG, "capabilities: $capabilities")
+    }
+
+    /** 非挂起入口：供 BroadcastReceiver 之类的同步上下文触发一次电量刷新。 */
+    fun requestBatteryRefresh() {
+        scope.launch { runCatching { refreshBattery() } }
     }
 
     /** 读取全量状态。 */
@@ -676,7 +701,7 @@ object MoondropLink {
             Gaia.F_BASIC -> if (f.command == Gaia.C_BASIC_GET_SUPPORTED_FEATURES) {
                 // request() 已经消费；这里只做通知型位图的增量合并
                 capabilities = capabilities.copy(
-                    features = capabilities.features + Gaia.parseSupportedFeatures(f.payload),
+                    features = capabilities.features + Gaia.parseSupportedFeaturesSmart(f.payload),
                 )
             }
         }

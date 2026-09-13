@@ -90,6 +90,7 @@ object MiBluetoothToastHook : HookContext() {
         receiver = null
         receiverContext = null
         processContext = null
+        hookedConstructors.clear()
     }
 
     private fun hookExactConstructor(vararg parameterTypes: Class<*>) {
@@ -139,8 +140,9 @@ object MiBluetoothToastHook : HookContext() {
         }
         val broadcastReceiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
-                val action = intent?.action ?: return
-                runCatching { handle(ctx ?: appContext, action, intent) }
+                val received = intent ?: return
+                val action = received.action ?: return
+                runCatching { handle(ctx ?: appContext, action, received) }
                     .onFailure { Log.e(TAG, "handle $action failed", it) }
             }
         }

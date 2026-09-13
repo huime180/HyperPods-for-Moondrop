@@ -16,7 +16,6 @@
  */
 package moe.chenxy.hyperpods.hook
 
-import android.content.SharedPreferences
 import android.util.Log
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.HotReloadedParam
@@ -24,6 +23,7 @@ import io.github.libxposed.api.XposedModuleInterface.HotReloadingParam
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 import moe.chenxy.hyperpods.BuildConfig
+import moe.chenxy.hyperpods.utils.data.HyperPodsPrefsKey
 
 class XposedEntry : XposedModule() {
 
@@ -33,7 +33,8 @@ class XposedEntry : XposedModule() {
         /** 远程设置组名（LSPosed 远程首选项；读不到时用内存兜底）。 */
         const val PREFS_GROUP = "hyperpods_moondrop_settings"
 
-        const val PKG_APP = "moe.chenxy.hyperpods.moondrop"
+        /** 本模块应用包名（与 module.prop 的 id 一致）。 */
+        val PKG_APP = BuildConfig.APPLICATION_ID
         const val PKG_BLUETOOTH = "com.android.bluetooth"
         const val PKG_XIAOMI_BLUETOOTH = "com.xiaomi.bluetooth"
         const val PKG_SYSTEMUI = "com.android.systemui"
@@ -66,6 +67,9 @@ class XposedEntry : XposedModule() {
                 .onFailure { Log.w(TAG, "onHotReloading($name) failed", it) }
         }
         hooks.clear()
+        // API 102 热重载协议：先卸载本进程当前全部 hook（XposedModule.detach()，与 OppoPods HookEntry 同做法），
+        // 否则重载后旧 hook 会与新 hook 同时生效。
+        runCatching { detach() }.onFailure { Log.w(TAG, "detach() failed", it) }
         return true
     }
 
@@ -105,88 +109,16 @@ class XposedEntry : XposedModule() {
         runCatching {
             hook.module = this
             hook.appClassLoader = classLoader
-            hook.prefs = runCatching { getRemotePreferences(PREFS_GROUP) }.getOrElse { MemoryPrefs() }
+            // 远程首选项取不到就保持 null（只影响总开关读取，读取方全程容错）。
+            hook.prefs = runCatching { getRemotePreferences(PREFS_GROUP) }.getOrNull()
+            // 模块总开关（HyperPodsPrefsKey.ENABLE，默认开启；prefs 不可用时视为开启）。
+            if (!hook.isEnabled()) {
+                Log.i(TAG, "$name disabled by prefs (${HyperPodsPrefsKey.ENABLE})")
+                return
+            }
             hook.onHook()
             hooks[name] = hook
             Log.i(TAG, "$name hooked in $processName (classLoader=$classLoader)")
         }.onFailure { Log.w(TAG, "hook $name skipped in $processName", it) }
-    }
-}
-
-/**
- * getRemotePreferences 不可用时的内存兜底实现（例如框架未实现远程首选项）。
- * 只用于保证 `prefs.getXxx(key, default)` 不会抛异常；不参与持久化。
- */
-private class MemoryPrefs : SharedPreferences {
-    private val values = LinkedHashMap<String, Any?>()
-
-    override fun getAll(): MutableMap<String, Any?> = LinkedHashMap(values)
-
-    override fun getString(key: String, defValue: String?): String? = values[key] as? String ?: defValue
-
-    override fun getStringSet(key: String, defValues: MutableSet<String>?): MutableSet<String>? =
-        @Suppress("UNCHECKED_CAST") (values[key] as? MutableSet<String>) ?: defValues
-
-    override fun getInt(key: String, defValue: Int): Int = values[key] as? Int ?: defValue
-
-    override fun getLong(key: String, defValue: Long): Long = values[key] as? Long ?: defValue
-
-    override fun getFloat(key: String, defValue: Float): Float = values[key] as? Float ?: defValue
-
-    override fun getBoolean(key: String, defValue: Boolean): Boolean = values[key] as? Boolean ?: defValue
-
-    override fun contains(key: String): Boolean = values.containsKey(key)
-
-    override fun edit(): SharedPreferences.Editor = MemoryEditor()
-
-    override fun registerOnSharedPreferenceChangeListener(
-        listener: SharedPreferences.OnSharedPreferenceChangeListener?
-    ) = Unit
-
-    override fun unregisterOnSharedPreferenceChangeListener(
-        listener: SharedPreferences.OnSharedPreferenceChangeListener?
-    ) = Unit
-
-    private inner class MemoryEditor : SharedPreferences.Editor {
-        private val pending = LinkedHashMap<String, Any?>()
-        private val removed = LinkedHashSet<String>()
-        private var clearRequested = false
-
-        override fun putString(key: String, value: String?): SharedPreferences.Editor = apply { pending[key] = value }
-
-        override fun putStringSet(key: String, values: MutableSet<String>?): SharedPreferences.Editor =
-            apply { pending[key] = values }
-
-        override fun putInt(key: String, value: Int): SharedPreferences.Editor = apply { pending[key] = value }
-
-        override fun putLong(key: String, value: Long): SharedPreferences.Editor = apply { pending[key] = value }
-
-        override fun putFloat(key: String, value: Float): SharedPreferences.Editor = apply { pending[key] = value }
-
-        override fun putBoolean(key: String, value: Boolean): SharedPreferences.Editor = apply { pending[key] = value }
-
-        override fun remove(key: String): SharedPreferences.Editor = apply { removed += key }
-
-        override fun clear(): SharedPreferences.Editor = apply { clearRequested = true }
-
-        override fun commit(): Boolean {
-            applyChanges()
-            return true
-        }
-
-        override fun apply() {
-            applyChanges()
-        }
-
-        private fun applyChanges() {
-            if (clearRequested) {
-                values.clear()
-                clearRequested = false
-            }
-            removed.forEach { values.remove(it) }
-            removed.clear()
-            values.putAll(pending)
-            pending.clear()
-        }
     }
 }
