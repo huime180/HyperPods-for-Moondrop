@@ -311,7 +311,7 @@ private fun isLhdcCodec(name: String): Boolean = name.contains("LHDC", ignoreCas
  *   ④ 没读到系统编码：显示「未知」，不谎报 AAC。
  *
  * 真正不同步的病因在数据侧（系统编码广播与 GAIA 开关不同步、断开后 activeCodec 也不清空），
- * 本次改动范围只到 ui/**，因此这里只保证 UI 不再背书一个与开关冲突的值。
+ * 本次改动范围只到 ui 目录，因此这里只保证 UI 不再背书一个与开关冲突的值。
  */
 @Composable
 private fun activeCodecLabel(snapshot: PodSnapshot): String {
