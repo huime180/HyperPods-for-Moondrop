@@ -17,7 +17,7 @@
  *   com.android.settings  --*_SELECT / UI_INIT / REQUEST_*--> 本桥 --> MoondropLink.setXxx()
  *   本桥 --ANC_CHANGED / BATTERY_CHANGED--> com.android.settings（被伪装的耳机页显示）
  *   com.android.bluetooth --CODEC_CHANGED--> 本桥 --> MoondropLink.onSystemCodecChanged()（详情页「当前编码」）
- *   本桥 --UI_INIT--> com.android.bluetooth（请它重放一次系统真实编码）
+ *   本桥 --UI_INIT--> com.android.bluetooth（请它重放一次系统真实编码：UI 打开时 + LHDC 切换后）
  *   本桥 --UPDATE_SYSTEM_BATTERY--> com.android.bluetooth（写进 AdapterService，系统 UI 显示电量）
  *   本桥 --UPDATE_PODS_NOTIFICATION / SEND_STRONG_TOAST / CANCEL_*--> com.xiaomi.bluetooth（通知）
  */
@@ -76,6 +76,10 @@ object ControlBridge {
         registerCodecReceiver(context.applicationContext)
         if (initialized) return
         MoondropLink.init(context.applicationContext, forwarder)
+        // LHDC 开关后系统 A2DP 会**异步**重新协商编码，而 CODEC_CHANGED 不保证会来：
+        // 把「请蓝牙进程重放编码」的通道交给协议侧，由它在切换后有界地调用几次
+        // （次数/间隔在 MoondropLink 里，见 reprobeSystemCodec）。
+        MoondropLink.setSystemCodecReprobe { reprobeSystemCodec() }
         initialized = true
         Log.i(TAG, "ControlBridge initialized")
     }
@@ -193,6 +197,17 @@ object ControlBridge {
             it.putExtra(HyperPodsAction.EXTRA_MAC, connectedDevice?.address)
             it.putExtra(HyperPodsAction.EXTRA_DEVICE, connectedDevice)
         }
+    }
+
+    /**
+     * 协议侧（MoondropLink）在 LHDC 切换后请求重放系统编码的入口。
+     *
+     * 每次调用只发一条 UI_INIT；次数由协议侧限死（MoondropLink.reprobeSystemCodec），
+     * 而且蓝牙进程侧对「同一设备 + 同一编码」还会去重，因此不会刷屏该进程。
+     */
+    private fun reprobeSystemCodec() {
+        Log.i(TAG, "codec re-probe: UI_INIT -> com.android.bluetooth")
+        appContext?.let { requestSystemCodec(it) }
     }
 
     private fun onConnected(context: Context, mac: String?, name: String?) {
