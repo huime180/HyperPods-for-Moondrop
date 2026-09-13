@@ -13,6 +13,7 @@
  * 参考实现（PuddingPods/OppoPods 构建）在旧 ROM 上挂的是
  * `com.android.bluetooth.ble.app.headset.BinderC6776v`（那张 ROM 上该 Binder 子类的 R8 名）
  * + `IMiuiHeadsetService.Stub.onTransact`；本 ROM 上对应物就是本文件下面的 HeadsetBinder。
+ * 两代 ROM 的候选表现在集中在 RomProfile（BT_BINDER 组），本文件只消费结论。
  *
  * ── 为什么不挂 onTransact 来做拦截 ───────────────────────────────────────────
  * AIDL 的 onTransact 靠 `TRANSACTION_<方法名>` 常量分发，而 R8 已把那些常量全部内联、
@@ -57,19 +58,16 @@ object HeadsetServiceBinderHook {
 
     private const val PKG_APP = BuildConfig.APPLICATION_ID
 
-    /** 本 ROM 实证：服务端 Binder 实现在 com.xiaomi.bluetooth 进程。 */
-    private const val CLS_BINDER =
-        "com.android.bluetooth.ble.app.headset.BluetoothHeadsetService\$HeadsetBinder"
-
     /**
-     * 服务端实现的候选类。本 ROM 是第一个（已实证）；后两个是「接口 Stub 未混淆 / 被混淆成 q$a」
-     * 的变体，留给别的 ROM——找不到就静默跳过，不会刷日志。
+     * 服务端实现的候选类 —— **由 RomProfile 按检测到的 ROM 代数给药**（不再硬编码单一代的名字）：
+     *   · HyperOS 4（本机 APK 已核对）：headset.BluetoothHeadsetService$HeadsetBinder
+     *     继承混淆后的 AIDL Stub `com.android.bluetooth.ble.app.q$a`（R8 名随 build 变）；
+     *   · HyperOS 3（unverified-on-device，取自旧 ROM 参考实现 PuddingPods）：
+     *     headset.BinderC6776v / headset.BluetoothHeadsetService / headset.v。
+     * RomProfile 会把「本代主档」排在最前，其余代数作为兜底，因此探测错了也只是退化到旧行为。
      */
-    private val BINDER_CLASSES = listOf(
-        CLS_BINDER,
-        "com.android.bluetooth.ble.app.IMiuiHeadsetService\$Stub",
-        "com.android.bluetooth.ble.app.q\$a"
-    )
+    private val BINDER_CLASSES: List<String>
+        get() = RomProfile.bluetoothBinderClasses
 
     private const val FAKE_DEVICE_ID = "01010607"
     private const val FAKE_SUPPORT = "$FAKE_DEVICE_ID,000000000000000010000000"
@@ -89,7 +87,8 @@ object HeadsetServiceBinderHook {
     private var processContext: Context? = null
 
     fun install(ctx: HookContext) {
-        Log.d(TAG, "installing headset service binder hooks")
+        Log.d(TAG, "installing headset service binder hooks (${RomProfile.summary()})")
+        Log.d(TAG, "binder candidates: ${BINDER_CLASSES.joinToString()}")
         installResultHooks(ctx)
         installCommandHooks(ctx)
         installNoopHooks(ctx)

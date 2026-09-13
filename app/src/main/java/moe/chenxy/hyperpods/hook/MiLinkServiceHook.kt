@@ -60,6 +60,14 @@
  *   · 写返回值前先核对**真实返回类型**（`coerceToReturnType`），对不上就保留原返回值——
  *     某台 ROM 把 List 改成 int[] 时只会少改一条 getter，绝不让 com.milink.service 崩。
  *
+ * ── ROM 代数 ──────────────────────────────────────────────────────────────
+ * 本文件正文里的类名**不再硬编码**：策略实现 / 小米蓝牙 SDK / 多点相关类全部来自
+ * RomProfile（MILINK_* / MULTIPOINT_* / HOST_EXTENSION / HEADSET_INFO 组）。
+ * RomProfile 先给「检测到的这一代」的主档，再给其余代数的兜底，所以：
+ *   HyperOS 4 -> 三个 runtime.model.*HeadsetStrategy 先试（已用真机 dex 核对）；
+ *   HyperOS 3 -> AncBatteryController / ProfileContext / AncBatteryModel 先试（unverified-on-device）。
+ * 两代的名字都在候选里，探测错了只是退化，不会失效。
+ *
  * ⚠ 所有 hook 注册都用 `hookOnce`（内部 runCatching + 去重），缺类/改签名只跳过该条 hook。
  * ⚠ 所有对外广播都 setPackage(...)（Android 14+ 丢弃隐式广播）。
  * ⚠ 已知接线缺口：应用进程的 ControlBridge 只把 ANC_CHANGED / BATTERY_CHANGED 发给
@@ -93,17 +101,17 @@ object MiLinkServiceHook : HookContext() {
     /** 与 SettingsHeadsetHook 共用同一个伪装 Device ID，两个面板才会指向同一台虚拟设备。 */
     private const val FAKE_DEVICE_ID = "01010607"
 
-    // ── 小米蓝牙 SDK（身份握手 + 降噪命令）────────────────────────────────────
-    private const val CLS_MX_SERVICE = "com.xiaomi.mxbluetoothsdk.service.MxBluetoothService"
-    private const val CLS_MX_MANAGER = "com.xiaomi.mxbluetoothsdk.manager.MxBluetoothManager"
-
-    // ── 耳机状态策略实现（本 ROM 的真实数据层）────────────────────────────────
-    private const val CLS_STRATEGY_XIAOMI = "com.miui.headset.runtime.model.XiaomiHeadsetStrategy"
-    private const val CLS_STRATEGY_THIRD_PARTY = "com.miui.headset.runtime.model.ThirdPartyHeadsetStrategy"
-    private const val CLS_STRATEGY_AIRPODS = "com.miui.headset.runtime.model.AirPodsHeadsetStrategy"
-
-    /** 面板直接渲染的数据对象（Kotlin data class，getter + componentN 双形态）。 */
-    private const val CLS_HEADSET_INFO = "com.miui.headset.api.HeadsetInfo"
+    // ── 目标类候选：全部来自 RomProfile（按检测到的 ROM 代数给药）──────────────
+    // 这里不再硬编码任何单一代 ROM 的类名。RomProfile 返回「本代主档 + 其余代数兜底」，
+    // 主档优先命中；探测错了也只是退化到旧代码那套候选容忍度，不会更差。
+    //
+    // evidence（详见 RomProfile）：
+    //   MILINK_MX_SDK  两代同名；HyperOS 4 侧已在 com.milink.service.apk 的 dex 里核对。
+    //   MILINK_STRATEGY H4=三个 runtime.model.*HeadsetStrategy（已核对）；
+    //                   H3=AncBatteryController/ProfileContext/AncBatteryModel（unverified-on-device，来自旧参考实现）。
+    private val mxBluetoothClasses: List<String> get() = RomProfile.mxBluetoothClasses
+    private val headsetStrategyClasses: List<String> get() = RomProfile.headsetStrategyClasses
+    private val headsetInfoClasses: List<String> get() = RomProfile.headsetInfoClasses
 
     // ── 多点 / 一拖二（multipoint / OneBringTwo）───────────────────────────────
     // 真机 dex 实证：这套机制**只存在于 com.milink.service**
@@ -113,23 +121,18 @@ object MiLinkServiceHook : HookContext() {
     //   no supportControlHost / supportControlHost= / HeadsetMultipointInfo.isSupportControl
     // 换句话说：拿不到有效「控制主机」描述时，框架就拒绝放行 ANC —— 这就是两台设备都报
     // 「正在双设备连接」的原因；HyperOS 4 上它同时让面板完全渲染不出电量/降噪。
-    private const val CLS_MULTIPOINT_INFO = "com.miui.headset.api.MultipointInfo"
-    private const val CLS_HEADSET_MULTIPOINT_INFO = "com.miui.headset.runtime.HeadsetMultipointInfo"
-    private const val CLS_MULTIPOINT_PROCESSOR = "com.miui.headset.runtime.MultipointProcessor"
-    private const val CLS_HOST_EXTENSION = "com.miui.headset.runtime.HeadsetHostExtension"
-
     /**
-     * 询问「这台设备的多点状态」的候选入口（不同 ROM / 版本命名不同）：
-     * 全部声明 `getMultipointInfo(String): com.miui.headset.api.MultipointInfo`（已逐条核对）。
-     * 逐个尝试，缺类静默跳过 —— 一个 APK 同时兼容 HyperOS 3 与 4。
+     * 多点 / 一拖二的候选类。这些方法签名在 HyperOS 4 的 dex 里逐条核对过（见 RomProfile 的
+     * MULTIPOINT_* / HOST_EXTENSION / HEADSET_INFO 组）；HyperOS 3 一侧取自旧参考实现，
+     * 标记 unverified-on-device。候选顺序 = 本代主档优先，其余代兜底。
      */
-    private val MULTIPOINT_QUERY_CLASSES = listOf(
-        "com.miui.headset.api.Query",
-        "com.miui.headset.runtime.QueryLocal",
-        "com.miui.headset.runtime.QueryServer",
-        "com.miui.circulate.api.protocol.headset.HeadsetServiceController",
-        "com.miui.headset.api.HeadsetClient\$queryProxyAdapter\$1"
-    )
+    private val multipointQueryClasses: List<String> get() = RomProfile.multipointQueryClasses
+    private val multipointInfoClasses: List<String> get() = RomProfile.multipointInfoClasses
+    private val headsetMultipointInfoClasses: List<String>
+        get() = RomProfile.headsetMultipointInfoClasses
+    private val multipointProcessorClasses: List<String>
+        get() = RomProfile.multipointProcessorClasses
+    private val hostExtensionClasses: List<String> get() = RomProfile.hostExtensionClasses
 
     private const val STATE_PREFS = "hyperpods_moondrop_milink_state"
 
@@ -207,7 +210,12 @@ object MiLinkServiceHook : HookContext() {
     private var lastPanelRefreshMs = 0L
 
     override fun onHook() {
-        Log.d(TAG, "MiLink hook initializing (HyperOS 4.0 verified target set)")
+        Log.d(TAG, "MiLink hook initializing (${RomProfile.summary()})")
+        Log.d(
+            TAG,
+            "target candidates: strategy=${headsetStrategyClasses.joinToString()} " +
+                "mxSdk=${mxBluetoothClasses.joinToString()}"
+        )
         hookContextEntry()
         hookMxBluetoothRuntime()
         hookHeadsetStrategies()
@@ -237,7 +245,7 @@ object MiLinkServiceHook : HookContext() {
     // ── 1) 上下文入口：拿到 com.milink.service 的 Context 才能注册广播接收器 ──────
 
     private fun hookContextEntry() {
-        listOf(CLS_MX_SERVICE, CLS_MX_MANAGER).forEach { className ->
+        mxBluetoothClasses.forEach { className ->
             // 本 ROM 实测存在：getInstanceForIsMiTWS / getInstanceForThirdParty / getInstance / getInstanceForAirpods（均 1 参 Context）
             listOf("getInstanceForIsMiTWS", "getInstanceForThirdParty", "getInstance").forEach { name ->
                 hookOnce(className, name, arrayOf(Context::class.java), "before") { param, _ ->
@@ -250,7 +258,7 @@ object MiLinkServiceHook : HookContext() {
     // ── 2) 小米蓝牙 SDK：让耳机被当成「原生 Mi TWS」并接管降噪命令 ────────────────
 
     private fun hookMxBluetoothRuntime() {
-        listOf(CLS_MX_SERVICE, CLS_MX_MANAGER).forEach { className ->
+        mxBluetoothClasses.forEach { className ->
             hookDevice(className, "checkIsMiTWS") { 1 }
             hookDevice(className, "getDeviceId") { FAKE_DEVICE_ID }
             hookDevice(className, "getBatteryLevel") { 1 }
@@ -270,7 +278,7 @@ object MiLinkServiceHook : HookContext() {
     // ── 3) 耳机状态策略：本 ROM 真实的数据层（哪个策略被选中都兜住）──────────────
 
     private fun hookHeadsetStrategies() {
-        listOf(CLS_STRATEGY_XIAOMI, CLS_STRATEGY_THIRD_PARTY, CLS_STRATEGY_AIRPODS).forEach { className ->
+        headsetStrategyClasses.forEach { className ->
             hookDevice(className, "getDeviceId") { FAKE_DEVICE_ID }
             hookDevice(className, "getAncState") { miLinkAncState() }
             hookDevice(className, "getBatteryLevelCache", reconnectOnRead = true) { miLinkBatteryLevels() }
@@ -293,12 +301,18 @@ object MiLinkServiceHook : HookContext() {
     // ── 4) 面板直接渲染的数据对象 ─────────────────────────────────────────────
 
     private fun hookHeadsetInfo() {
-        hookInfo("getDeviceId") { FAKE_DEVICE_ID }
-        hookInfo("component3") { FAKE_DEVICE_ID }
-        hookInfo("getPowers", reconnectOnRead = true) { miLinkBatteryLevels() }
-        hookInfo("component4", reconnectOnRead = true) { miLinkBatteryLevels() }
-        hookInfo("getMode") { miLinkAncState() }
-        hookInfo("component5") { miLinkAncState() }
+        val className = firstPresentClass(headsetInfoClasses)
+        if (className == null) {
+            Log.w(TAG, "HeadsetInfo hook skipped: none of $headsetInfoClasses present")
+            return
+        }
+        Log.d(TAG, "HeadsetInfo target=$className candidates=$headsetInfoClasses")
+        hookInfo(className, "getDeviceId") { FAKE_DEVICE_ID }
+        hookInfo(className, "component3") { FAKE_DEVICE_ID }
+        hookInfo(className, "getPowers", reconnectOnRead = true) { miLinkBatteryLevels() }
+        hookInfo(className, "component4", reconnectOnRead = true) { miLinkBatteryLevels() }
+        hookInfo(className, "getMode") { miLinkAncState() }
+        hookInfo(className, "component5") { miLinkAncState() }
     }
 
     // ── 多点 / 一拖二：回答「不是多点主机、没有其它主机、控制可用」 ─────────────
@@ -306,7 +320,7 @@ object MiLinkServiceHook : HookContext() {
     private fun hookMultipoint() {
         // 1) 多点查询本体：原生返回 null 时补一个描述。
         hookOnceAny(
-            MULTIPOINT_QUERY_CLASSES, "getMultipointInfo", arrayOf(String::class.java)
+            multipointQueryClasses, "getMultipointInfo", arrayOf(String::class.java)
         ) { param, returnType ->
             if (param.result != null) return@hookOnceAny
             if (!shouldAnswerNoMultipoint()) return@hookOnceAny
@@ -318,7 +332,7 @@ object MiLinkServiceHook : HookContext() {
         // 2) 面板/框架取「主机扩展」里的多点信息：null 会走
         //    "wrong path, primaryHeadsetHost not have headsetMultipointInfo" 分支（面板就不渲染了）。
         hookOnceAny(
-            listOf(CLS_HOST_EXTENSION), "getHeadsetMultipointInfo", emptyArray<Class<*>>()
+            hostExtensionClasses, "getHeadsetMultipointInfo", emptyArray<Class<*>>()
         ) { param, returnType ->
             if (param.result != null) return@hookOnceAny
             if (!shouldAnswerNoMultipoint()) return@hookOnceAny
@@ -331,7 +345,7 @@ object MiLinkServiceHook : HookContext() {
 
         // 3) 捕获多点处理器实例：它的主机表是「是否真有多点主机」的权威来源（只读不改）。
         hookOnceAny(
-            listOf(CLS_MULTIPOINT_PROCESSOR), "getMultipointHeadsetHosts", emptyArray<Class<*>>()
+            multipointProcessorClasses, "getMultipointHeadsetHosts", emptyArray<Class<*>>()
         ) { param, _ ->
             lastMultipointProcessor = param.instance
             val size = (param.result as? Map<*, *>)?.size ?: -1
@@ -340,13 +354,13 @@ object MiLinkServiceHook : HookContext() {
 
         // 4) 远端主机登记事件：只观察，用来把「没有其它主机」这句话收紧成真话。
         hookOnceAny(
-            listOf(CLS_MULTIPOINT_PROCESSOR), "remoteHost", arrayOf(String::class.java)
+            multipointProcessorClasses, "remoteHost", arrayOf(String::class.java)
         ) { param, _ ->
             lastMultipointProcessor = param.instance
             noteRemoteHost("remoteHost", param.args.getOrNull(0)?.toString().orEmpty())
         }
         hookOnceAny(
-            listOf(CLS_MULTIPOINT_PROCESSOR), "foundHost", arrayOf(String::class.java)
+            multipointProcessorClasses, "foundHost", arrayOf(String::class.java)
         ) { param, _ ->
             lastMultipointProcessor = param.instance
             noteRemoteHost("foundHost", param.args.getOrNull(0)?.toString().orEmpty())
@@ -386,9 +400,11 @@ object MiLinkServiceHook : HookContext() {
         return true
     }
 
-    /** com.miui.headset.api.MultipointInfo 是 data class，构造器为 (boolean, String, List)。 */
+    /** MultipointInfo（RomProfile.MULTIPOINT_INFO 组）是 data class，构造器为 (boolean, String, List)。 */
     private fun buildNoMultipointInfo(): Any? = runCatching {
-        val cls = findClass(CLS_MULTIPOINT_INFO)
+        val className = firstPresentClass(multipointInfoClasses)
+            ?: throw ClassNotFoundException("MultipointInfo candidates=$multipointInfoClasses")
+        val cls = findClass(className)
         val ctor = cls.getDeclaredConstructor(
             Boolean::class.javaPrimitiveType!!, String::class.java, List::class.java
         )
@@ -411,9 +427,13 @@ object MiLinkServiceHook : HookContext() {
             return null
         }
         return runCatching {
-            val cls = findClass(CLS_HEADSET_MULTIPOINT_INFO)
+            val infoClassName = firstPresentClass(headsetInfoClasses)
+                ?: throw ClassNotFoundException("HeadsetInfo candidates=$headsetInfoClasses")
+            val mpClassName = firstPresentClass(headsetMultipointInfoClasses)
+                ?: throw ClassNotFoundException("HeadsetMultipointInfo candidates=$headsetMultipointInfoClasses")
+            val cls = findClass(mpClassName)
             val ctor = cls.getDeclaredConstructor(
-                findClass(CLS_HEADSET_INFO),
+                findClass(infoClassName),
                 Long::class.javaPrimitiveType!!,
                 Boolean::class.javaPrimitiveType!!,
                 String::class.java,
@@ -546,9 +566,14 @@ object MiLinkServiceHook : HookContext() {
         }
     }
 
-    /** com.miui.headset.api.HeadsetInfo 的无参 getter / data class componentN。 */
-    private fun hookInfo(methodName: String, reconnectOnRead: Boolean = false, provide: () -> Any) {
-        hookOnce(CLS_HEADSET_INFO, methodName, emptyArray<Class<*>>(), "after") { param, returnType ->
+    /** HeadsetInfo（RomProfile.HEADSET_INFO 组解析出的类）的无参 getter / data class componentN。 */
+    private fun hookInfo(
+        className: String,
+        methodName: String,
+        reconnectOnRead: Boolean = false,
+        provide: () -> Any
+    ) {
+        hookOnce(className, methodName, emptyArray<Class<*>>(), "after") { param, returnType ->
             if (!isTargetHeadsetInfo(param.instance)) return@hookOnce
             lastHeadsetInfo = param.instance
             val old = param.result

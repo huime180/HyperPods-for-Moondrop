@@ -23,6 +23,8 @@
  *   本模块**不硬编码**这些名字，而是在运行时用 `View.resources.getResourceEntryName(view.id)`
  *   去匹配（release 构建会重命名资源 entry，硬编码 id 更不可靠），并且**必须先命中名字**才隐藏
  *   原生控件；只靠结构猜出来的行不隐藏，避免把页面上别的控件误藏。
+ *   ⚠ 名字族本身现在由 RomProfile 按检测到的 ROM 代数给出（HyperOS 4 = resources.arsc 实证；
+ *     HyperOS 3 = 旧参考实现的命名 + 旧 MiLink 面板 entry 名，unverified-on-device）。
  *   （本机无法完整反编译 resources.arsc 的二进制 XML，所以没有静态确认布局层级——
  *     若运行时一个 headset_anc* 名字都没命中，会退化为「保留原生控件 + 在旁边插入我们自己的一行」，
  *     并把找到的候选 entry 名全部打进 logcat，供下一轮定位。）
@@ -359,10 +361,12 @@ object NativeThreeModeAncUi {
         runCatching { callMethod(fragment, "getView") as? View }.getOrNull()
 
     /**
-     * 三级定位，先高置信后低置信：
+     * 四级定位，先高置信后低置信：
      *   1) 资源 entry 名（headset_anc* 等）—— 高置信，隐藏原生行；
-     *   2) 滑杆 max ∈ 2..5 —— 4 段 ANC 滑杆的语义特征，与名字无关，同样够格隐藏；
-     *   3) 任意滑杆 —— 低置信，**只插入不隐藏**（怕误藏页面上别的控件）。
+     *   2) 原生 ANC 控件的**类名**（RomProfile.NATIVE_ANC_VIEW；HyperOS 4 实证
+     *      `com.android.settings.bluetooth.MiuiHeadsetAncAdjustView`）—— 同样高置信，隐藏原生行；
+     *   3) 滑杆 max ∈ 2..5 —— 4 段 ANC 滑杆的语义特征，与名字无关，同样够格隐藏；
+     *   4) 任意滑杆 —— 低置信，**只插入不隐藏**（怕误藏页面上别的控件）。
      */
     private fun findNativeAncRow(root: View): View? {
         findByName(root)?.let {
@@ -370,6 +374,16 @@ object NativeThreeModeAncUi {
             nativeRowEvidence = "entryName:" + entryName(it)
             Log.i(TAG, "native ANC row by entry name: ${nativeRowEvidence}")
             return normaliseRow(it)
+        }
+        findByClassName(root, RomProfile.nativeAncViewClasses)?.let { (row, matchedClass) ->
+            nativeRowGuessed = false
+            nativeRowEvidence = "viewClass:" + matchedClass.substringAfterLast('.')
+            Log.i(
+                TAG,
+                "native ANC row by view class: class=$matchedClass row=${row.javaClass.name} " +
+                    "entry=${entryName(row)}"
+            )
+            return row
         }
         findBySeekBarSignature(root)?.let { row ->
             nativeRowGuessed = false
@@ -390,16 +404,49 @@ object NativeThreeModeAncUi {
         return any
     }
 
+    /**
+     * 名字匹配分两档（两张表都由 RomProfile 按检测到的 ROM 代数给出）：
+     *   1) 主档 = 本代 ROM 的 entry 名候选（HyperOS 4 是 resources.arsc 里核对过的 headset_anc* / miheadset_anc*）；
+     *   2) 兜底档 = 其余代数的候选，**只有主档一个都没命中时**才用（保持旧代码的候选容忍度）。
+     */
     private fun findByName(root: View): View? {
+        val (primary, fallback) = RomProfile.nativeAncTokens()
+        findByName(root, primary, "primary")?.let { return it }
+        return findByName(root, fallback, "fallback")
+    }
+
+    /**
+     * 类名定位（次高置信）：RomProfile 给出「原生 ANC 控件类」候选（本代优先）。
+     * HyperOS 4 上是 com.android.settings.bluetooth.MiuiHeadsetAncAdjustView —— 它内部就是
+     * AncLevelChangeListener / LabeledSeekBarExploreByTouchHelper，比「随便一个滑杆」可靠。
+     * 返回 (抬到行的 view, 命中的类名)。
+     */
+    private fun findByClassName(root: View, classNames: List<String>): Pair<View, String>? {
+        if (classNames.isEmpty()) return null
+        val queue = ArrayList<View>()
+        queue.add(root)
+        var i = 0
+        while (i < queue.size) {
+            val view = queue[i++]
+            val cls = view.javaClass
+            val matched = classNames.firstOrNull { it == cls.name || it == cls.simpleName }
+            if (matched != null) return normaliseRow(view) to cls.name
+            if (view is ViewGroup) for (c in 0 until view.childCount) queue.add(view.getChildAt(c))
+        }
+        return null
+    }
+
+    private fun findByName(root: View, tokens: List<AncToken>, tier: String): View? {
+        if (tokens.isEmpty()) return null
         val queue = ArrayList<View>()
         queue.add(root)
         var i = 0
         while (i < queue.size) {
             val view = queue[i++]
             val name = entryName(view)
-            if (name != null && looksLikeAncId(name)) {
-                matchedEntryNames.add("${name}(${view.javaClass.simpleName})")
-                Log.d(TAG, "ANC candidate entry=$name class=${view.javaClass.name}")
+            if (name != null && RomProfile.matchesNativeAncEntry(name, tokens)) {
+                matchedEntryNames.add("${name}(${view.javaClass.simpleName},$tier)")
+                Log.d(TAG, "ANC candidate entry=$name tier=$tier class=${view.javaClass.name}")
                 return view
             }
             if (view is ViewGroup) for (c in 0 until view.childCount) queue.add(view.getChildAt(c))
@@ -506,19 +553,12 @@ object NativeThreeModeAncUi {
         return runCatching { view.resources.getResourceEntryName(view.id) }.getOrNull()
     }
 
-    /**
-     * 本 ROM 实测存在的名字族：
-     *   headset_anc_layout_* / headset_anc_level_Text_* / headset_anc_level_layout_*
-     *   headset_anc_mode_text_size / headset_anc_text_* / headset_anc_image_high
-     * 同时排掉 cancel / balance / advanced 这类「含 anc 但不是降噪」的误命中。
-     */
-    private fun looksLikeAncId(name: String): Boolean {
-        val n = name.lowercase()
-        if (n.contains("cancel") || n.contains("balance") || n.contains("advanced") ||
-            n.contains("enhance") || n.contains("financ")
-        ) return false
-        return n.startsWith("headset_anc") || n.startsWith("miheadset_anc") ||
-            n.contains("anc_layout") || n.contains("anc_level") ||
-            n.contains("anc_mode") || n.contains("anc_seek")
-    }
+    // 资源 entry 名的正负向匹配规则已全部搬进 RomProfile（nativeAncTokens / matchesNativeAncEntry），
+    // 本文件不再硬编码 headset_anc* 这类名字族：
+    //   · HyperOS 4（VERIFIED_H4_RES）：headset_anc_layout_* / headset_anc_level_* /
+    //     headset_anc_mode_text_size / headset_anc_text_* / headset_anc_image_high / miheadset_anc*
+    //     （从本机 com.android.settings 的 resources.arsc 里逐条抓到）
+    //   · HyperOS 3（unverified-on-device）：同一命名族 + 旧 MiLink 面板的 audio_effect_view /
+    //     mi_audio_ringing_view（OppoPods 在旧 ROM 上用的 entry 名）
+    //   · 负向排除 cancel / balance / advanced / enhance / financ 也在 RomProfile 里。
 }

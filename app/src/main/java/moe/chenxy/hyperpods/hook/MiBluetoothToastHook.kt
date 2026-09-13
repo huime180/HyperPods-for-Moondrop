@@ -46,8 +46,14 @@ import moe.chenxy.hyperpods.utils.data.HyperPodsAction
 object MiBluetoothToastHook : HookContext() {
     private const val TAG = "HyperPods-MiBtToast"
     private const val PKG_APP = BuildConfig.APPLICATION_ID
-    private const val CLS_BT_SERVICE = "com.android.bluetooth.ble.app.headset.BluetoothHeadsetService"
-    private const val CLS_NOTIFICATION = "com.android.bluetooth.ble.app.MiuiBluetoothNotification"
+    /**
+     * 两个系统类名都由 RomProfile 按检测到的 ROM 代数解析（本代主档优先，其余代数兜底）：
+     *   clsBtService    = BT_HEADSET_SERVICE 组（通知构造器的宿主服务；两代同名，H4 已核对）
+     *   clsNotification = BT_NOTIFICATION    组（通知 / 超级岛类；两代同名，H4 已核对）
+     * onHook() 里解析；解析不到留空串，下面的 find* 会抛异常并被 runCatching 吞掉（只 skip 该条）。
+     */
+    private var clsBtService: String = ""
+    private var clsNotification: String = ""
     private const val VENDOR_PKG = "com.xiaomi.bluetooth"
 
     private const val NOTIFICATION_ID = 10003
@@ -86,12 +92,21 @@ object MiBluetoothToastHook : HookContext() {
     override fun processContextOrNull(): Context? = processContext
 
     override fun onHook() {
+        Log.d(TAG, "xiaomi bluetooth notification hook initializing (${RomProfile.summary()})")
+        clsBtService = firstPresentClass(RomProfile.bluetoothHeadsetServiceClasses).orEmpty()
+        clsNotification = firstPresentClass(RomProfile.bluetoothNotificationClasses).orEmpty()
+        if (clsBtService.isEmpty()) {
+            Log.w(TAG, "headset service missing; candidates=${RomProfile.bluetoothHeadsetServiceClasses}")
+        }
+        if (clsNotification.isEmpty()) {
+            Log.w(TAG, "notification class missing; candidates=${RomProfile.bluetoothNotificationClasses}")
+        }
         hookExactConstructor(Context::class.java, Looper::class.java)
         runCatching {
-            hookExactConstructor(Looper::class.java, findClass(CLS_BT_SERVICE))
-        }.onFailure { Log.w(TAG, "$CLS_BT_SERVICE unavailable for notification constructor hook", it) }
+            hookExactConstructor(Looper::class.java, findClass(clsBtService))
+        }.onFailure { Log.w(TAG, "$clsBtService unavailable for notification constructor hook", it) }
         runCatching {
-            val constructor = findConstructorByParamCount(CLS_NOTIFICATION, 2)
+            val constructor = findConstructorByParamCount(clsNotification, 2)
             if (hookedConstructors.add(constructor.toGenericString())) {
                 hookConstructorAfter(constructor) { onNotificationCreated(instance, args) }
                 Log.d(TAG, "hooked constructor by param-count fallback: ${describe(constructor.parameterTypes)}")
@@ -126,7 +141,7 @@ object MiBluetoothToastHook : HookContext() {
     private fun hookNotificationParameters() {
         runCatching {
             val method = findMethodOrNull(
-                CLS_NOTIFICATION, "invokeStatusBar",
+                clsNotification, "invokeStatusBar",
                 Context::class.java, String::class.java, Bundle::class.java
             )
             if (method != null) {
@@ -138,13 +153,13 @@ object MiBluetoothToastHook : HookContext() {
                         Log.i(TAG, "invokeStatusBar action=$action extras=${extras?.keySet()?.joinToString()}")
                     }
                 }
-                Log.d(TAG, "hooked $CLS_NOTIFICATION#invokeStatusBar (diagnostic only)")
+                Log.d(TAG, "hooked $clsNotification#invokeStatusBar (diagnostic only)")
             }
-        }.onFailure { Log.w(TAG, "hook $CLS_NOTIFICATION.invokeStatusBar skipped", it) }
+        }.onFailure { Log.w(TAG, "hook $clsNotification.invokeStatusBar skipped", it) }
 
         runCatching {
             // 按参数个数定位，避免在编译期引用混淆内部类 MiuiBluetoothNotification$c。
-            val method = findMethodByParamCountOrNull(CLS_NOTIFICATION, "updateParameters", 1)
+            val method = findMethodByParamCountOrNull(clsNotification, "updateParameters", 1)
             if (method != null) {
                 hookBefore(method) {
                     val payload = args.getOrNull(0)
@@ -152,9 +167,9 @@ object MiBluetoothToastHook : HookContext() {
                     val first = synchronized(loggedUpdateParamClasses) { loggedUpdateParamClasses.add(cls) }
                     if (first) Log.i(TAG, "updateParameters payload=$cls fields=${describePayload(payload)}")
                 }
-                Log.d(TAG, "hooked $CLS_NOTIFICATION#updateParameters (diagnostic only)")
+                Log.d(TAG, "hooked $clsNotification#updateParameters (diagnostic only)")
             }
-        }.onFailure { Log.w(TAG, "hook $CLS_NOTIFICATION.updateParameters skipped", it) }
+        }.onFailure { Log.w(TAG, "hook $clsNotification.updateParameters skipped", it) }
     }
 
     /** 把混淆载荷对象的字段名与可读值列出来（只读，失败即忽略）。 */
@@ -171,11 +186,11 @@ object MiBluetoothToastHook : HookContext() {
 
     private fun hookExactConstructor(vararg parameterTypes: Class<*>) {
         runCatching {
-            val constructor = findConstructor(CLS_NOTIFICATION, *parameterTypes)
+            val constructor = findConstructor(clsNotification, *parameterTypes)
             if (!hookedConstructors.add(constructor.toGenericString())) return
             hookConstructorAfter(constructor) { onNotificationCreated(instance, args) }
-            Log.d(TAG, "hooked $CLS_NOTIFICATION(${describe(constructor.parameterTypes)})")
-        }.onFailure { Log.w(TAG, "$CLS_NOTIFICATION(${describe(parameterTypes)}) not available", it) }
+            Log.d(TAG, "hooked $clsNotification(${describe(constructor.parameterTypes)})")
+        }.onFailure { Log.w(TAG, "$clsNotification(${describe(parameterTypes)}) not available", it) }
     }
 
     private fun describe(types: Array<out Class<*>>): String = types.joinToString { it.name }

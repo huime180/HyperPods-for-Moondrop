@@ -84,6 +84,19 @@ abstract class HookContext {
 
     fun findClassOrNull(name: String): Class<*>? = runCatching { findClass(name) }.getOrNull()
 
+    /**
+     * 候选类名里第一个能在本进程 ClassLoader 里加载的类名；都没有返回 null。
+     *
+     * 供 RomProfile 的「本代主档优先 + 其余代数兜底」候选表使用：hook 文件不再自己硬编码
+     * 单一代 ROM 的类名，而是把候选表交给这里，按顺序挑第一个真实存在的。
+     */
+    fun firstPresentClass(candidates: List<String>): String? {
+        for (name in candidates) {
+            if (findClassOrNull(name) != null) return name
+        }
+        return null
+    }
+
     fun findMethod(className: String, methodName: String, vararg parameterTypes: Class<*>): Method =
         findClass(className).getDeclaredMethod(methodName, *parameterTypes).apply { isAccessible = true }
 

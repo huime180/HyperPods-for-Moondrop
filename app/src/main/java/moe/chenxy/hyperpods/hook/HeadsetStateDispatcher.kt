@@ -111,13 +111,15 @@ object HeadsetStateDispatcher : HookContext() {
     private const val CLS_ADAPTER_SERVICE = "com.android.bluetooth.btservice.AdapterService"
 
     /**
-     * 从 A2dpService 实例上取 AdapterService 的候选字段。
-     * ⚠ 参考实现用的 `mAdapterService` 在这台 ROM 上**不存在**：
-     *   A2dpService → ConnectableProfile → ProfileService，三者都没有 mAdapterService 字段；
-     *   ProfileService 实际声明的字段名是 `adapterService`（真机 dex 实证）。
-     *   保留 mAdapterService 只是为了其它 ROM 兜底。
+     * 从 A2dpService 实例上取 AdapterService 的候选字段 —— 由 RomProfile 按检测到的 ROM 代数给药
+     * （ADAPTER_SERVICE_FIELD 组，主档优先）：
+     *   · HyperOS 4（真机 dex 实证）：ProfileService 实际声明的字段名是 `adapterService`；
+     *     A2dpService → ConnectableProfile → ProfileService 这条链上**没有** `mAdapterService`。
+     *   · HyperOS 3 / 更旧（unverified-on-device，来自旧参考实现）：`mAdapterService`。
+     * 两代的字段都在候选表里（只是顺序不同），所以任何一代都仍然两个都试 —— 不改变旧行为。
      */
-    private val ADAPTER_SERVICE_FIELDS = arrayOf("adapterService", "mAdapterService")
+    private val ADAPTER_SERVICE_FIELDS: Array<String>
+        get() = RomProfile.adapterServiceFields.toTypedArray()
 
     // ── 低延迟（HyperOS 系统侧）候选 codec ─────────────────────────────────────
     // 数值取自 BluetoothCodecConfig 的公开/系统常量本身；这里写字面量是为了不在编译期
@@ -191,6 +193,7 @@ object HeadsetStateDispatcher : HookContext() {
     private var bootstrapRunnable: Runnable? = null
 
     override fun onHook() {
+        Log.d(TAG, "bluetooth dispatcher hook initializing (${RomProfile.summary()})")
         hookConnectionStateChanged()
         hookServiceCreateForBootstrap()
         hookCodecConfigChanged()

@@ -29,6 +29,11 @@
  *
  * ⚠ 所有分支**必须先确认是水月雨设备**（设备名经 core.MoondropModels.match 命中，
  *   或地址出现在本模块已知的水月雨地址集合里），非水月雨设备一律不碰。
+ *
+ * ROM 代数：本文件里所有系统类名（MiuiHeadsetActivity / MiuiHeadsetFragment / MiuiHeadsetBattery /
+ * IMiuiHeadsetService$Stub$Proxy …）都从 RomProfile 的候选表解析（SETTINGS_* 组），
+ * onHook() 里先按检测到的 ROM 代数取「本代主档」，再退到其它代数兜底。
+ * 这些名字两代恰好相同，但入口统一了：以后某一代改名只改 RomProfile。
  */
 package moe.chenxy.hyperpods.hook
 
@@ -60,13 +65,31 @@ object SettingsHeadsetHook : HookContext() {
     private const val FAKE_DEVICE_ID = "01010607"
     private const val FAKE_SUPPORT = "$FAKE_DEVICE_ID,000000000000000010000000"
 
-    private const val CLS_ACTIVITY = "com.android.settings.bluetooth.MiuiHeadsetActivity"
-    private const val CLS_ACTIVITY_PLUGIN = "com.android.settings.bluetooth.MiuiHeadsetActivityPlugin"
-    private const val CLS_ID_CONSTANTS = "com.android.settings.bluetooth.HeadsetIDConstants"
-    private const val CLS_FRAGMENT = "com.android.settings.bluetooth.MiuiHeadsetFragment"
-    private const val CLS_PROXY = "com.android.bluetooth.ble.app.IMiuiHeadsetService\$Stub\$Proxy"
-    private const val CLS_HEADSET_SERVICE = "com.android.bluetooth.ble.app.IMiuiHeadsetService"
-    private const val CLS_BATTERY = "com.android.settings.bluetooth.tws.MiuiHeadsetBattery"
+    /**
+     * 目标类名 —— 全部由 RomProfile 按检测到的 ROM 代数解析（本代主档优先，其余代数兜底）。
+     *
+     * 这些类名在 HyperOS 3 / 4 上**恰好同名**，但 RomProfile 仍然显式给出两代的候选与证据：
+     *   HyperOS 4 侧已在本机 com.android.settings.apk 的 dex 里逐条核对（VERIFIED_H4_DEX）；
+     *   HyperOS 3 侧来自旧 ROM 参考实现（OppoPods / PuddingPods），标 unverified-on-device。
+     * 以后某一代改了名字，只需要改 RomProfile 的表，本文件不动。
+     *
+     * onHook() 里解析成实际类名；解析不到就留空串 —— 各 hook 的 findMethod 会抛异常并被
+     * runCatching 吞掉（只 skip 那一条），不会崩进程、也不影响别的 hook。
+     */
+    private var clsActivity: String = ""
+    private var clsActivityPlugin: String = ""
+    private var clsIdConstants: String = ""
+    private var clsFragment: String = ""
+    private var clsProxy: String = ""
+    private var clsHeadsetService: String = ""
+    private var clsBattery: String = ""
+
+    /** RomProfile 候选里第一个在本进程真实存在的类名；一个都没有时记一条日志并返回空串。 */
+    private fun resolveTargetClass(candidates: List<String>, label: String): String {
+        val found = firstPresentClass(candidates)
+        if (found == null) Log.w(TAG, "$label: none of $candidates present in this process")
+        return found.orEmpty()
+    }
 
     private const val EXTRA_DEVICE = "android.bluetooth.device.extra.DEVICE"
     private const val EXTRA_BT_ADDRESS = "bluetoothaddress"
@@ -148,6 +171,14 @@ object SettingsHeadsetHook : HookContext() {
     }
 
     override fun onHook() {
+        Log.d(TAG, "Settings headset hook initializing (${RomProfile.summary()})")
+        clsActivity = resolveTargetClass(RomProfile.settingsActivityClasses, "MiuiHeadsetActivity")
+        clsActivityPlugin = resolveTargetClass(RomProfile.settingsActivityPluginClasses, "MiuiHeadsetActivityPlugin")
+        clsIdConstants = resolveTargetClass(RomProfile.settingsIdConstantsClasses, "HeadsetIDConstants")
+        clsFragment = resolveTargetClass(RomProfile.settingsFragmentClasses, "MiuiHeadsetFragment")
+        clsProxy = resolveTargetClass(RomProfile.settingsProxyClasses, "IMiuiHeadsetService\$Stub\$Proxy")
+        clsHeadsetService = resolveTargetClass(RomProfile.headsetServiceIfaceClasses, "IMiuiHeadsetService")
+        clsBattery = resolveTargetClass(RomProfile.settingsBatteryViewClasses, "MiuiHeadsetBattery")
         hookActivityEntry()
         hookSupportChecks()
         hookServiceProxy()
@@ -172,18 +203,18 @@ object SettingsHeadsetHook : HookContext() {
 
     private fun hookActivityEntry() {
         runCatching {
-            val onCreate = findMethod(CLS_ACTIVITY, "onCreate", Bundle::class.java)
+            val onCreate = findMethod(clsActivity, "onCreate", Bundle::class.java)
             hookBefore(onCreate) { patchHeadsetIntent(this, "MiuiHeadsetActivity") }
-            hookActivityStringGetter(CLS_ACTIVITY, "getDeviceID") { FAKE_DEVICE_ID }
-            hookActivityStringGetter(CLS_ACTIVITY, "getSupport") { FAKE_SUPPORT }
-            Log.d(TAG, "hooked $CLS_ACTIVITY#onCreate/getDeviceID/getSupport")
-        }.onFailure { Log.w(TAG, "hook $CLS_ACTIVITY skipped", it) }
+            hookActivityStringGetter(clsActivity, "getDeviceID") { FAKE_DEVICE_ID }
+            hookActivityStringGetter(clsActivity, "getSupport") { FAKE_SUPPORT }
+            Log.d(TAG, "hooked $clsActivity#onCreate/getDeviceID/getSupport")
+        }.onFailure { Log.w(TAG, "hook $clsActivity skipped", it) }
 
         runCatching {
-            val onCreate = findMethod(CLS_ACTIVITY_PLUGIN, "onCreate", Bundle::class.java)
+            val onCreate = findMethod(clsActivityPlugin, "onCreate", Bundle::class.java)
             hookBefore(onCreate) { patchHeadsetIntent(this, "MiuiHeadsetActivityPlugin") }
-            Log.d(TAG, "hooked $CLS_ACTIVITY_PLUGIN#onCreate")
-        }.onFailure { Log.w(TAG, "hook $CLS_ACTIVITY_PLUGIN skipped", it) }
+            Log.d(TAG, "hooked $clsActivityPlugin#onCreate")
+        }.onFailure { Log.w(TAG, "hook $clsActivityPlugin skipped", it) }
     }
 
     private fun patchHeadsetIntent(param: HookParam, who: String) {
@@ -220,14 +251,14 @@ object SettingsHeadsetHook : HookContext() {
     // ── 2) HeadsetIDConstants 静态判定 ────────────────────────────────────────
 
     private fun hookSupportChecks() {
-        hookStringStaticResult(CLS_ID_CONSTANTS, "checkSupport") { value ->
+        hookStringStaticResult(clsIdConstants, "checkSupport") { value ->
             value.startsWith(FAKE_DEVICE_ID) || value.contains(FAKE_DEVICE_ID)
         }
-        hookStringStaticResult(CLS_ID_CONSTANTS, "isTWS01Headset") { value -> value == FAKE_DEVICE_ID }
-        hookStringStaticResult(CLS_ID_CONSTANTS, "isK77sHeadset") { false }
-        hookBleMmaConnect(CLS_ID_CONSTANTS, "isBleMmaConnect", Context::class.java)
-        runCatching { findClass(CLS_HEADSET_SERVICE) }.getOrNull()?.let { serviceClass ->
-            hookBleMmaConnect(CLS_ID_CONSTANTS, "isBleMmaConnect", serviceClass)
+        hookStringStaticResult(clsIdConstants, "isTWS01Headset") { value -> value == FAKE_DEVICE_ID }
+        hookStringStaticResult(clsIdConstants, "isK77sHeadset") { false }
+        hookBleMmaConnect(clsIdConstants, "isBleMmaConnect", Context::class.java)
+        runCatching { findClass(clsHeadsetService) }.getOrNull()?.let { serviceClass ->
+            hookBleMmaConnect(clsIdConstants, "isBleMmaConnect", serviceClass)
         }
     }
 
@@ -297,7 +328,7 @@ object SettingsHeadsetHook : HookContext() {
 
     private fun hookProxyStringResult(methodName: String, vararg parameterTypes: Class<*>, provide: () -> String) {
         runCatching {
-            val method = findMethod(CLS_PROXY, methodName, *parameterTypes)
+            val method = findMethod(clsProxy, methodName, *parameterTypes)
             hookBefore(method) {
                 val device = args.firstOrNull { it is BluetoothDevice } as? BluetoothDevice
                 if (!isMoondropDevice(device)) return@hookBefore
@@ -313,7 +344,7 @@ object SettingsHeadsetHook : HookContext() {
         provide: (List<Any?>) -> String
     ) {
         runCatching {
-            val method = findMethod(CLS_PROXY, methodName, *parameterTypes)
+            val method = findMethod(clsProxy, methodName, *parameterTypes)
             hookBefore(method) {
                 val device = args.firstOrNull { it is BluetoothDevice } as? BluetoothDevice
                 val addressArg = args.lastOrNull { it is String } as? String
@@ -329,7 +360,7 @@ object SettingsHeadsetHook : HookContext() {
 
     private fun hookProxyBooleanStringResult(methodName: String, provide: () -> Boolean) {
         runCatching {
-            val method = findMethod(CLS_PROXY, methodName, String::class.java)
+            val method = findMethod(clsProxy, methodName, String::class.java)
             hookBefore(method) {
                 val address = args.getOrNull(0) as? String
                 if (!isOursToken(address)) return@hookBefore
@@ -341,7 +372,7 @@ object SettingsHeadsetHook : HookContext() {
 
     private fun hookProxyVoidDeviceNoop(methodName: String, vararg parameterTypes: Class<*>) {
         runCatching {
-            val method = findMethod(CLS_PROXY, methodName, *parameterTypes)
+            val method = findMethod(clsProxy, methodName, *parameterTypes)
             hookBefore(method) {
                 val device = args.firstOrNull { it is BluetoothDevice } as? BluetoothDevice
                 if (!isMoondropDevice(device)) return@hookBefore
@@ -353,7 +384,7 @@ object SettingsHeadsetHook : HookContext() {
 
     private fun hookProxyVoidDeviceStringNoop(methodName: String, vararg parameterTypes: Class<*>) {
         runCatching {
-            val method = findMethod(CLS_PROXY, methodName, *parameterTypes)
+            val method = findMethod(clsProxy, methodName, *parameterTypes)
             hookBefore(method) {
                 val device = args.firstOrNull { it is BluetoothDevice } as? BluetoothDevice
                 if (!isMoondropDevice(device)) return@hookBefore
@@ -369,7 +400,7 @@ object SettingsHeadsetHook : HookContext() {
         uiIndex: (List<Any?>) -> Int?
     ) {
         runCatching {
-            val method = findMethod(CLS_PROXY, methodName, *parameterTypes)
+            val method = findMethod(clsProxy, methodName, *parameterTypes)
             hookBefore(method) {
                 val device = args.firstOrNull { it is BluetoothDevice } as? BluetoothDevice
                 if (!isMoondropDevice(device)) return@hookBefore
@@ -390,56 +421,63 @@ object SettingsHeadsetHook : HookContext() {
     // 该回调永远不来，电量环就永远停在占位值，所以必须主动喂。
     private fun hookBatteryView() {
         runCatching {
-            val constructor = findConstructorByParamCount(CLS_BATTERY, 4)
+            val constructor = findConstructorByParamCount(clsBattery, 4)
             hookConstructorAfter(constructor) {
                 val device = args.getOrNull(0) as? BluetoothDevice
                 registerStatusReceiver(args.getOrNull(1) as? Context)
-                Log.d(TAG, "$CLS_BATTERY.<init> device=${describe(device)} isMoondrop=${isMoondropDevice(device)}")
+                Log.d(TAG, "$clsBattery.<init> device=${describe(device)} isMoondrop=${isMoondropDevice(device)}")
                 if (!isMoondropDevice(device)) return@hookConstructorAfter
                 val view = instance ?: return@hookConstructorAfter
                 batteryViews[view] = device ?: return@hookConstructorAfter
                 requestAppStatus("battery-init")
                 updateBatteryView(view)
-                Log.d(TAG, "$CLS_BATTERY registered address=${SystemApisUtils.deviceAddress(device)}")
+                Log.d(TAG, "$clsBattery registered address=${SystemApisUtils.deviceAddress(device)}")
             }
-            Log.d(TAG, "hooked $CLS_BATTERY<init>/4")
-        }.onFailure { Log.w(TAG, "hook $CLS_BATTERY constructor skipped", it) }
+            Log.d(TAG, "hooked $clsBattery<init>/4")
+        }.onFailure { Log.w(TAG, "hook $clsBattery constructor skipped", it) }
 
         // 没有 MMA 服务时系统会推一个空/失败回调把电量环刷回占位值：吞掉并重新注入。
         runCatching {
-            val method = findMethod(CLS_BATTERY, "onBatteryChanged", String::class.java)
+            val method = findMethod(clsBattery, "onBatteryChanged", String::class.java)
             hookBefore(method) {
                 val view = instance ?: return@hookBefore
                 val device = batteryViews[view]
-                Log.d(TAG, "$CLS_BATTERY.onBatteryChanged(String) raw=${args.getOrNull(0)} device=${describe(device)}")
+                Log.d(TAG, "$clsBattery.onBatteryChanged(String) raw=${args.getOrNull(0)} device=${describe(device)}")
                 if (!isMoondropDevice(device)) return@hookBefore
                 result = null
                 updateBatteryView(view)
             }
-            Log.d(TAG, "hooked $CLS_BATTERY#onBatteryChanged(String)")
-        }.onFailure { Log.w(TAG, "hook $CLS_BATTERY.onBatteryChanged(String) skipped", it) }
+            Log.d(TAG, "hooked $clsBattery#onBatteryChanged(String)")
+        }.onFailure { Log.w(TAG, "hook $clsBattery.onBatteryChanged(String) skipped", it) }
     }
 
     // ── 4) 片段状态注入 / 页面内操作回传 ─────────────────────────────────────
 
     private fun hookFragmentState() {
+        // 片段上的方法名也随 ROM 变，因此同样走 RomProfile（HyperOS 4 六个名字都已核对）。
+        val methods = RomProfile.settingsFragmentMethods
+        Log.d(TAG, "fragment methods: ${methods.updateAtUiInfo.name}/${methods.updateAncUi.name}/" +
+            "${methods.refreshStatus.name}/${methods.handleConnectMmaFailed.name}/" +
+            "${methods.updateAncMode.name}/${methods.updateAncLevel.name}")
         runCatching {
-            val onCreateView = findMethodByParamCount(CLS_FRAGMENT, "onCreateView", 3)
+            val onCreateView = findMethodByParamCount(clsFragment, "onCreateView", 3)
             hookAfter(onCreateView) { onFragmentAlive(this, "onCreateView") }
-            Log.d(TAG, "hooked $CLS_FRAGMENT#onCreateView")
-        }.onFailure { Log.w(TAG, "hook $CLS_FRAGMENT.onCreateView skipped", it) }
+            Log.d(TAG, "hooked $clsFragment#onCreateView")
+        }.onFailure { Log.w(TAG, "hook $clsFragment.onCreateView skipped", it) }
 
         runCatching {
-            val onServiceConnected = findMethodByParamCountOrNull(CLS_FRAGMENT, "onServiceConnected", 0)
+            val onServiceConnected = findMethodByParamCountOrNull(clsFragment, "onServiceConnected", 0)
             if (onServiceConnected != null) {
                 hookAfter(onServiceConnected) { onFragmentAlive(this, "onServiceConnected") }
-                Log.d(TAG, "hooked $CLS_FRAGMENT#onServiceConnected")
+                Log.d(TAG, "hooked $clsFragment#onServiceConnected")
             }
-        }.onFailure { Log.w(TAG, "hook $CLS_FRAGMENT.onServiceConnected skipped", it) }
+        }.onFailure { Log.w(TAG, "hook $clsFragment.onServiceConnected skipped", it) }
 
         // 没有 MMA 服务时系统会刷新成「连接失败」，直接吞掉并重新注入我们的状态
         runCatching {
-            val refresh = findMethodOrNull(CLS_FRAGMENT, "refreshStatus", String::class.java, String::class.java)
+            val refresh = findMethodOrNull(
+                clsFragment, methods.refreshStatus.name, String::class.java, String::class.java
+            )
             if (refresh != null) {
                 hookBefore(refresh) {
                     val key = args.getOrNull(0) as? String
@@ -450,10 +488,10 @@ object SettingsHeadsetHook : HookContext() {
                     }
                 }
             }
-        }.onFailure { Log.w(TAG, "hook $CLS_FRAGMENT.refreshStatus skipped", it) }
+        }.onFailure { Log.w(TAG, "hook $clsFragment.refreshStatus skipped", it) }
 
         runCatching {
-            val failed = findMethodOrNull(CLS_FRAGMENT, "handleConnectMmaFailed", String::class.java)
+            val failed = findMethodOrNull(clsFragment, methods.handleConnectMmaFailed.name, String::class.java)
             if (failed != null) {
                 hookBefore(failed) {
                     if (isMoondropFragment(instance)) {
@@ -463,12 +501,16 @@ object SettingsHeadsetHook : HookContext() {
                     }
                 }
             }
-        }.onFailure { Log.w(TAG, "hook $CLS_FRAGMENT.handleConnectMmaFailed skipped", it) }
+        }.onFailure { Log.w(TAG, "hook $clsFragment.handleConnectMmaFailed skipped", it) }
 
-        hookFragmentAncCommand("updateAncMode", Int::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!) { args ->
+        hookFragmentAncCommand(
+            methods.updateAncMode.name, Int::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!
+        ) { args ->
             miuiAncToUiIndex(args.getOrNull(0) as? Int ?: 0)
         }
-        hookFragmentAncCommand("updateAncLevel", String::class.java, Boolean::class.javaPrimitiveType!!) { args ->
+        hookFragmentAncCommand(
+            methods.updateAncLevel.name, String::class.java, Boolean::class.javaPrimitiveType!!
+        ) { args ->
             miuiAncFromLevel(args.getOrNull(0) as? String ?: "")
         }
     }
@@ -525,7 +567,7 @@ object SettingsHeadsetHook : HookContext() {
 
     private fun hookFragmentAncCommand(methodName: String, vararg parameterTypes: Class<*>, uiIndex: (List<Any?>) -> Int) {
         runCatching {
-            val method = findMethod(CLS_FRAGMENT, methodName, *parameterTypes)
+            val method = findMethod(clsFragment, methodName, *parameterTypes)
             hookBefore(method) {
                 if (!isMoondropFragment(instance)) return@hookBefore
                 // 第二个参数 updateDevice=false 表示只是刷新 UI，不是用户操作，放行。
@@ -535,27 +577,30 @@ object SettingsHeadsetHook : HookContext() {
                 currentAncUi = index
                 sendAncSelect(index)
                 saveState(context)
-                runCatching { callMethod(instance, "updateAncUi", settingsAncLevel(), false) }
+                runCatching {
+                    callMethod(instance, RomProfile.settingsFragmentMethods.updateAncUi.name, settingsAncLevel(), false)
+                }
                 injectFragmentStatus(instance)
                 result = null
                 Log.i(TAG, "fragment $methodName handled from settings ui -> uiIndex=$index")
             }
-        }.onFailure { Log.w(TAG, "hook $CLS_FRAGMENT.$methodName skipped", it) }
+        }.onFailure { Log.w(TAG, "hook $clsFragment.$methodName skipped", it) }
     }
 
     private fun injectFragmentStatus(fragment: Any?) {
         if (fragment == null) return
         val payload = "${settingsAncMode()}|$ANC_PAYLOAD_LEVELS|${settingsBatteryString()}|00"
         Log.d(TAG, "injectFragmentStatus payload=$payload ${fragmentDebug(fragment)}")
-        runCatching { callMethod(fragment, "updateAtUiInfo", payload) }
-            .onFailure { Log.d(TAG, "updateAtUiInfo unavailable on $CLS_FRAGMENT", it) }
-        runCatching { callMethod(fragment, "updateAncUi", settingsAncLevel(), false) }
-            .onFailure { Log.d(TAG, "updateAncUi unavailable on $CLS_FRAGMENT", it) }
+        val methods = RomProfile.settingsFragmentMethods
+        runCatching { callMethod(fragment, methods.updateAtUiInfo.name, payload) }
+            .onFailure { Log.d(TAG, "${methods.updateAtUiInfo.name} unavailable on $clsFragment", it) }
+        runCatching { callMethod(fragment, methods.updateAncUi.name, settingsAncLevel(), false) }
+            .onFailure { Log.d(TAG, "${methods.updateAncUi.name} unavailable on $clsFragment", it) }
         // 优先用 fragment 自己的 mDevice 地址；fragmentAddress 内部已回落到 currentAddress。
         val address = fragmentAddress(fragment)
         if (address != null) {
-            runCatching { callMethod(fragment, "refreshStatus", address, settingsRefreshPayload()) }
-                .onFailure { Log.d(TAG, "refreshStatus unavailable on $CLS_FRAGMENT", it) }
+            runCatching { callMethod(fragment, methods.refreshStatus.name, address, settingsRefreshPayload()) }
+                .onFailure { Log.d(TAG, "${methods.refreshStatus.name} unavailable on $clsFragment", it) }
         }
         // 同步我们自己的三档控件选中态（框架控件那边由 updateAncUi 负责）。
         runCatching { NativeThreeModeAncUi.refresh(currentAncUi) }
@@ -582,8 +627,8 @@ object SettingsHeadsetHook : HookContext() {
     private fun updateBatteryView(view: Any?) {
         val values = batteryRaw
         runCatching { callMethod(view, "onBatteryChanged", values[0], values[1], values[2]) }
-            .onSuccess { Log.d(TAG, "$CLS_BATTERY.onBatteryChanged(int,int,int) forced=${values.joinToString(",")}") }
-            .onFailure { Log.d(TAG, "$CLS_BATTERY.onBatteryChanged(int,int,int) unavailable", it) }
+            .onSuccess { Log.d(TAG, "$clsBattery.onBatteryChanged(int,int,int) forced=${values.joinToString(",")}") }
+            .onFailure { Log.d(TAG, "$clsBattery.onBatteryChanged(int,int,int) unavailable", it) }
     }
 
     // ── 5) 与应用进程的广播桥 ────────────────────────────────────────────────
@@ -902,5 +947,8 @@ object SettingsHeadsetHook : HookContext() {
  *  4. MiuiHeadsetBattery（tws 电量控件）已按 OppoPods hookBatteryView 实现：
  *     构造函数（4 参）后登记控件 + onBatteryChanged(String) 拦截 + onBatteryChanged(int,int,int) 主动注入。
  *     若实机日志里 `hooked ...MiuiHeadsetBattery<init>/4` 缺失，说明该类名/构造参数个数与 ROM 不符，
- *     需要照实机改名（同组件的另一个候选是 com.android.settings.bluetooth.MiuiHeadsetBattery）。
+ *     需要照实机改名（候选表在 RomProfile 的 SETTINGS_BATTERY_VIEW 组：HyperOS 4 已核对
+ *     `com.android.settings.bluetooth.tws.MiuiHeadsetBattery`；非 tws 的
+ *     `com.android.settings.bluetooth.MiuiHeadsetBattery` 在 HyperOS 4 的 APK 里**不存在**，
+ *     只作为 HyperOS 3 的 heuristic 候选）。
  */

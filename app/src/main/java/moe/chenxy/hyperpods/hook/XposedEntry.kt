@@ -52,6 +52,11 @@ class XposedEntry : XposedModule() {
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         Log.i(TAG, "onModuleLoaded process=${param.processName} api=${runCatching { getApiVersion() }.getOrDefault(-1)}")
+        // ROM 代数识别：每个被注入进程打一次（本进程后续所有 hook 都按这个结论选候选表）。
+        // 期望日志（HyperOS 4 平板）：HyperPods-Rom: kind=HYPEROS_4 sdk=37 mi.os.version.code=4 name=OS4.0 …
+        // 期望日志（HyperOS 3 手机）：HyperPods-Rom: kind=HYPEROS_3 sdk=36 mi.os.version.code=3 name=OS3.0 …
+        runCatching { RomProfile.logOnce(param.processName) }
+            .onFailure { Log.w(TAG, "RomProfile.logOnce failed", it) }
     }
 
     override fun onPackageReady(param: PackageReadyParam) {

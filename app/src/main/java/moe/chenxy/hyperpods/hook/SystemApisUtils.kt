@@ -48,7 +48,12 @@ object SystemApisUtils {
     const val KEY_RIGHT_CHARGING = "right_charging"
     const val KEY_CASE_CHARGING = "case_charging"
 
-    /** HyperOS 判定：ro.mi.os.version.code 非空（优先 SystemProperties 反射，失败回退 getprop）。 */
+    /**
+     * HyperOS 判定：ro.mi.os.version.code 非空（优先 SystemProperties 反射，失败回退 getprop）。
+     *
+     * 注意：这只是「是不是 HyperOS」的粗粒度布尔值。要知道**具体哪一代**（HyperOS 3 / 4 / 更旧）
+     * 以及每一代该挂哪些类，见 hook/RomProfile.kt —— 那才是本模块唯一的权威判定入口。
+     */
     fun isHyperOS(): Boolean = systemProperty("ro.mi.os.version.code").isNotEmpty()
 
     fun systemProperty(name: String): String {
