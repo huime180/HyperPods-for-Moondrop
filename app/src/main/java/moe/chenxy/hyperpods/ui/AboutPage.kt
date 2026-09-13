@@ -51,6 +51,9 @@ private val SECTION_GAP = 12.dp
  *
  * @param themeMode 0 跟随系统 / 1 浅色 / 2 深色（由 MainActivity 持久化）
  * @param settings  模块首选项读写封装（见 ui/ModuleSettings.kt），键来自 HyperPodsPrefsKey
+ * @param hasGestures 耳机上报了 feature 22（TOUCHV2）时为真 —— 手势入口行只有此时才出现
+ *                    （与设备页的「手势操作」行同一套能力门控）
+ * @param onOpenGestures 「手势操作」行 → 导航到手势页（由 MainUI 的返回栈负责）
  */
 @Composable
 fun SettingsPage(
@@ -60,6 +63,8 @@ fun SettingsPage(
     onThemeModeChange: (Int) -> Unit = {},
     settings: ModuleSettingsState = rememberModuleSettings(),
     onOpenAbout: () -> Unit = {},
+    hasGestures: Boolean = false,
+    onOpenGestures: () -> Unit = {},
 ) {
     val themeOptions = listOf(
         stringResource(R.string.theme_follow_system),
@@ -131,6 +136,21 @@ fun SettingsPage(
                     onCheckedChange = { settings.setShowFocusIsland(it) },
                     enabled = settings.enabled,
                 )
+            }
+        }
+
+        // 手势入口（第二个入口；设备页那行在 PodDetailPage）——只有能力位为真时出现
+        if (hasGestures) {
+            item { SmallTitle(text = stringResource(R.string.settings_section_gesture)) }
+
+            item {
+                Card {
+                    ArrowPreference(
+                        title = stringResource(R.string.gesture_title),
+                        summary = stringResource(R.string.gesture_summary),
+                        onClick = onOpenGestures,
+                    )
+                }
             }
         }
 

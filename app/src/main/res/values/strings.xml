@@ -83,6 +83,7 @@
     <string name="show_strong_toast_summary">Show the HyperOS strong toast for battery and mode changes</string>
     <string name="show_focus_island_title">Focus notifications</string>
     <string name="show_focus_island_summary">Keep the earbuds state on the HyperOS focus island</string>
+    <string name="settings_section_gesture">Touch gestures</string>
     <string name="settings_section_model">Device model</string>
     <string name="model_auto_title">Auto-detect model</string>
     <string name="model_auto_summary">Match the model by the Bluetooth device name</string>
@@ -112,4 +113,24 @@
     <string name="restart_scope_confirm">Restart</string>
     <string name="restart_scope_done">Notified %1$d scope processes to exit. If one does not respond, grant root or restart the phone manually.</string>
     <string name="restart_scope_denied">Could not notify any scope process. Check the module scope in LSPosed, or restart the phone manually.</string>
+
+    <!-- gesture control (TOUCHV2, feature 22) -->
+    <string name="gesture_title">Touch gestures</string>
+    <string name="gesture_summary">Set the action for single, double and triple tap and both long presses</string>
+    <string name="gesture_slot_single_tap">Single tap</string>
+    <string name="gesture_slot_double_tap">Double tap</string>
+    <string name="gesture_slot_triple_tap">Triple tap</string>
+    <string name="gesture_slot_long_press_1s">Long press 1s</string>
+    <string name="gesture_slot_long_press_3s">Long press 3s</string>
+    <string name="gesture_action_none">None / undefined</string>
+    <string name="gesture_action_play_pause">Play / Pause</string>
+    <string name="gesture_action_previous_track">Previous track</string>
+    <string name="gesture_action_voice_assistant">Voice assistant</string>
+    <string name="gesture_action_anc_switch">Noise control switch</string>
+    <string name="gesture_unavailable_title">Gesture configuration unavailable</string>
+    <string name="gesture_unavailable_summary">These earbuds did not report feature 22 (TOUCHV2), so the gesture configuration cannot be read or written here. Reconnect and refresh if the earbuds support it.</string>
+    <string name="gesture_reading_title">Gesture configuration not read yet</string>
+    <string name="gesture_reading_summary">These earbuds report feature 22 (TOUCHV2), but the configuration has not come back yet. Reconnect, or tap Refresh and try again.</string>
+    <string name="gesture_note_title">Notes</string>
+    <string name="gesture_note_body">Read and written over feature 22 (TOUCHV2) as five slots: single, double and triple tap, long press 1s and long press 3s. Two honest limits: only the vendor app left-ear page has been measured, so there is no left or right selector; and the action list is partial — only ids confirmed byte for byte against the earbuds are listed, and an unmapped value shows as 未知(0x..) instead of a blank. Long press 1s and 3s stay two independent slots: the vendor app appears to treat them as mutually exclusive, which is not confirmed, so this module does not forbid the combination.</string>
 </resources>

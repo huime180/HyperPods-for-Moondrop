@@ -104,6 +104,13 @@ object MoondropLink {
     @Volatile private var activeCodec = ""
     @Volatile private var dualConnectionOn: Boolean? = null
     @Volatile private var lowLatencyOn: Boolean? = null
+    /**
+     * 手势配置（TOUCHV2）的 5 个槽位（顺序见 [Gaia.GestureSlot]）；null = 还没读到过。
+     *
+     * 内部存 IntArray（与线格式字节一一对应），对外只经 [snapshot] 暴露不可变的
+     * [Gaia.GestureConf]。是否支持由能力位图判定（见 [probeCapabilities] 的 hasGestures）。
+     */
+    @Volatile private var gestureConf: IntArray? = null
     @Volatile private var capabilities = PodCapabilities()
 
     // 每个 feature 只保留一个等待者，避免并发请求互相覆盖（GAIA 无序列号）
@@ -166,6 +173,8 @@ object MoondropLink {
         activeCodec = activeCodec,
         dualConnectionOn = dualConnectionOn,
         lowLatencyOn = lowLatencyOn,
+        // 手势：拷贝一份，避免把内部可变数组暴露给监听者
+        gestureConf = gestureConf?.let { Gaia.GestureConf(it.copyOf()) },
         capabilities = capabilities,
     )
 
@@ -520,6 +529,8 @@ object MoondropLink {
             hasPromptVolume = model.features.promptVolume || Gaia.F_VOICE in feats,
             hasLhdc = model.features.lhdc || Gaia.F_CODEC_TYPE in feats,
             hasDualConnection = model.features.dualConnection || Gaia.F_ONEBRINGTWO in feats,
+            // 手势：**只看能力位图**（Pudding 真机位图里确有 feature 22）；型号档案不参与判定
+            hasGestures = Gaia.F_TOUCHV2 in feats,
             hasLowLatency = model.features.lowLatency,
             probed = true,
         )
@@ -544,6 +555,8 @@ object MoondropLink {
             if (capabilities.hasPromptTone || capabilities.hasPromptVolume) refreshPromptVoice()
             if (capabilities.hasLhdc) refreshLhdc()
             if (capabilities.hasDualConnection) refreshDualConnection()
+            // 手势：一次读回 5 个槽位的整份配置（能力位图门控，与其它功能同一套写法）
+            if (capabilities.hasGestures) refreshGestures()
             emitState()
         }
     }
@@ -665,6 +678,29 @@ object MoondropLink {
         emit(PodEvent.DualConnectionChanged(dualConnectionOn!!))
     }
 
+    /**
+     * 读手势配置（TOUCHV2 cmd 2）。
+     *
+     * 固件只提供「整份 5 字节配置」的读写，没有单槽位读：所以一次全读，
+     * UI 的 5 行都取自这一份快照（[PodSnapshot.gestureConf]）。
+     */
+    suspend fun refreshGestures() {
+        if (!capabilities.hasGestures) return
+        val slots = fetchGestureConf() ?: return
+        applyGestureConf(slots)
+    }
+
+    /** 读回 5 个槽位（不落状态）；超时/回包过短返回 null。 */
+    private suspend fun fetchGestureConf(): IntArray? {
+        val p = request(Gaia.touchV2GetConf(), ANC_TIMEOUT_MS) ?: return null
+        return Gaia.parseGestureConf(p)?.slots
+    }
+
+    private fun applyGestureConf(slots: IntArray) {
+        gestureConf = slots
+        emit(PodEvent.GestureChanged(Gaia.GestureConf(slots.copyOf())))
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     // 各功能：写（乐观更新 + 读回确认）
     // ══════════════════════════════════════════════════════════════════════
@@ -745,6 +781,39 @@ object MoondropLink {
         scope.launch { write(Gaia.dualConnectionSet(on)); delay(500); refreshDualConnection(); emitState() }
     }
 
+    /**
+     * 写一个手势槽位。
+     *
+     * ⚠ **必须下发完整 5 字节**（见 [Gaia.touchV2SetConf]）：固件把 5 个槽位当作一份
+     * 配置，只发一个槽位会把其余槽位写坏 —— 与 [setPromptVoice] 是同一个坑。
+     * 因此这里：若还没读到过配置，先读一次再写；**读不到就放弃本次写入**，
+     * 绝不用 0 补齐（那等于把用户其余槽位悄悄清成「无」）。
+     *
+     * 写完按既有模式 delay 后回读，保证 UI 显示的是固件真实接受了的值。
+     *
+     * @param slot     目标槽位（单击 / 双击 / 三击 / 长按1秒 / 长按3秒）
+     * @param actionId [Gaia.TouchActions] 里的动作 id（未知 id 也原样下发）
+     */
+    fun setGesture(slot: Gaia.GestureSlot, actionId: Int) {
+        scope.launch {
+            val current = gestureConf ?: fetchGestureConf()
+            if (current == null) {
+                Log.w(TAG, "setGesture($slot) skipped: gesture config unknown")
+                return@launch
+            }
+            val next = Gaia.GestureConf(current.copyOf()).with(slot, actionId)
+            Log.i(
+                TAG,
+                "setGesture ${slot.index}/${slot.labelZh} -> " +
+                    "${Gaia.TouchActions.matchOrUnknown(actionId)} ($next)",
+            )
+            write(Gaia.touchV2SetConf(next.toPayload()))
+            delay(300)
+            refreshGestures()
+            emitState()
+        }
+    }
+
     /** 由系统侧（A2DP 编解码协商）回调进来，用于 UI 显示当前实际编码。 */
     fun onSystemCodecChanged(codecName: String) {
         activeCodec = codecName
@@ -798,6 +867,12 @@ object MoondropLink {
                 f.command == Gaia.C_VOICE_SET_CONF
             ) {
                 Gaia.parseVoiceConf(f.payload)?.let { applyVoiceConf(it) }
+            }
+            Gaia.F_TOUCHV2 -> if (f.command == Gaia.C_TOUCHV2_GET_ACTION_CONF ||
+                f.command == Gaia.C_TOUCHV2_SET_ACTION_CONF
+            ) {
+                // 读回与写入回显都是同一份 5 字节配置
+                Gaia.parseGestureConf(f.payload)?.let { applyGestureConf(it.slots) }
             }
             Gaia.F_BASIC -> if (f.command == Gaia.C_BASIC_GET_SUPPORTED_FEATURES) {
                 // request() 已经消费；这里只做通知型位图的增量合并

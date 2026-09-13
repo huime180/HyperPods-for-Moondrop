@@ -28,6 +28,13 @@ data class PodCapabilities(
     /** 双设备连接：位图含 F_ONEBRINGTWO */
     val hasDualConnection: Boolean = false,
     /**
+     * 手势操作（feature 22 TOUCHV2）：位图含 F_TOUCHV2。
+     *
+     * ⚠ 只由**能力位图**决定（本机型不使用 feature 11 GESTURE_CONFIGURATION，
+     * 也不做型号档案标记）。
+     */
+    val hasGestures: Boolean = false,
+    /**
      * 低延迟模式。
      *
      * 这是 **HyperOS 系统侧功能**（系统蓝牙设备详情页的「低延迟」开关），
@@ -47,7 +54,8 @@ data class PodCapabilities(
             hasLed == other.hasLed && hasSpatial == other.hasSpatial &&
             hasHeadTracking == other.hasHeadTracking && hasPromptTone == other.hasPromptTone &&
             hasPromptVolume == other.hasPromptVolume && hasLhdc == other.hasLhdc &&
-            hasDualConnection == other.hasDualConnection && hasLowLatency == other.hasLowLatency &&
+            hasDualConnection == other.hasDualConnection && hasGestures == other.hasGestures &&
+            hasLowLatency == other.hasLowLatency &&
             probed == other.probed
     }
 
@@ -106,8 +114,18 @@ data class PodSnapshot(
     val dualConnectionOn: Boolean? = null,
     /** 低延迟模式（HyperOS 系统侧）；null = 未知 */
     val lowLatencyOn: Boolean? = null,
+    /**
+     * 手势配置（TOUCHV2，5 个槽位，顺序见 [Gaia.GestureSlot]）；null = 尚未读到。
+     *
+     * 用不可变的 [Gaia.GestureConf]（内部按内容 equals）而不是裸 IntArray：
+     * 裸数组的 equals 是按引用的，会让状态比较永远「不相等」。
+     */
+    val gestureConf: Gaia.GestureConf? = null,
     val capabilities: PodCapabilities = PodCapabilities(),
 ) {
+    /** 手势配置是否已读到（UI 用它区分「读不到」与「配置为全无」）。 */
+    val gesturesKnown: Boolean get() = gestureConf != null
+
     companion object {
         val DISCONNECTED = PodSnapshot()
     }
@@ -125,6 +143,8 @@ sealed interface PodEvent {
     data class PromptVolumeChanged(val raw: Int) : PodEvent
     data class LhdcChanged(val on: Boolean) : PodEvent
     data class DualConnectionChanged(val on: Boolean) : PodEvent
+    /** 手势配置变化（读回到新的 5 槽位配置）。 */
+    data class GestureChanged(val conf: Gaia.GestureConf) : PodEvent
     data class LowLatencyChanged(val on: Boolean) : PodEvent
     data class CapabilitiesChanged(val capabilities: PodCapabilities) : PodEvent
     data class Frame(val direction: String, val hex: String, val decoded: String) : PodEvent

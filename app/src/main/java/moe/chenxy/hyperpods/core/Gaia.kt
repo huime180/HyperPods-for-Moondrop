@@ -184,6 +184,46 @@ object Gaia {
     const val C_CODEC_SET_LHDC_STATE = 6
 
     // ============================================================
+    // TOUCHV2(22)：触控手势（feature 11 GESTURE_CONFIGURATION 本耳机不使用）
+    //
+    // ✅ 真机实测（MOONDROP Pudding）：读写都是**一份 5 字节配置**，
+    //    字节顺序 = 槽位顺序：b0=单击 b1=双击 b2=三击 b3=长按1秒 b4=长按3秒。
+    //
+    //      READ   TX 00 1D 2C 02
+    //             RX 00 1D 2D 02 <b0> <b1> <b2> <b3> <b4>
+    //      WRITE  TX 00 1D 2C 03 <b0> <b1> <b2> <b3> <b4>
+    //             RX echo 00 1D 2D 03 <同样 5 字节>
+    //
+    //    ⚠ **写入必须带全部 5 字节**：固件把 5 个槽位当作一份完整配置，
+    //      只发一个槽位会把其余槽位写坏（与提示音 VoiceConf 同一个坑）。
+    //
+    //    ⚠ 观测到的帧来自官方 App 的**左耳**页面。是否存在右耳对应帧
+    //      （多一个参数/索引、独立命令，或按触控板区分）**尚未确认**；
+    //      在没有证据之前 UI 不提供左右耳选择器（见 ui/GesturePage.kt）。
+    // ============================================================
+    /** 读手势配置（cmd 2），回包 payload = 5 个槽位 */
+    const val C_TOUCHV2_GET_ACTION_CONF = 2
+    /** 写手势配置（cmd 3），payload = 5 个槽位（必须全量） */
+    const val C_TOUCHV2_SET_ACTION_CONF = 3
+
+    /** 手势配置 payload 长度：单击/双击/三击/长按1秒/长按3秒 = 5 */
+    const val TOUCHV2_CONF_SIZE = 5
+
+    /** 槽位数量（= [GestureSlot] 的条目数，就是 payload 的字节数） */
+    const val GESTURE_SLOT_COUNT = TOUCHV2_CONF_SIZE
+
+    /**
+     * 动作 id `0x00` = 无 / 未定义。
+     *
+     * 真机读写 1:1 对齐确认的动作 id **只有这 5 条**（见 [TouchActions.ALL]）：
+     * `0x00` 无 / 未定义、`0x11` 播放 / 暂停、`0x23` 上一曲、
+     * `0x66` 语音助手、`0x77` 降噪切换。
+     * 完整动作表仍在从官方 App 的 dex（Qualcomm `TouchNewInfo` / TouchV2 枚举）提取，
+     * 因此这里**只播种已确认的 id，不臆造任何新 id**。
+     */
+    const val TOUCH_ACTION_NONE = 0x00
+
+    // ============================================================
     // VOICE(14)：提示音（voice prompt）
     //
     // ✅ 命令号与 payload 已由**官方 App 自身 gaiaclient 的日志**确认
@@ -580,6 +620,150 @@ object Gaia {
         val addr = (1..6).joinToString(":") { "%02X".format(p[it].toInt() and 0xFF) }
         val name = String(p, 7, p.size - 7, Charsets.UTF_8)
         return Triple(num, addr, name)
+    }
+
+    // ============================================================
+    // 命令构造：手势（TOUCHV2）
+    // ============================================================
+
+    /** 读手势配置（feature 22 / cmd 2）→ 回包 payload = `[单击,双击,三击,长按1秒,长按3秒]` */
+    fun touchV2GetConf(): ByteArray = command(F_TOUCHV2, C_TOUCHV2_GET_ACTION_CONF)
+
+    /**
+     * 写手势配置（feature 22 / cmd 3）。**必须是完整 5 字节**（见 TOUCHV2 段落）。
+     *
+     * 长度不符时直接抛 [IllegalArgumentException]，而不是补齐/截断：静默补 0
+     * 会把用户没动过的槽位写成「无」，属于破坏性写入。调用方在不确定其余槽位时
+     * 应当先 [touchV2GetConf] 读回来（见 MoondropLink.setGesture）。
+     */
+    fun touchV2SetConf(bytes: ByteArray): ByteArray {
+        require(bytes.size == TOUCHV2_CONF_SIZE) {
+            "TOUCHV2 配置必须恰好 $TOUCHV2_CONF_SIZE 字节（收到 ${bytes.size}）：${hex(bytes)}"
+        }
+        return command(F_TOUCHV2, C_TOUCHV2_SET_ACTION_CONF, bytes)
+    }
+
+    /**
+     * 手势槽位。**index 即 payload 里的字节位置**（顺序 = 实测字节顺序）。
+     *
+     * ⚠ 「长按1秒」与「长按3秒」是两个**独立**槽位（实测 payload 就是 5 个独立字节，
+     *   读回时长按3秒是 `0x00` = 无）。用户反馈官方 App UI 里两者看似互斥
+     *   （「冲突的，我手动修改了一次」），但**本模块不硬编码互斥**：
+     *   没有证据证明固件禁止两者同时配置，就不能替用户禁掉一种可能合法的组合。
+     */
+    enum class GestureSlot(val index: Int, val labelZh: String, val labelEn: String) {
+        SINGLE_TAP(0, "单击", "Single tap"),
+        DOUBLE_TAP(1, "双击", "Double tap"),
+        TRIPLE_TAP(2, "三击", "Triple tap"),
+        LONG_PRESS_1S(3, "长按1秒", "Long press 1s"),
+        LONG_PRESS_3S(4, "长按3秒", "Long press 3s"),
+    }
+
+    /** 一个手势动作：id + 双语标签 + 可选 i18n 资源名（UI 侧取 strings.xml 用）。 */
+    data class TouchAction(
+        val id: Int,
+        val labelZh: String,
+        val labelEn: String,
+        /** strings.xml 里的资源名；null = 暂无本地化条目（UI 回落到 [labelZh]）。 */
+        val i18nKey: String? = null,
+    )
+
+    /**
+     * 手势动作表 —— **数据驱动的唯一来源**，新增动作只在这里加一行。
+     *
+     * ⚠ **这是部分表（partial）**：只收录真机对齐过的 id。未映射的 id 由
+     *   [matchOrUnknown] 显示为 `未知(0x..)`，不会被静默吞掉变成空白。
+     *   完整枚举由兄弟任务从官方 App dex 提取（Qualcomm TouchNewInfo / TouchV2）。
+     */
+    object TouchActions {
+
+        /** 无 / 未定义（该槽位不响应任何手势） */
+        const val NONE = TOUCH_ACTION_NONE
+        /** 播放 / 暂停 */
+        const val PLAY_PAUSE = 0x11
+        /** 上一曲 */
+        const val PREVIOUS_TRACK = 0x23
+        /** 语音助手 */
+        const val VOICE_ASSISTANT = 0x66
+        /** 降噪切换 */
+        const val ANC_SWITCH = 0x77
+
+        /** 顺序即 UI 下拉列表顺序；[NONE] 放最前（= 不响应）。 */
+        val ALL: List<TouchAction> = listOf(
+            TouchAction(NONE, "无 / 未定义", "None / undefined", "gesture_action_none"),
+            TouchAction(PLAY_PAUSE, "播放 / 暂停", "Play / Pause", "gesture_action_play_pause"),
+            TouchAction(
+                PREVIOUS_TRACK, "上一曲", "Previous track", "gesture_action_previous_track",
+            ),
+            TouchAction(
+                VOICE_ASSISTANT, "语音助手", "Voice assistant", "gesture_action_voice_assistant",
+            ),
+            TouchAction(ANC_SWITCH, "降噪切换", "Noise control switch", "gesture_action_anc_switch"),
+        )
+
+        /** 按 id 取动作；未映射返回 null。 */
+        fun byId(id: Int): TouchAction? {
+            val v = id and 0xFF
+            return ALL.firstOrNull { it.id == v }
+        }
+
+        /** 已映射动作的中文标签；未映射返回 null。 */
+        fun labelOf(id: Int): String? = byId(id)?.labelZh
+
+        /** 未映射的 id 也照实显示，避免「空白 = 看起来没配置」的误导。 */
+        fun matchOrUnknown(id: Int): String {
+            val a = byId(id)
+            if (a != null) return a.labelZh
+            return "未知(0x%02X)".format(id and 0xFF)
+        }
+    }
+
+    /**
+     * 手势配置：5 个槽位，顺序同 [GestureSlot]。
+     *
+     * IntArray 的 equals/hashCode 是按**引用**的，这里覆写成按**内容**比较：
+     * 否则两份取值相同的配置在 State/事件比较里会被当成「变了」，UI 会反复重组。
+     */
+    data class GestureConf(val slots: IntArray) {
+
+        val size: Int get() = slots.size
+
+        /** 取某个槽位的动作 id。 */
+        operator fun get(slot: GestureSlot): Int = slots[slot.index]
+
+        /** 返回「替换了一个槽位」的新配置（不改自身）。 */
+        fun with(slot: GestureSlot, actionId: Int): GestureConf {
+            val next = slots.copyOf()
+            next[slot.index] = actionId and 0xFF
+            return GestureConf(next)
+        }
+
+        /** 转成下发用的 payload（长度 = [TOUCHV2_CONF_SIZE]）。 */
+        fun toPayload(): ByteArray = ByteArray(slots.size) { slots[it].toByte() }
+
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is GestureConf) return false
+            return slots.contentEquals(other.slots)
+        }
+
+        override fun hashCode(): Int = slots.contentHashCode()
+
+        override fun toString(): String =
+            "GestureConf(${slots.joinToString(" ") { "%02X".format(it and 0xFF) }})"
+    }
+
+    /**
+     * 解析手势配置回包。
+     *
+     * 长度不足 [TOUCHV2_CONF_SIZE] 返回 null；**超过 5 字节时取前 5 字节**：
+     * 多出来的字节目前无法解释（固件版本差异？左右耳索引？——未确认），
+     * 因此不据此推断任何语义，也不用它去改槽位映射。
+     */
+    fun parseGestureConf(payload: ByteArray?): GestureConf? {
+        val p = payload ?: return null
+        if (p.size < TOUCHV2_CONF_SIZE) return null
+        return GestureConf(IntArray(TOUCHV2_CONF_SIZE) { p[it].toInt() and 0xFF })
     }
 
     // ============================================================

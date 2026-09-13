@@ -11,7 +11,9 @@
  *     提示音开关 + 提示音音量合并成一行（components/PromptTone.kt）—— 与 OppoPods 同一套组件词汇。
  *
  * 行顺序（本项目的功能面）：机型 + 传输/编码 → 电量 → 降噪（三选一 + 子排）→ 增益
- *   → 指示灯 / 提示音(含音量) / LHDC / 双设备连接 → 刷新 → 系统蓝牙设置 → 关于。
+ *   → 指示灯 / 提示音(含音量) / LHDC / 双设备连接
+ *   → 手势操作（单独一张卡的跳转行，hasGestures 门控）
+ *   → 刷新 → 系统蓝牙设置 → 关于。
  * 所有功能行仍由 PodCapabilities 硬门控：能力位为 false 时该行不会出现在组合树里。
  * 「低延迟模式」开关已按用户要求移除（系统侧功能仍在系统蓝牙详情页可用），
  * 因此 hasLowLatency 不再门控任何 UI。
@@ -81,6 +83,7 @@ fun PodDetailPage(
     contentPadding: PaddingValues,
     snapshot: PodSnapshot,
     onOpenAbout: () -> Unit,
+    onOpenGestures: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -181,6 +184,18 @@ fun PodDetailPage(
                             },
                         )
                     }
+                }
+            }
+        }
+
+        if (capabilities.hasGestures) {
+            item {
+                Card(modifier = Modifier.padding(top = CARD_GAP)) {
+                    ArrowPreference(
+                        title = stringResource(R.string.gesture_title),
+                        summary = stringResource(R.string.gesture_summary),
+                        onClick = onOpenGestures,
+                    )
                 }
             }
         }

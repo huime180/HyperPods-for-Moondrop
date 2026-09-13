@@ -53,6 +53,8 @@ sealed interface Screen : NavKey {
     data object Home : Screen
     data object Settings : Screen
     data object About : Screen
+    /** 手势操作页（TOUCHV2）：入口 = 设备页的「手势操作」行 + 设置页的同名入口，两者都由 hasGestures 门控 */
+    data object Gesture : Screen
 }
 
 @Composable
@@ -122,6 +124,7 @@ fun MainUI(
                         contentPadding = padding,
                         snapshot = snapshot,
                         onOpenAbout = { backStack.add(Screen.About) },
+                        onOpenGestures = { backStack.add(Screen.Gesture) },
                         modifier = Modifier
                             .overScrollVertical()
                             .nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -146,6 +149,8 @@ fun MainUI(
                     onThemeModeChange = onThemeModeChange,
                     settings = settings,
                     onOpenAbout = { backStack.add(Screen.About) },
+                    hasGestures = snapshot.capabilities.hasGestures,
+                    onOpenGestures = { backStack.add(Screen.Gesture) },
                 )
             }
         }
@@ -156,6 +161,19 @@ fun MainUI(
                 onBack = { if (backStack.size > 1) backStack.removeLast() },
             ) { padding, contentModifier ->
                 AboutContent(
+                    modifier = contentModifier,
+                    contentPadding = padding,
+                )
+            }
+        }
+
+        entry<Screen.Gesture> {
+            SubPageScaffold(
+                title = stringResource(R.string.gesture_title),
+                onBack = { if (backStack.size > 1) backStack.removeLast() },
+            ) { padding, contentModifier ->
+                GesturePage(
+                    snapshot = snapshot,
                     modifier = contentModifier,
                     contentPadding = padding,
                 )

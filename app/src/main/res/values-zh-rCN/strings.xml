@@ -83,6 +83,7 @@
     <string name="show_strong_toast_summary">电量与模式变化时显示 HyperOS 强提示</string>
     <string name="show_focus_island_title">焦点通知</string>
     <string name="show_focus_island_summary">在 HyperOS 焦点通知里常驻耳机状态</string>
+    <string name="settings_section_gesture">手势操作</string>
     <string name="settings_section_model">设备型号</string>
     <string name="model_auto_title">自动识别型号</string>
     <string name="model_auto_summary">按蓝牙设备名匹配型号档案</string>
@@ -112,4 +113,24 @@
     <string name="restart_scope_confirm">重启</string>
     <string name="restart_scope_done">已通知 %1$d 个作用域进程退出（若某个进程未响应，可尝试授予 root 或手动重启）</string>
     <string name="restart_scope_denied">未能通知任何作用域进程，请在 LSPosed 中检查模块作用域，或手动重启手机</string>
+
+    <!-- 手势（TOUCHV2，feature 22） -->
+    <string name="gesture_title">手势操作</string>
+    <string name="gesture_summary">设置单击 / 双击 / 三击与两档长按对应的动作</string>
+    <string name="gesture_slot_single_tap">单击</string>
+    <string name="gesture_slot_double_tap">双击</string>
+    <string name="gesture_slot_triple_tap">三击</string>
+    <string name="gesture_slot_long_press_1s">长按1秒</string>
+    <string name="gesture_slot_long_press_3s">长按3秒</string>
+    <string name="gesture_action_none">无 / 未定义</string>
+    <string name="gesture_action_play_pause">播放 / 暂停</string>
+    <string name="gesture_action_previous_track">上一曲</string>
+    <string name="gesture_action_voice_assistant">语音助手</string>
+    <string name="gesture_action_anc_switch">降噪切换</string>
+    <string name="gesture_unavailable_title">无法读取手势配置</string>
+    <string name="gesture_unavailable_summary">耳机没有上报 feature 22（TOUCHV2），本机型无法读写手势配置。若耳机支持，请重连后刷新。</string>
+    <string name="gesture_reading_title">尚未读到手势配置</string>
+    <string name="gesture_reading_summary">耳机上报了 feature 22（TOUCHV2），但配置还没有读回来。请重连，或点「刷新」后再试。</string>
+    <string name="gesture_note_title">说明</string>
+    <string name="gesture_note_body">手势配置走 feature 22（TOUCHV2），5 个槽位：单击 / 双击 / 三击 / 长按1秒 / 长按3秒。两点如实说明：① 只实测过官方 App 的左耳页面，因此不提供左右耳选择器；② 动作表只收录与耳机逐字节核对过的 id，未映射的值显示为「未知(0x..)」，不会留空白。长按1秒与长按3秒按实测的 5 个独立槽位处理 —— 官方 App 看起来把两者当互斥，但未经证实，本模块因此不禁止该组合。</string>
 </resources>
