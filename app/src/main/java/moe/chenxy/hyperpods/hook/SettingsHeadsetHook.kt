@@ -42,6 +42,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.View
 import java.util.WeakHashMap
 import moe.chenxy.hyperpods.BuildConfig
 import moe.chenxy.hyperpods.core.MoondropModels
@@ -117,6 +118,13 @@ object SettingsHeadsetHook : HookContext() {
                 updateFragments()
                 // 电量环自己要重喂一次：它不跟随 fragment 的状态注入。
                 updateBatteryViews()
+                // 三档降噪控件：先重声明；被厂商删掉的话下一轮重新装回去。
+                if (NativeThreeModeAncUi.isAttached()) {
+                    runCatching { NativeThreeModeAncUi.reassert() }
+                } else {
+                    headsetFragments.keys.firstOrNull { isMoondropFragment(it) }
+                        ?.let { installAncUi(it, "periodic") }
+                }
                 refreshHandler.postDelayed(this, REFRESH_INTERVAL_MS)
             } else {
                 refreshLoopStarted = false
@@ -143,6 +151,7 @@ object SettingsHeadsetHook : HookContext() {
         context = null
         headsetFragments.clear()
         batteryViews.clear()
+        NativeThreeModeAncUi.reset()
     }
 
     // ── 1) 冒充身份：改写 intent + 强制 getter ────────────────────────────────
@@ -456,6 +465,37 @@ object SettingsHeadsetHook : HookContext() {
         requestAppStatus("fragment-$reason")
         startPeriodicRefresh()
         injectFragmentStatus(param.instance)
+        installAncUi(param.instance, reason)
+    }
+
+    /**
+     * 在原生耳机页里装「三档降噪」控件：通透 / 降噪 / 关闭，降噪展开 自适应 / 抗风 / 普通。
+     *
+     * 参考实现（PuddingPods 的 SettingsHeadsetHook$PuddingAncUi / installPuddingThreeModeUi）
+     * 是「隐藏框架自己的 ANC 控件行 + 在同一位置放自己的一套」。具体定位与取舍见
+     * NativeThreeModeAncUi 的文件头（含本 ROM 实测的 headset_anc* 资源名取证）。
+     */
+    private fun installAncUi(fragment: Any?, reason: String) {
+        val installed = runCatching {
+            NativeThreeModeAncUi.install(fragment, currentAncUi) { index -> onAncSelectedFromNativeUi(index) }
+        }.onFailure { Log.w(TAG, "install native three-mode ANC ui failed ($reason)", it) }
+            .getOrDefault(false)
+        Log.d(
+            TAG,
+            "native ANC ui installed=$installed reason=$reason " +
+                "matched=${NativeThreeModeAncUi.matchedNames()} structuralGuess=${NativeThreeModeAncUi.usedStructuralGuess()}"
+        )
+        val root = runCatching { callMethod(fragment, "getView") as? View }.getOrNull()
+        root?.post { runCatching { NativeThreeModeAncUi.reassert() } }
+    }
+
+    /** 用户在原生页的三档控件里选了档位：与系统控件走完全相同的通道（广播给应用进程）。 */
+    private fun onAncSelectedFromNativeUi(uiIndex: Int) {
+        currentAncUi = uiIndex
+        saveState(context)
+        sendAncSelect(uiIndex)
+        updateFragments()
+        Log.i(TAG, "native three-mode ANC ui selected uiIndex=$uiIndex")
     }
 
     private fun hookFragmentAncCommand(methodName: String, vararg parameterTypes: Class<*>, uiIndex: (List<Any?>) -> Int) {
@@ -492,6 +532,8 @@ object SettingsHeadsetHook : HookContext() {
             runCatching { callMethod(fragment, "refreshStatus", address, settingsRefreshPayload()) }
                 .onFailure { Log.d(TAG, "refreshStatus unavailable on $CLS_FRAGMENT", it) }
         }
+        // 同步我们自己的三档控件选中态（框架控件那边由 updateAncUi 负责）。
+        runCatching { NativeThreeModeAncUi.refresh(currentAncUi) }
     }
 
     private fun updateFragments() {

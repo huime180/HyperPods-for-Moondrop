@@ -13,6 +13,9 @@
  *   4) 附带的 MAC 握手应答：SystemUI 的 DeviceCardHook 广播 GET_PODS_MAC 到本进程，
  *      本进程回 PODS_MAC_RECEIVED + EXTRA_MAC 到 com.android.systemui（两者 action 字符串相同，
  *      靠 setPackage 的方向区分，见 utils/data/HyperPodsAction.kt 的注释）。
+ *   5) 编码上报：读**系统实际协商出来的** A2DP 编码（A2dpService/BluetoothA2dp 反射，兜底 hook
+ *      A2dpService#onCodecConfigChangedFromNative 与 A2dpStateMachine#processCodecConfigEvent），
+ *      以 CODEC_CHANGED + EXTRA_CODEC 广播给应用进程 → 详情页「当前编码」。
  *
  * 迟装兜底（bootstrap）：模块可能在耳机已连接之后才被安装/启用，此时
  * handleConnectionStateChanged 不会再触发，因此 hook 服务 onCreate 后延迟 ~1.5s
@@ -45,6 +48,37 @@ object HeadsetStateDispatcher : HookContext() {
     private const val PKG_SYSTEMUI = "com.android.systemui"
     private const val STATUS_BAR_ICON = "wireless_headset"
     private const val BOOTSTRAP_DELAY_MS = 1_500L
+    private const val CLS_A2DP_STATE_MACHINE = "com.android.bluetooth.a2dp.A2dpStateMachine"
+
+    // ── A2DP 编解码（系统真实编码，详情页「当前编码」） ─────────────────────
+    // 以下名称全部先在真机 ROM 的 dex 里核对过（_refs/_device/apks/com.android.bluetooth.apk，
+    // Android 17 / HyperOS 4.0，用 tools/dex_strings.py + 自写的 method_ids/field_ids 扫描）：
+    //   A2dpService.getCodecStatus(BluetoothDevice) → BluetoothCodecStatus
+    //   A2dpService.onCodecConfigChangedFromNative(BluetoothDevice, BluetoothCodecConfig) → void
+    //   A2dpService.codecConfigUpdated(BluetoothDevice, BluetoothCodecConfig, boolean) → void
+    //   A2dpService.mActiveDevice : BluetoothDevice
+    //   A2dpStateMachine.processCodecConfigEvent(BluetoothCodecConfig) → void
+    //   A2dpStateMachine.mCodecStatus : BluetoothCodecStatus / mDevice : BluetoothDevice /
+    //                                 mA2dpService : A2dpService
+    //   BluetoothCodecStatus.getCodecConfig() → BluetoothCodecConfig
+    //   BluetoothCodecConfig.getCodecName() → String（getCodecType() → int）
+    /** A2dpService 上 native 侧编码协商结果回调（带设备 + 新配置）。 */
+    private const val METHOD_CODEC_CHANGED_NATIVE = "onCodecConfigChangedFromNative"
+    /** A2dpService 上状态机回写编码配置的方法（同 dex 核对，形态 (设备, 新配置, boolean)）。 */
+    private const val METHOD_CODEC_CONFIG_UPDATED = "codecConfigUpdated"
+    /** A2dpStateMachine 的编码变更事件处理。 */
+    private const val METHOD_PROCESS_CODEC_CONFIG_EVENT = "processCodecConfigEvent"
+    private const val FIELD_CODEC_STATUS = "mCodecStatus"
+    private const val FIELD_STATE_MACHINE_DEVICE = "mDevice"
+    private const val FIELD_STATE_MACHINE_SERVICE = "mA2dpService"
+    private const val FIELD_ACTIVE_DEVICE = "mActiveDevice"
+    /** 连接后编解码协商要等一会儿才出结果：延迟第一次查询，再补一次（不轮询）。 */
+    private const val CODEC_QUERY_DELAY_MS = 1_200L
+    private const val CODEC_QUERY_RETRY_MS = 2_500L
+    private const val CODEC_QUERY_ATTEMPTS = 2
+
+    /** BluetoothCodecConfig 上的编码名字段（AOSP 的私有字段名；取不到名字时才会用到）。 */
+    private val CODEC_NAME_FIELDS = arrayOf("mCodecName", "codecName")
 
     // ── 低延迟（HyperOS 系统侧）候选 codec ─────────────────────────────────────
     // 数值取自 BluetoothCodecConfig 的公开/系统常量本身；这里写字面量是为了不在编译期
@@ -93,12 +127,27 @@ object HeadsetStateDispatcher : HookContext() {
     @Volatile
     private var lowLatencyPreviousConfig: Any? = null
 
+    /** 最近一次上报给应用进程的编码名 + 设备（去重：hook 反复触发时不刷广播）。 */
+    @Volatile
+    private var lastReportedCodec: String = ""
+
+    @Volatile
+    private var lastReportedCodecMac: String = ""
+
+    /** 读编码用的 A2DP 代理回调：与低延迟开关分开存，互不覆盖。 */
+    @Volatile
+    private var codecProxyListener: Any? = null
+
+    private var codecHandler: Handler? = null
+    private var codecRunnable: Runnable? = null
+
     private var bootstrapHandler: Handler? = null
     private var bootstrapRunnable: Runnable? = null
 
     override fun onHook() {
         hookConnectionStateChanged()
         hookServiceCreateForBootstrap()
+        hookCodecConfigChanged()
     }
 
     override fun onHotReloading() {
@@ -112,6 +161,12 @@ object HeadsetStateDispatcher : HookContext() {
         receiverRegistered = false
         a2dpProxyListener = null
         lowLatencyPreviousConfig = null
+        codecRunnable?.let { runnable -> codecHandler?.removeCallbacks(runnable) }
+        codecRunnable = null
+        codecHandler = null
+        codecProxyListener = null
+        lastReportedCodec = ""
+        lastReportedCodecMac = ""
         a2dpService = null
         appContext = null
         activeMac = ""
@@ -168,6 +223,8 @@ object HeadsetStateDispatcher : HookContext() {
             activeName = name
             SystemApisUtils.setIconVisibility(SystemApisUtils.statusBarManager(context), STATUS_BAR_ICON, true)
             dispatchConnected(device, name)
+            // 编码协商在连接完成后才出结果：延迟查询 + 补一次（UI 不必等下一次编码切换）
+            scheduleCodecReport(device)
         } else if (disconnected) {
             if (address.isNotEmpty() && address == activeMac) {
                 activeMac = ""
@@ -192,6 +249,9 @@ object HeadsetStateDispatcher : HookContext() {
     }
 
     private fun dispatchDisconnected(device: BluetoothDevice, name: String) {
+        // 断开即清掉编码去重记录：下次连接（哪怕编码没变）也重报一次，UI 不必等编码切换。
+        lastReportedCodec = ""
+        lastReportedCodecMac = ""
         val context = appContext ?: return
         val intent = Intent(HyperPodsAction.PODS_DISCONNECTED).apply {
             setPackage(PKG_APP)
@@ -214,6 +274,8 @@ object HeadsetStateDispatcher : HookContext() {
             addAction(HyperPodsAction.GET_PODS_MAC)
             addAction(HyperPodsAction.UPDATE_SYSTEM_BATTERY)
             addAction(HyperPodsAction.LOW_LATENCY_SELECT)
+            // 应用进程 UI 打开时发来的重放请求：其中一项是「重放系统真实编码」。
+            addAction(HyperPodsAction.UI_INIT)
         }
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
@@ -226,6 +288,8 @@ object HeadsetStateDispatcher : HookContext() {
                         .onFailure { Log.w(TAG, "applySystemBattery failed", it) }
                     HyperPodsAction.LOW_LATENCY_SELECT -> runCatching { handleLowLatencySelect(received) }
                         .onFailure { Log.w(TAG, "handleLowLatencySelect failed", it) }
+                    HyperPodsAction.UI_INIT -> runCatching { reportCurrentCodec() }
+                        .onFailure { Log.w(TAG, "codec report on UI_INIT failed", it) }
                 }
             }
         }
@@ -237,7 +301,7 @@ object HeadsetStateDispatcher : HookContext() {
         requestReceiver = receiver
         receiverContext = appCtx
         receiverRegistered = true
-        Log.d(TAG, "request receiver registered (GET_PODS_MAC / UPDATE_SYSTEM_BATTERY)")
+        Log.d(TAG, "request receiver registered (GET_PODS_MAC / UPDATE_SYSTEM_BATTERY / LOW_LATENCY_SELECT / UI_INIT)")
     }
 
     private fun replyMac(context: Context) {
@@ -321,6 +385,7 @@ object HeadsetStateDispatcher : HookContext() {
         Log.i(TAG, "bootstrap: found ${activeName} / ${activeMac} -> dispatch connected")
         SystemApisUtils.setIconVisibility(SystemApisUtils.statusBarManager(context), STATUS_BAR_ICON, true)
         dispatchConnected(device, activeName)
+        scheduleCodecReport(device)
     }
 
     private fun connectedMoondropDevice(): BluetoothDevice? {
@@ -503,4 +568,217 @@ object HeadsetStateDispatcher : HookContext() {
             Log.i(TAG, "LOW_LATENCY_CHANGED enabled=$enabled reason=$reason")
         }.onFailure { Log.w(TAG, "LOW_LATENCY_CHANGED broadcast failed", it) }
     }
+
+    // ── 5) A2DP 编解码：把系统真实编码（SBC/AAC/LDAC/LHDC…）报给应用进程 ────────
+    //
+    // 详情页 hero 的「当前编码」必须是**系统实际协商出来的**编码。应用进程读不到：
+    // BluetoothCodecStatus/BluetoothCodecConfig 是隐藏 API，且 A2dpService 要求
+    // BLUETOOTH_PRIVILEGED；本进程（com.android.bluetooth）有权限，所以在这里读完再广播。
+    //
+    // 读取路径（全部反射 + runCatching，任何一步不可用只记日志，绝不崩）：
+    //   A) 直接问 hook 到的 A2dpService 实例：getCodecStatus(device) → BluetoothCodecStatus
+    //   B) BluetoothAdapter#getProfileProxy(A2DP) 拿 BluetoothA2dp 代理（与本文件低延迟开关
+    //      完全同一套路）→ proxy.getCodecStatus(device) → BluetoothCodecStatus
+    //   拿到状态后统一：status.getCodecConfig() → config.getCodecName()
+    //   C) 兜底 hook（编码真正切换时触发；A/B 都被 ROM 挡住时仍然能上报）：
+    //      · A2dpService#onCodecConfigChangedFromNative(BluetoothDevice, BluetoothCodecConfig)
+    //      · A2dpStateMachine#processCodecConfigEvent(BluetoothCodecConfig) + mCodecStatus 字段
+    //
+    // ⚠ 刻意**不做 codecType 数值 → 名字的硬映射**：本 ROM 解出 A2dpService.SOURCE_CODEC_TYPE_
+    //   APTX_ADAPTIVE = 10（旧代码里的字面量 7 是错的），数值不可靠。能拿到名字就用名字，
+    //   拿不到名字只记日志 —— 宁可继续显示「未知」，也不显示错的编码。
+
+    /** 注册「编码变了」兜底 hook（方法与字段名均已对照真机 dex 核对）。 */
+    private fun hookCodecConfigChanged() {
+        // A2dpService：native 协商结果 + 状态机回写，两条都是「(设备, 新编码配置, …)」形态。
+        // 只从 dex 无法判定本 ROM 在切换编码时究竟走哪一条，所以两条都挂；
+        // 重复上报由 lastReportedCodec 去重挡掉，不会多刷广播。
+        hookServiceCodecCallback(METHOD_CODEC_CHANGED_NATIVE, 2)
+        hookServiceCodecCallback(METHOD_CODEC_CONFIG_UPDATED, 3)
+
+        // A2dpStateMachine：每台设备一个状态机，mCodecStatus 是它维护的权威状态
+        runCatching {
+            val method = findMethodByParamCountOrNull(CLS_A2DP_STATE_MACHINE, METHOD_PROCESS_CODEC_CONFIG_EVENT, 1)
+                ?: findAnyMethod(CLS_A2DP_STATE_MACHINE, METHOD_PROCESS_CODEC_CONFIG_EVENT, 1)
+            hookAfter(method) {
+                runCatching {
+                    val machine = instance
+                    val service =
+                        runCatching { getObjectField(machine, FIELD_STATE_MACHINE_SERVICE) }.getOrNull()
+                    if (service != null) a2dpService = service
+                    val device = runCatching {
+                        getObjectField(machine, FIELD_STATE_MACHINE_DEVICE) as? BluetoothDevice
+                    }.getOrNull()
+                    val status = runCatching { getObjectField(machine, FIELD_CODEC_STATUS) }.getOrNull()
+                    val config = codecConfigOf(status) ?: args.getOrNull(0)
+                    reportCodecFromConfig(config, device, "A2dpStateMachine#$METHOD_PROCESS_CODEC_CONFIG_EVENT")
+                }.onFailure { Log.w(TAG, "codec hook $METHOD_PROCESS_CODEC_CONFIG_EVENT failed", it) }
+            }
+            Log.d(TAG, "hooked $CLS_A2DP_STATE_MACHINE#$METHOD_PROCESS_CODEC_CONFIG_EVENT")
+        }.onFailure { Log.w(TAG, "hook $METHOD_PROCESS_CODEC_CONFIG_EVENT skipped", it) }
+    }
+
+    /**
+     * 在 A2dpService 上挂一个「(设备, 新编码配置, …)」形态的回调：
+     * [paramCount] 是参数个数（onCodecConfigChangedFromNative=2、codecConfigUpdated=3），
+     * 新配置固定取 args[1]、设备固定取 args[0]（两条回调的参数顺序一致，短的 shorty 已核对）。
+     */
+    private fun hookServiceCodecCallback(methodName: String, paramCount: Int) {
+        runCatching {
+            val method = findMethodByParamCountOrNull(CLS_A2DP_SERVICE, methodName, paramCount)
+                ?: findAnyMethod(CLS_A2DP_SERVICE, methodName, paramCount)
+            hookAfter(method) {
+                runCatching {
+                    val service = instance
+                    if (service != null) a2dpService = service
+                    reportCodecFromConfig(
+                        args.getOrNull(1),
+                        args.getOrNull(0) as? BluetoothDevice,
+                        "A2dpService#$methodName"
+                    )
+                }.onFailure { Log.w(TAG, "codec hook $methodName failed", it) }
+            }
+            Log.d(TAG, "hooked $CLS_A2DP_SERVICE#$methodName/$paramCount")
+        }.onFailure { Log.w(TAG, "hook $methodName/$paramCount skipped", it) }
+    }
+
+    /** 连接建立后延迟查询编码（协商要时间），最多 CODEC_QUERY_ATTEMPTS 次。 */
+    private fun scheduleCodecReport(device: BluetoothDevice) {
+        val context = appContext ?: return
+        val handler = runCatching { Handler(context.mainLooper) }.getOrElse { Handler(Looper.getMainLooper()) }
+        codecRunnable?.let { runnable -> codecHandler?.removeCallbacks(runnable) }
+        val runnable = object : Runnable {
+            private var attempt = 0
+
+            override fun run() {
+                attempt++
+                runCatching { reportCurrentCodec(device) }
+                    .onFailure { Log.w(TAG, "codec query failed", it) }
+                if (attempt < CODEC_QUERY_ATTEMPTS) handler.postDelayed(this, CODEC_QUERY_RETRY_MS)
+            }
+        }
+        codecHandler = handler
+        codecRunnable = runnable
+        handler.postDelayed(runnable, CODEC_QUERY_DELAY_MS)
+        Log.d(TAG, "codec query scheduled for ${SystemApisUtils.deviceAddress(device)}")
+    }
+
+    /** 查询当前编码：先直接问 A2dpService 实例，不可用再退化为 A2DP 代理。 */
+    private fun reportCurrentCodec(preferred: BluetoothDevice? = null) {
+        val device = preferred ?: connectedMoondropDevice() ?: activeDeviceFromService()
+        if (device == null) {
+            Log.d(TAG, "codec query: no connected device")
+            return
+        }
+        val status = runCatching { callMethod(a2dpService, "getCodecStatus", device) }.getOrNull()
+        val direct = codecConfigOf(status)
+        if (codecNameOf(direct) != null) {
+            reportCodecFromConfig(direct, device, "A2dpService.getCodecStatus")
+            return
+        }
+        Log.d(TAG, "codec query: A2dpService.getCodecStatus unusable (status=$status); falling back to A2DP proxy")
+        queryCodecViaProxy(device)
+    }
+
+    /** 路径 B：BluetoothAdapter#getProfileProxy(A2DP) → BluetoothA2dp 代理 → getCodecStatus(device)。 */
+    private fun queryCodecViaProxy(device: BluetoothDevice) {
+        val context = appContext ?: return
+        val adapter = bluetoothAdapter(context)
+        if (adapter == null) {
+            Log.w(TAG, "codec query: BluetoothAdapter unavailable")
+            return
+        }
+        val listener = object : BluetoothProfile.ServiceListener {
+            override fun onServiceConnected(profile: Int, proxy: BluetoothProfile?) {
+                codecProxyListener = null
+                if (profile != BluetoothProfile.A2DP || proxy == null) return
+                runCatching {
+                    val status = callMethod(proxy, "getCodecStatus", device)
+                    reportCodecFromConfig(codecConfigOf(status), device, "BluetoothA2dp.getCodecStatus")
+                }.onFailure { Log.w(TAG, "codec via A2DP proxy failed", it) }
+                runCatching { callMethod(adapter, "closeProfileProxy", BluetoothProfile.A2DP, proxy) }
+                    .onFailure { Log.d(TAG, "closeProfileProxy unavailable", it) }
+            }
+
+            override fun onServiceDisconnected(profile: Int) {
+                codecProxyListener = null
+                if (profile == BluetoothProfile.A2DP) Log.d(TAG, "A2DP proxy disconnected during codec query")
+            }
+        }
+        codecProxyListener = listener
+        val requested = runCatching {
+            callMethod(adapter, "getProfileProxy", context, listener, BluetoothProfile.A2DP) as? Boolean
+        }.getOrNull()
+        if (requested != true) {
+            codecProxyListener = null
+            Log.w(TAG, "codec query: A2DP getProfileProxy unavailable")
+        }
+    }
+
+    /** BluetoothCodecStatus.getCodecConfig() → BluetoothCodecConfig（任一环不可用回 null）。 */
+    private fun codecConfigOf(status: Any?): Any? {
+        if (status == null) return null
+        return runCatching { callMethod(status, "getCodecConfig") }.getOrNull()
+    }
+
+    /** BluetoothCodecConfig.getCodecName()；方法不可用时才试 AOSP 的私有名字段。 */
+    private fun codecNameOf(config: Any?): String? {
+        if (config == null) return null
+        val byMethod = runCatching { callMethod(config, "getCodecName") as? String }.getOrNull()
+        if (!byMethod.isNullOrBlank()) return byMethod
+        for (field in CODEC_NAME_FIELDS) {
+            val value = runCatching { getObjectField(config, field) as? String }.getOrNull()
+            if (!value.isNullOrBlank()) return value
+        }
+        return null
+    }
+
+    /** 拿不到名字时只用于日志，不做数值 → 名字的猜测映射。 */
+    private fun codecTypeOf(config: Any?): Int? =
+        runCatching { callMethod(config, "getCodecType") as? Int }.getOrNull()
+
+    /** 配置 → 名字 → 广播；名字读不到就当没有（宁可「未知」也不猜）。 */
+    private fun reportCodecFromConfig(config: Any?, device: BluetoothDevice?, source: String) {
+        val name = codecNameOf(config)
+        if (name == null) {
+            if (config != null) Log.d(TAG, "codec from $source has no readable name (type=${codecTypeOf(config)})")
+            return
+        }
+        broadcastCodec(name, device, source)
+    }
+
+    /** 蓝牙进程 → 应用进程：CODEC_CHANGED{EXTRA_CODEC}（同编码 + 同设备只报一次）。 */
+    private fun broadcastCodec(codecName: String, device: BluetoothDevice?, source: String) {
+        val context = appContext ?: return
+        val name = codecName.trim()
+        if (name.isEmpty()) return
+        val mac = SystemApisUtils.deviceAddress(device)
+        // 只报本模块接管的设备：本进程的编码回调对**所有** A2DP 设备都会触发，
+        // 平板上其它耳机/音箱的编码绝不能显示到水月雨详情页里。
+        val tracked = (mac.isNotEmpty() && mac == activeMac) ||
+            MoondropModels.match(SystemApisUtils.deviceName(device)) != null
+        if (!tracked) {
+            Log.d(TAG, "CODEC_CHANGED skipped: $name is not the tracked device (mac=$mac)")
+            return
+        }
+        if (name == lastReportedCodec && mac == lastReportedCodecMac) return
+        lastReportedCodec = name
+        lastReportedCodecMac = mac
+        runCatching {
+            context.sendBroadcast(Intent(HyperPodsAction.CODEC_CHANGED).apply {
+                setPackage(PKG_APP)
+                putExtra(HyperPodsAction.EXTRA_CODEC, name)
+                if (mac.isNotEmpty()) putExtra(HyperPodsAction.EXTRA_MAC, mac)
+                if (device != null) {
+                    putExtra(HyperPodsAction.EXTRA_DEVICE_NAME, SystemApisUtils.deviceName(device))
+                }
+                addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+            })
+            Log.i(TAG, "CODEC_CHANGED codec=$name source=$source mac=$mac")
+        }.onFailure { Log.w(TAG, "CODEC_CHANGED broadcast failed", it) }
+    }
+
+    /** A2dpService.mActiveDevice：A2dpService 实例不可用/无活动设备时回 null。 */
+    private fun activeDeviceFromService(): BluetoothDevice? =
+        runCatching { getObjectField(a2dpService, FIELD_ACTIVE_DEVICE) as? BluetoothDevice }.getOrNull()
 }

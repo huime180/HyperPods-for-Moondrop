@@ -29,8 +29,7 @@
     <string name="batt_case">Case</string>
     <string name="batt_whole">Earbuds</string>
     <string name="batt_charging">Charging</string>
-
-    <string name="batt_offline">Offline</string>
+    <string name="battery_offline">Offline</string>
     <string name="batt_unknown">Reading battery…</string>
 
     <!-- ANC: top row = transparency / noise control (group) / off;

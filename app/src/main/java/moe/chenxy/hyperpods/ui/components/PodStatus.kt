@@ -3,8 +3,18 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 电池图标全部用 Canvas 画（本项目没有 airpods_* 之类的图片资源，也不新增资源）。
- * 关键约束：设备可能只上报「单设备电量」（[BatterySnapshot.singleDevice]），
- * 此时显示一个「整机」数值，而不是两个空白；rightKnown 为 true 时绝不渲染空的右耳。
+ *
+ * 关键约束：
+ *   ① **未连接 / 没有数据的组件显示「离线」，绝不显示 0 %。**
+ *      水月雨固件对未连接的一侧会回 0x00，pods 层的系统电量兜底
+ *      （BatteryState.fallbackFromSystem）也会把系统广播的 0 写进 rawLeft/rawRight；
+ *      旧 UI 把它当普通读数画出「0 %」，用户看到一只耳 0% 会误以为电量耗尽。
+ *   ② 数据契约以 [BatterySnapshot] 的 leftKnown / rightKnown / caseKnown 为准
+ *      （BATTERY_UNKNOWN = -1 表示无数据），**不要用 0 去当"未知"**；
+ *      渲染层的「离线」判定见 isOffline()。
+ *   ③ 设备可能只上报「单设备电量」（[BatterySnapshot.singleDevice]），
+ *      此时继续显示一个「整机」数值（而不是左右两行）。
+ *   ④ 三路都还没读到时（刚连上 / 完全未连接）保留既有的「正在读取电量…」过渡提示。
  */
 package moe.chenxy.hyperpods.ui.components
 
@@ -53,109 +63,130 @@ fun PodStatus(battery: BatterySnapshot, modifier: Modifier = Modifier) {
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        if (battery.singleDevice) {
+        when {
+            // 三路都还没有数据（刚连上 / 完全未连接）：保留既有的过渡提示
+            !battery.anyKnown -> {
+                Text(stringResource(R.string.batt_unknown), fontSize = 13.sp)
+            }
+
             // 单设备电量形态（type 0）：只显示一个「整机」数值
-            val level = if (battery.leftKnown) battery.left else battery.right
-            if (level != -1) {
+            battery.singleDevice -> {
                 BatteryRow(
                     label = stringResource(R.string.batt_whole),
-                    level = level,
+                    level = if (battery.leftKnown) battery.left else battery.right,
+                    known = battery.leftKnown || battery.rightKnown,
                     charging = battery.leftCharging || battery.rightCharging,
-                    darkMode = darkMode
+                    darkMode = darkMode,
                 )
             }
-        } else {
-            if (battery.leftKnown) {
+
+            // 分体电量：左耳 / 右耳 / 充电盒各一行；其中没有数据的行显示「离线」
+            else -> {
                 BatteryRow(
                     label = stringResource(R.string.batt_left),
                     level = battery.left,
+                    known = battery.leftKnown,
                     charging = battery.leftCharging,
-                    darkMode = darkMode
+                    darkMode = darkMode,
                 )
-            }
-            // rightKnown == true 时必须渲染右耳（「右耳不显示」是本项目要修的根因问题之一）
-            if (battery.rightKnown) {
+                // rightKnown == true 时必须给出右耳（「右耳不显示」是本项目要修的根因问题之一）；
+                // false 时也不再"整行消失"，而是明确显示「离线」
                 BatteryRow(
                     label = stringResource(R.string.batt_right),
                     level = battery.right,
+                    known = battery.rightKnown,
                     charging = battery.rightCharging,
-                    darkMode = darkMode
+                    darkMode = darkMode,
                 )
-            }
-            if (battery.caseKnown) {
                 BatteryRow(
                     label = stringResource(R.string.batt_case),
                     level = battery.case,
+                    known = battery.caseKnown,
                     charging = battery.caseCharging,
-                    darkMode = darkMode
+                    darkMode = darkMode,
                 )
             }
-        }
-
-        if (!battery.anyKnown) {
-            Text(stringResource(R.string.batt_unknown), fontSize = 13.sp)
         }
     }
 }
 
-/** 一行：左侧标签，右侧画出来的电池 + 百分比。 */
+/**
+ * 该组件是否按「离线」渲染。
+ *
+ * ① 数据契约：`*Known == false`（[moe.chenxy.hyperpods.core.BATTERY_UNKNOWN] = -1）＝ 本轮没有该组件的数据；
+ * ② 读回 0：固件对未连接的一侧回 0x00、系统电量兜底也会写 0，
+ *    而一个真能上报的耳机不可能是真的 0 %，所以 0 在**展示层**同样按「离线」处理，
+ *    不画成 0 %（这正是用户报的现象）。
+ *
+ * 注意 ② 只是渲染层的取舍，没有改数据契约：`known` 谓词仍是「有没有数据」的唯一真值来源。
+ */
+private fun isOffline(known: Boolean, level: Int): Boolean = !known || level <= 0
+
+/**
+ * 一行：左侧标签，右侧画出来的电池 + 百分比；离线时显示「离线」（不显示 0 %，也不显示「充电中」）。
+ *
+ * @param level  原始读数（[BatterySnapshot] 的 left/right/case；-1 = 无数据）
+ * @param known  对应的 leftKnown / rightKnown / caseKnown
+ */
 @Composable
 fun BatteryRow(
     label: String,
     level: Int,
-    charging: Boolean,
-    darkMode: Boolean,
+    known: Boolean = true,
+    charging: Boolean = false,
+    darkMode: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    val offline = isOffline(known, level)
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         BasicText(
-            text = if (charging && level > 0) "$label · ${stringResource(R.string.batt_charging)}" else label,
+            // 离线组件不显示「充电中」角标
+            text = if (charging && !offline) "$label · ${stringResource(R.string.batt_charging)}" else label,
             style = TextStyle(
                 fontSize = 14.sp,
                 color = MiuixTheme.colorScheme.onBackground
             )
         )
-        Battery(level = level, charging = charging, darkMode = darkMode)
+        Battery(level = level, offline = offline, charging = charging, darkMode = darkMode)
     }
 }
 
-/**
- * 电池图标 + 百分比文字。
- *
- * 未连接 / 无数据的组件**不显示 0 %，而显示「离线」**：
- * 水月雨固件对未连接的一侧常上报 0x00 或 0xFF，两者都不能当成"真的 0% 电量"，
- * 否则用户会看到一只耳显示 0% 而误以为电量耗尽。
- */
+/** 电池图标 + 百分比文字；[offline] 为 true 时显示「离线」。 */
 @Composable
-fun Battery(level: Int, charging: Boolean, darkMode: Boolean, modifier: Modifier = Modifier) {
-    val offline = level <= 0
+fun Battery(
+    level: Int,
+    offline: Boolean = false,
+    charging: Boolean = false,
+    darkMode: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
     Row(
         modifier = modifier.width(100.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         BatteryIcon(
-            batteryLevel = level.coerceAtLeast(0),
+            batteryLevel = if (offline) 0 else level.coerceIn(0, 100),
             isCharging = charging && !offline,
-            isDarkMode = darkMode,
+            isDarkMode = darkMode
         )
         BasicText(
-            text = if (offline) stringResource(R.string.batt_offline) else "$level %",
+            text = if (offline) stringResource(R.string.battery_offline) else "$level %",
             style = TextStyle(
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
-                color = if (offline) MiuixTheme.colorScheme.onBackground.copy(alpha = 0.45f)
+                color = if (offline) MiuixTheme.colorScheme.onSurfaceVariantSummary
                 else batteryColor(level, charging, darkMode)
             )
         )
     }
 }
 
-/** 纯 Canvas 画的电池：外壳 + 按比例填充的电池芯 + 正极触点。 */
+/** 纯 Canvas 画的电池：外壳 + 按比例填充的电池芯 + 正极触点（离线时 level 传 0，只剩空心外壳）。 */
 @Composable
 fun BatteryIcon(batteryLevel: Int, isCharging: Boolean, isDarkMode: Boolean, modifier: Modifier = Modifier) {
     val outline = if (isDarkMode) Color.White else Color.DarkGray

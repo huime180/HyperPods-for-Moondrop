@@ -29,8 +29,7 @@
     <string name="batt_case">充电盒</string>
     <string name="batt_whole">整机</string>
     <string name="batt_charging">充电中</string>
-
-    <string name="batt_offline">离线</string>
+    <string name="battery_offline">离线</string>
     <string name="batt_unknown">正在读取电量…</string>
 
     <!-- 降噪：顶部一排 = 通透 / 降噪（组）/ 关闭；

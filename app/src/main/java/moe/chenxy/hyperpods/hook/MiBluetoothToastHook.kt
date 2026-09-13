@@ -16,6 +16,12 @@
  * ⚠ 与原 HyperPods 的差异：**完全丢弃 AirPods 的 mp4/强提示视频**（原实现内嵌 base64 mp4 并用
  *   FileProvider 交给 SystemUI 播放）。本模块不携带任何 .mp4 / base64 资产，
  *   SEND_STRONG_TOAST 降级为同一套普通耳机电量通知。
+ *
+ * 另外，本进程还是**小米耳机 AIDL 服务的服务端**：
+ *   com.android.bluetooth.ble.app.headset.BluetoothHeadsetService$HeadsetBinder
+ *     extends com.android.bluetooth.ble.app.q$a   （混淆后的 IMiuiHeadsetService$Stub）
+ * 系统设置页通过它取耳机能力/电量档位，所以这里同时安装 HeadsetServiceBinderHook
+ * （见该文件头：为什么必须挂服务端、而不是只挂 settings 侧的 $Stub$Proxy）。
  */
 package moe.chenxy.hyperpods.hook
 
@@ -64,6 +70,12 @@ object MiBluetoothToastHook : HookContext() {
 
     private val hookedConstructors = LinkedHashSet<String>()
 
+    /** 诊断用：invokeStatusBar 的 action 只记一次，避免刷屏。 */
+    private val loggedStatusBarActions = LinkedHashSet<String>()
+
+    /** 诊断用：updateParameters 的载荷类只记一次。 */
+    private val loggedUpdateParamClasses = LinkedHashSet<String>()
+
     private var receiver: BroadcastReceiver? = null
     private var receiverContext: Context? = null
 
@@ -82,6 +94,10 @@ object MiBluetoothToastHook : HookContext() {
                 Log.d(TAG, "hooked constructor by param-count fallback: ${describe(constructor.parameterTypes)}")
             }
         }.onFailure { Log.w(TAG, "2-arg notification constructor fallback skipped", it) }
+        hookNotificationParameters()
+        // 服务端 Binder 伪装（本进程才是小米耳机 AIDL 服务的实现者）——见 HeadsetServiceBinderHook 文件头。
+        runCatching { HeadsetServiceBinderHook.install(this) }
+            .onFailure { Log.w(TAG, "headset service binder hooks skipped", it) }
     }
 
     override fun onHotReloading() {
@@ -91,6 +107,63 @@ object MiBluetoothToastHook : HookContext() {
         receiverContext = null
         processContext = null
         hookedConstructors.clear()
+        synchronized(loggedStatusBarActions) { loggedStatusBarActions.clear() }
+        synchronized(loggedUpdateParamClasses) { loggedUpdateParamClasses.clear() }
+        HeadsetServiceBinderHook.reset()
+    }
+
+    /**
+     * 连接通知 / 状态栏文案的两处入口（本 ROM 实测存在）：
+     *   MiuiBluetoothNotification.updateParameters(MiuiBluetoothNotification$c): V
+     *   MiuiBluetoothNotification.invokeStatusBar(Context, String, Bundle): V
+     *
+     * 这里**只观察不改写**：载荷类 `MiuiBluetoothNotification$c` 是混淆类，Bundle 的键值语义
+     * 无法从 DEX 静态确定，盲改文案会破坏原生通知。先把真实载荷记进 logcat，下一轮再按实测改。
+     */
+    private fun hookNotificationParameters() {
+        runCatching {
+            val method = findMethodOrNull(
+                CLS_NOTIFICATION, "invokeStatusBar",
+                Context::class.java, String::class.java, Bundle::class.java
+            )
+            if (method != null) {
+                hookBefore(method) {
+                    val action = args.getOrNull(1) as? String
+                    val extras = args.getOrNull(2) as? Bundle
+                    val first = synchronized(loggedStatusBarActions) { loggedStatusBarActions.add(action ?: "null") }
+                    if (first) {
+                        Log.i(TAG, "invokeStatusBar action=$action extras=${extras?.keySet()?.joinToString()}")
+                    }
+                }
+                Log.d(TAG, "hooked $CLS_NOTIFICATION#invokeStatusBar (diagnostic only)")
+            }
+        }.onFailure { Log.w(TAG, "hook $CLS_NOTIFICATION.invokeStatusBar skipped", it) }
+
+        runCatching {
+            // 按参数个数定位，避免在编译期引用混淆内部类 MiuiBluetoothNotification$c。
+            val method = findMethodByParamCountOrNull(CLS_NOTIFICATION, "updateParameters", 1)
+            if (method != null) {
+                hookBefore(method) {
+                    val payload = args.getOrNull(0)
+                    val cls = payload?.javaClass?.name ?: "null"
+                    val first = synchronized(loggedUpdateParamClasses) { loggedUpdateParamClasses.add(cls) }
+                    if (first) Log.i(TAG, "updateParameters payload=$cls fields=${describePayload(payload)}")
+                }
+                Log.d(TAG, "hooked $CLS_NOTIFICATION#updateParameters (diagnostic only)")
+            }
+        }.onFailure { Log.w(TAG, "hook $CLS_NOTIFICATION.updateParameters skipped", it) }
+    }
+
+    /** 把混淆载荷对象的字段名与可读值列出来（只读，失败即忽略）。 */
+    private fun describePayload(payload: Any?): String {
+        if (payload == null) return "null"
+        return runCatching {
+            payload.javaClass.declaredFields.joinToString(prefix = "{", postfix = "}") { field ->
+                field.isAccessible = true
+                val value = runCatching { field.get(payload) }.getOrNull()
+                "${field.name}=${value ?: "null"}"
+            }
+        }.getOrDefault("<unreadable>")
     }
 
     private fun hookExactConstructor(vararg parameterTypes: Class<*>) {
