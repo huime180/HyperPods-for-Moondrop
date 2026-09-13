@@ -3,7 +3,8 @@
 > 本文说明如何编译、测试、打包与安装本模块。
 >
 > ⚠ **诚实声明**：编写本文档的环境**没有 JDK、没有 Android SDK、也没有网络**，
-> 因此本文的命令**没有被实际执行过**；**本仓库目前没有构建出任何 APK，也没有做真机测试**。
+> 因此本文的命令**没有被实际执行过**；仓库中不含 APK 产物，CI 的编译状态与产物不由本文档断言，
+> 本模块也**没有任何真机测试结论**。
 > 下面的内容全部来自对 `app/build.gradle.kts`、`gradle/libs.versions.toml`、
 > `gradle/wrapper/gradle-wrapper.properties` 与 `.github/workflows/build.yml` 的逐行核对。
 
@@ -233,7 +234,9 @@ $ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs HyperPods-for-Mo
 4. 依赖里有 `compileOnly(libs.libxposedApi)`：**不要把 libxposed API 打进 APK**，
    它必须由框架在运行时提供（这正是 `compileOnly` 的含义）。
 5. Debug 包可直接安装；Release 包未签名，需要自行签名（第 7 节）。
-6. 代码里存在若干「已实现但未接线」的能力（空间音频、9ECA、部分通知/电量广播发送端、
-   设置页降噪回传），构建不会报错，但功能不会生效；清单见 [README.md](README.md) 第六节。
+6. 跨进程链路已由 `pods/ControlBridge.kt` + manifest 声明的 `pods.ControlReceiver` 接通
+   （连接/控制命令下发、电量写回系统蓝牙栈、通知、设置页回显、低延迟转发）；仍有若干
+   「已实现但未接线」的能力（空间音频/头动追踪、9ECA、LC3/LDAC、充电位解析），构建不会报错，
+   但功能不会生效；清单见 [README.md](README.md) 第六节。
 7. 提示音（feature `0x0E`）的命令号**未真机证实**，测试只锁定「默认 GET=1/SET=2」的字节，
    不代表设备行为（见 [PROTOCOL.md](PROTOCOL.md) 第 6 节）。

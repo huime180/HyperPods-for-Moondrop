@@ -72,7 +72,7 @@ data class MoondropModel(
 
 | id | ANC 路径 / 档位（SET / GET 映射） | 增益 `gainMap`（UI 低中高 → 设备码） | 指示灯 | 电量（证据） | verified |
 |---|---|---|---|---|---|
-| `edge` | AudioCuration / 3 档：SET `[1,2,4]`，GET `null`（反查） | `[0,1,2]` | — | **只回 type 0 单设备**（moondrop-link 真机 60%） | ✅ 实测 |
+| `edge` | AudioCuration / 3 档：SET `[1,2,4]`，GET `[0,1,2]` | `[0,1,2]` | — | **只回 type 0 单设备**（moondrop-link 真机 60%） | ✅ 实测 |
 | `pudding` | ANC V2 / 5 档：SET `[0,4,2,3,1]`，GET 同 | `[0,1,2]` | ✅ | **三路** 1=左 2=右 3=盒（PuddingPods 文档） | ✅ 实测 |
 | `golden_ages_2` | AudioCuration / 4 档：SET `[1,2,4,3]`，GET `[0,1,2,3]` | `[2,1,0]` | — | 仅左右耳，**无充电盒**（FxxkMoondrop 实测） | ✅ 实测 |
 | `space_travel_2` | AudioCuration / 4 档：SET `[1,2,4,3]`，GET `[0,1,2,3]` | `[2,1,0]` | — | 未实测 | ✅ 实测 |
@@ -87,12 +87,13 @@ data class MoondropModel(
 | `voyager` | AudioCuration / 4 档恒等 | `[0,1,2]` | — | 未实测 | 推断 |
 | `block` | AudioCuration / 4 档恒等 | 不展示（`DcProfile()`） | — | 未实测 | 推断 |
 | `space_travel` | AudioCuration / 4 档恒等 | `[0,1,2]` | — | 未实测 | 推断 |
-| `edge2` | AudioCuration / 3 档：SET `[1,2,4]`，GET `null`（反查） | `[0,1,2]` | — | 未实测 | 推断 |
+| `edge2` | AudioCuration / 3 档：SET `[1,2,4]`，GET `[0,1,2]` | `[0,1,2]` | — | 未实测 | 推断 |
 | `space_travel_2_ultra` | AudioCuration / 4 档：同 GA2 | `[2,1,0]` | — | 未实测 | 推断 |
 | `fallback` | AudioCuration / 4 档恒等 | 不展示（`DcProfile()`） | — | 完全由探测决定 | 兜底 |
 
-> 说明：`GET null（反查）` 表示 `AncProfile.getMap = null`，回包按 `setMap.indexOf(deviceCode)` 反查；
-> 若该型号固件读回是 0-based 值域（像 EDGE 那样），反查会失败（得到 `-1`）—— 见第九节第 3 条。
+> 说明：EDGE / EDGE2 现已显式给出 `getMap = [0,1,2]`（SET 是位掩码 `1/2/4`，GET 是 0-based 索引）。
+> 其余档案中 `getMap = null` 者表示回包按 `setMap.indexOf(deviceCode)` **反查**；
+> 若这些型号的固件读回也是 0-based 值域，反查会失败（得到 `-1`）—— 见第九节第 3 条。
 
 ---
 
@@ -120,7 +121,7 @@ data class AncProfile(
 |---|---|---|---|---|---|
 | `anc4Ga2()` | 关/降/透/抗 | `[1,2,4,3]` | `[0,1,2,3]` | AudioCuration | 梦回2、太空漫游2、梦回、太空漫游2 ULTRA |
 | `anc4Identity()` | 关/降/透/抗 | `[1,2,3,4]` | `null` | AudioCuration | 猫咖、猫饼、音乐胶囊、超声波、知更鸟、爱丽丝、火花、旅行者、方糖、太空漫游、fallback |
-| `anc3Ac()` | 关/降/透 | `[1,2,4]` | `null` | AudioCuration | EDGE、EDGE2 |
+| `anc3Ac()` | 关/降/透 | `[1,2,4]` | `[0,1,2]` | AudioCuration | EDGE、EDGE2 |
 | `ancPudding()` | 关/降/透/抗/自适应 | `[0,4,2,3,1]` | `[0,4,2,3,1]`（恒等读回） | ANC_V2 | PUDDING |
 | `ancV2Identity()` | 关/降/透/抗/自适应/LIVE | `[0..5]` | `[0..5]` | ANC_V2 | ⚠ **定义了但没有任何机型使用（死代码）** |
 
@@ -148,11 +149,10 @@ data class AncProfile(
   * AudioCuration → **特例**：写的是位掩码 `Gaia.AC_SET_PAYLOAD[uiIndex]`（`1/2/4`），不是 `setMap` 值
   * ANC_V1 → `ancV1SetState(dev == 0 ? 0 : 1)`
 
-> ⚠ **已知风险（需要真机修正）**：EDGE 档案是 `setMap=[1,2,4]` 且 `getMap=null`，
-> 而上游实测 EDGE 的 AC 读回是 **0-based `0/1/2`**。`AudioCuration` 分支用的是
-> `prof.deviceToUi(dev)`（此处即 `setMap.indexOf(dev)`），设备回 `0` 会得到 `-1`（等价于「状态未知」）。
-> 若真机确认，应给 EDGE 补 `getMap = intArrayOf(0,1,2)`（与 GA2 的处理方式一致）。
-> 本文档不做代码修改，仅如实记录。
+> ✅ **已修正（初稿之后）**：EDGE / EDGE2 的 `anc3Ac()` 现在带 `getMap = intArrayOf(0,1,2)`。
+> 上游实测 EDGE 的 AudioCuration **SET 是位掩码 `1/2/4`、GET 是 0-based 索引 `0/1/2`**，
+> 早先 `getMap=null` 时 `setMap.indexOf(0)` 会得到 `-1`（状态未知），现已与 GA2 一样双向分离。
+> 该参数仍**未经本模块真机复核**（见第九节第 3 条）。
 
 ---
 
@@ -250,11 +250,14 @@ data class FeatureProfile(
 
 `MoondropLink.connect()` → 建立链路（BLE GATT 或 SPP）→ `afterConnected()`：
 
-1. `emitState()` —— 先把「已连接」状态推给 UI；
-2. `probeCapabilities()`：
+1. **GAIA 版本探测**：先发 `00 0A 03 00`（`Gaia.getApiVersion()`，V1/V2 包、vendor `0x000A`），
+   用 `runCatching` 包住，失败不阻塞后续（设备 GAIA 版本为 3 时功能命令才走 vendor `0x001D`）；
+2. `emitState()` —— 先把「已连接」状态推给 UI；
+3. `probeCapabilities()`：
    1. 循环最多 4 次请求 `BASIC(0) cmd 1 GET_SUPPORTED_FEATURES`（后续页用 `cmd 2 NEXT`）：
       * `payload[0] & 0x01` 表示「还有下一页」；
-      * 其余字节交给 `Gaia.parseSupportedFeatures()` 解析成 feature 集合；
+      * 其余字节交给 `Gaia.parseSupportedFeaturesSmart()`：先按 `[more][featureId][version]...` 字节对解析
+        （条目合法，feature id 落在 0..63 就采用），否则回退 32-bit word 位图；
    2. 发 `BATTERY(0x0D) cmd 0`（`00 1D 1A 00`）问设备**支持哪些电池类型**，
       `BatteryCodec.parseSupported()` 只保留 `0..3` 的已知 type（这是电量修复的第一步）；
    3. 用 `Gaia.ancPathFrom(features)` 选 ANC 路径，**优先级 AudioCuration(8) > ANC_V2(32) > ANC_V1(2)**；
@@ -266,20 +269,20 @@ data class FeatureProfile(
       * `hasLhdc = 档案.lhdc || 位图含 16`；`hasDualConnection = 档案.dualConnection || 位图含 20`；
       * `hasLowLatency = 档案.lowLatency`（**不依赖位图**，因为它是系统侧功能）；
       * `ancModes = 档案.anc.modes`；`probed = true`；
-3. `refreshAll()` —— 读电量、ANC，再按能力开关读增益/指示灯/提示音/LHDC/双设备；
-4. `startPolling()` —— 每 30 s 重新读一次电量；
-5. 再 `emitState()` 一次。
+4. `refreshAll()` —— 读电量、ANC，再按能力开关读增益/指示灯/提示音/LHDC/双设备；
+5. `startPolling()` —— 每 30 s 重新读一次电量；
+6. 再 `emitState()` 一次。
 
 请求/响应机制：GAIA 没有序列号，`MoondropLink` 按 **feature** 建 pending 表（`HashMap<Int, CompletableFuture>`），
 每个 feature 只允许一个等待者，超时 1500/2000 ms；所有写操作由一个 `Mutex` 串行化。
 
-> ⚠ **能力位图编码存疑**：本项目把 `GET_SUPPORTED_FEATURES` 的响应体当作
-> 「32-bit word 位图」（word i 覆盖 feature `32*i .. 32*i+31`，大端）；
-> 而上游 moondrop-link 把它当作「`(featureId, version)` 字节对」序列
-> （`features.py::get_supported_features`，`data[i], data[i+1]` 成对读取）。
-> 两种读法**互斥**且都会把 `payload[0]` 当分页标志。目前**没有真机抓包裁决**哪一种正确。
-> 影响面：若实际是字节对，位图解析会得到一批虚假 feature，从而误导 ANC 路径选择与 UI 开关展示。
-> 建议：首次真机联调时抓一次 `GET_SUPPORTED_FEATURES` 的原始回包（`00 1D 00 81 …`）再定论。
+> ⚠ **能力编码：两种读法都试（初稿之后修正）**。上游两派对 `GET_SUPPORTED_FEATURES` 响应体的解读不同且互斥：
+> moondrop-link 当作「`[more][featureId][version]...` 字节对」序列，FxxkMoondrop 当作
+> 「32-bit word 位图」（word i 覆盖 feature `32*i .. 32*i+31`，大端）。
+> 现在 `Gaia.parseSupportedFeaturesSmart()` **先按字节对解析**（feature id 落在 0..63 才认为有效），
+> 失败再回退位图；能力探测与通知型位图都走它。
+> 仍**未真机抓包确认**具体固件用哪种编码、以及误判风险（若某固件的字节对恰好也像合法位图，可能选错 ANC 路径）。
+> 建议：首次真机联调时抓一次 `GET_SUPPORTED_FEATURES` 的原始回包（形如 `00 1D 00 81 …`）并核对两种解析结果。
 >
 > 另外 `Gaia.isFeaturePayloadTruncated()` 已经写好（用于识别「payload 长度不是 4 的倍数」导致末位 word 丢失），
 > 但**客户端流程没有调用它**。
@@ -361,9 +364,9 @@ data class FeatureProfile(
 | # | 未知项 | 现状 / 建议验证方式 |
 |---|---|---|
 | 1 | 提示音（feature 0x0E）命令号 | 只保留 feature id；默认 GET=1/SET=2。用官方 App 抓 btsnoop 后回填 `cmdVoice*` |
-| 2 | `GET_SUPPORTED_FEATURES` 响应体编码 | 位图 vs (featureId, version) 字节对，两派读法冲突；抓原始回包裁决 |
-| 3 | EDGE / 恒等档案的 ANC 读回值域 | 若 0-based，需给档案补 `getMap`；否则 ANC 状态显示为未知（`-1`） |
-| 4 | GAIA 版本探测 | `Gaia.getApiVersion()` 未被调用；不确定设备是否需要先探测再发功能命令 |
+| 2 | `GET_SUPPORTED_FEATURES` 响应体编码 | 代码两种都试（`parseSupportedFeaturesSmart`）；**具体固件用哪种、会不会误判**仍需抓原始回包裁决 |
+| 3 | ANC 读回值域 | EDGE / EDGE2 已按上游实测补 `getMap=[0,1,2]`（参数待真机复核）；`anc4Identity` 系列仍是 `getMap=null` 反查，若这些机型也是 0-based 读回会得到 `-1` |
+| 4 | GAIA 版本探测 | 已在连接流程中发送（`00 0A 03 00`）；**探测结果的解析与用途**（是否需要据此切换包格式）未真机确认 |
 | 5 | EDGE 增益映射 | 档案为恒等 `[0,1,2]`，无实测证据 |
 | 6 | `promptVolumeMax = 15` | 无实测依据；不同固件量程可能不同 |
 | 7 | 9ECA 私有协议 | 已实现但未接线、未验证（上游亦标注未实机验证） |
@@ -378,7 +381,7 @@ data class FeatureProfile(
 ## 十、代码级备注（阅读档案时容易踩的坑）
 
 * `ancV2Identity()` 已定义但无任何机型引用（死代码）；`AncMode.LIVE` 亦只出现在该组合里。
-* `Gaia` 中以下 API 已实现但客户端未调用：`getApiVersion()`、`registerNotification()`、
+* `Gaia` 中以下 API 已实现但客户端未调用：`registerNotification()`、
   `spatialGet/Set()`、`headTrackingGet/Set()`、`powerOff()`、`basicGetVariant/AppVersion/SerialNumber/TwsStatus/EarbudLang()`、
   `ldacGet/Set()`、`lc3Get/Set()`、`ancV2GetSwitchConf()/ancV2SwitchConf()`、`audioCurationSetStateIndex()`。
 * `BatteryCodec.buildSupportedQuery()` / `buildLegacyQuery()` 与部分解析器同样是「备用实现」，
@@ -399,17 +402,30 @@ data class FeatureProfile(
 | `hook/HeadsetStateDispatcher.kt` | `com.android.bluetooth`：A2DP 连接感知 + 电量写回系统蓝牙栈 + MAC 应答 | 连接判定统一走 `MoondropModels.match()`；**新机型的蓝牙名必须能命中 `aliases`，否则整条链路不会启动** |
 | `hook/SystemUIPluginHook.kt` + `hook/DeviceCardHook.kt` | 融合设备中心耳机卡点击接管 | 只认 `deviceType == "third_headset"` 的卡片；卡片 id 与耳机 MAC 比较，不改机型档案 |
 | `hook/MiBluetoothToastHook.kt` | `com.xiaomi.bluetooth` 电量通知 | 三路电量由 `SystemApisUtils.readBatteryExtras()` 统一读；单设备机型走 `EXTRA_LEVEL` 兜底 |
-| `hook/SettingsHeadsetHook.kt` | 设置页伪装原生耳机（`01010607`）+ 状态注入 | 伪装 ID 对应「小米四档 ANC 模板」，与真实机型 ANC 档位数不同，需要映射；ANC 改动回传走 `ANC_SELECT` 广播 |
+| `hook/SettingsHeadsetHook.kt` | 设置页伪装原生耳机（`01010607`）+ 状态注入 | 伪装 ID 对应「小米四档 ANC 模板」，与真实机型 ANC 档位数不同，需要映射；ANC 改动经 `ANC_SELECT` 广播回传 |
+| `pods/ControlBridge.kt` + manifest 的 `ControlReceiver` | **应用侧跨进程控制桥**：接收系统各进程的控制命令、把状态转发回去 | 是「新机型能力能否出现在系统界面」的关键一环；manifest 声明 + 显式广播，App 未运行也能被拉起 |
 | `ui/PodDetailPage.kt` | 模块自己的详情页 | 开关行由 `PodCapabilities` **硬门控**（能力 false 即不进入组合树）；新增功能必须同时接能力字段与 UI 行 |
 
-**已知接线缺口（截至 1.0.0，源码 grep 确认）**：
+**接线现状（`pods/ControlBridge.kt`，初稿之后已实现）**：
 
-* `UPDATE_SYSTEM_BATTERY`（→ 系统蓝牙栈电量）、`SEND_STRONG_TOAST` / `UPDATE_PODS_NOTIFICATION` /
-  `CANCEL_PODS_NOTIFICATION`（→ 通知）**只有接收端，应用进程没有发送端**；
-* `ANC_SELECT`（设置页 → 应用进程）与 `LOW_LATENCY_SELECT`（详情页）**没有接收端**；
-* 空间音频 / 头动追踪（`Gaia.spatialGet/Set`、`headTracking*`）未接到客户端；
+| 方向 | 动作 | 说明 |
+|---|---|---|
+| `com.android.bluetooth` → 应用进程 | `PODS_CONNECTED` / `PODS_DISCONNECTED` | `getRemoteDevice(mac)` → `MoondropLink.connect()` / `disconnect()`；非水月雨设备忽略 |
+| 设置页 → 应用进程 | `ANC_SELECT` / `GAIN_SELECT` / `LED_SELECT` / `PROMPT_TONE_SELECT` / `PROMPT_VOLUME_SELECT` / `LHDC_SELECT` / `DUAL_CONNECTION_SELECT` | 路由到 `MoondropLink.setXxx()`（`ANC_SELECT` 带的是本模块 UI 档位下标） |
+| 系统侧 → 应用进程 | `UI_INIT` / `REQUEST_CAPABILITIES` / `REQUEST_BATTERY` | 状态重放 |
+| 应用进程 → `com.android.bluetooth` | `UPDATE_SYSTEM_BATTERY` | 反射 `AdapterService.setBatteryLevel`，系统 UI 显示电量 |
+| 应用进程 → `com.android.settings` | `ANC_CHANGED` / `BATTERY_CHANGED` | 喂被伪装的耳机页 |
+| 应用进程 → `com.xiaomi.bluetooth` | `UPDATE_PODS_NOTIFICATION` / `SEND_STRONG_TOAST` / `CANCEL_PODS_NOTIFICATION` | 通知 / 电量展示 |
+| 应用进程 → `com.android.bluetooth` → 应用进程 | `LOW_LATENCY_SELECT` → `LOW_LATENCY_CHANGED` | 低延迟（系统侧）：先反射厂商直通方法，否则 A2DP codec 兜底 |
+
+电量以 `Bundle` 传递（`left`/`right`/`case` + `*_charging`；`255 = 未知`、`value or 128 = 充电中`）。
+
+**仍未接线 / 未验证的部分**：
+
+* 空间音频 / 头动追踪（`Gaia.spatialGet/Set`、`headTracking*`）**未接到客户端**；
+* 低延迟的系统侧实现（反射桥 + A2DP codec 兜底）**从未真机验证**，隐藏 API 不可用时只回「保持原状态」；
 * `SettingsHeadsetHook` 的 `updateAtUiInfo / updateAncUi / refreshStatus` 调用签名按 OppoPods 在 HyperOS
   上的用法书写，**需实机核对**；`MiuiHeadsetBattery` 电量控件注入未实现。
 
 这些是**接线**而不是**协议**问题：新增机型时，只要档案能被匹配、能力位图/回包能被解析，
-协议层就能工作；要让它在系统界面上出现，还需要把上面的链路补齐。
+协议层就能工作；要让它在系统界面上出现，上面的桥已经就位（但需真机验证）。

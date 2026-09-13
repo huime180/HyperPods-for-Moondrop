@@ -229,8 +229,9 @@ LHDC / LDAC / aptX-adaptive / LC3 / AAC 的顺序挑候选，用 `setCodecConfig
 
 ### 构建状态（非常重要）
 
-* **本文档编写时没有构建过任何 APK**：本次工作环境**没有 JDK、没有 Android SDK、没有网络**，
-  无法执行 Gradle；因此**也没有任何真机测试结论**。
+* **本文档作者未在本机构建过 APK**：本次工作环境**没有 JDK、没有 Android SDK、没有网络**，无法执行 Gradle；
+  仓库中也不含任何 APK 产物；CI（GitHub Actions）的编译状态与产物**不由本文档断言**。
+* **本模块没有任何真机测试结论**（这是最重要的那句话）。
 * 所有「实测」均指**上游项目**（FxxkMoondrop / moondrop-link-desktop / PuddingPods）在真机上取得的结论。
 * 构建与验证步骤见 [BUILD.md](BUILD.md)。
 

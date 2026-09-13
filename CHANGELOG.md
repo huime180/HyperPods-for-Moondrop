@@ -3,10 +3,10 @@
 首个版本。本版本包含**协议核心层**（纯 Kotlin，可单测）、**协议客户端**、
 **libxposed API 102 系统集成层**（4 个作用域进程）与 **Compose / Miuix UI**。
 
-> ⚠ **诚实声明**：本版本**没有构建出 APK，也没有在真机上测试过**
-> （编写时的环境无 JDK / Android SDK / 网络）。下文所有「已由上游真机验证」均指
-> 上游项目（FxxkMoondrop / moondrop-link-desktop / PuddingPods）的结论，**不是本模块的测试结论**；
-> 凡是未验证的条目都在最后单独列出。
+> ⚠ **诚实声明**：本模块**没有任何真机测试结论**，仓库中也不含 APK 产物；
+> 本文档作者未在本机构建（环境无 JDK / Android SDK / 网络），CI 的编译状态与产物不由本文档断言。
+> 下文所有「已由上游真机验证」均指上游项目（FxxkMoondrop / moondrop-link-desktop / PuddingPods）的结论，
+> **不是本模块的测试结论**；凡是未验证的条目都在最后单独列出。
 
 ### 多机型适配（17 个型号档案 + 1 个兜底档案）
 
@@ -51,7 +51,7 @@
 | **提示音开关 + 音量滑条**（`VOICE 0x0E`） | `Gaia.promptToneGet/Set`、`promptVolumeGet/Set`；档案可逐设备覆盖命令号（`FeatureProfile.cmdVoice*` / `HyperPodsPrefsKey.VOICE_CMD_*`）；UI 行由能力位图（feature 14）或档案开关**硬门控**（无能力即隐藏）；滑条拖动只改本地显示，松手才下发 | ⚠ **命令号未证实**：官方 App 逆向只保留 feature id，默认按「GET=1 / SET=2」惯例，需真机验证 |
 | **LHDC 开关**（`CODEC_TYPE 0x10`） | cmd 5 读 `00 1D 20 05` / cmd 6 写 `00 1D 20 06 01|00`；单测逐字节锁定；同时保留 LC3（1/3）与 LDAC（2/4）构造器 | 帧格式已锁定；**开关实际效果未真机验证**。上游实测耳机出厂默认 LHDC 关（当前活动编码 AAC，主机侧广告 LHDCv5/LHDC_V3/LHDC_V2/LDAC/aptX-adaptive） |
 | **双设备连接**（`ONEBRINGTWO 0x14`） | cmd 1/2 状态（`00 1D 28 01` / `00 1D 28 02 01`）、3/4 超时、5/6 设备列表、7 断开单台（payload `[num:1][addr:6][name utf8]`）；`parseLinkedDevice()` 解析条目 | 命令号由 moondrop-link 在 EDGE **真机确认**；上游原文注明「读取与开关已验证，**写入/断开单台需双机场景实测**」 |
-| **低延迟模式** | **明确：这是 HyperOS 系统侧功能，不是 GAIA 命令**，无对应 feature；`PodCapabilities.hasLowLatency` / `PodSnapshot.lowLatencyOn` 由系统侧状态驱动，按型号档案决定是否展示（EDGE、EDGE2） | ❌ **未验证**：详情页开关只发 `LOW_LATENCY_SELECT` 广播并乐观更新，**当前没有接收端** |
+| **低延迟模式** | **明确：这是 HyperOS 系统侧功能，不是 GAIA 命令**，无对应 feature；链路已接通：详情页 → `LOW_LATENCY_SELECT` → `ControlBridge`（乐观状态）→ `com.android.bluetooth`，由 `HeadsetStateDispatcher` 先反射厂商直通方法（`setLowLatencyMode` 等），否则走 A2DP codec 路径（`getCodecStatus` / `setCodecConfigPreference`，按 LHDC/LDAC/aptX-adaptive/LC3/AAC 挑候选，关闭时恢复原配置），最后回 `LOW_LATENCY_CHANGED` | 已实现，❌ **未在真机验证**（隐藏 API 可能不可用，不可用时回「保持原状态」并记日志） |
 
 ### HyperOS 系统集成层（libxposed API 102）
 
@@ -95,12 +95,25 @@
   降噪档位、增益、能力硬门控的开关区（指示灯 / 提示音 / LHDC / 双设备连接 / 低延迟）、
   提示音音量滑条、手动刷新；应用进程注册 `PODS_*` / `UI_INIT` / `REQUEST_*` 广播触发器，
   从已配对设备里按型号档案挑出水月雨耳机并建立 GAIA 通道。默认英文字符串 + `values-zh-rCN` 中文。
+* `pods/ControlBridge.kt` + manifest 声明的 `pods.ControlReceiver`：**应用侧跨进程控制桥**。
+  因为是 manifest 声明的接收器 + 显式广播（`setPackage`），**App 未运行时也能被系统广播拉起**处理控制命令。
+  它接收 `PODS_CONNECTED` / `PODS_DISCONNECTED`（用 `getRemoteDevice(mac)` 解析设备并连接）、
+  全部 `*_SELECT` 控制命令（设置页 → `MoondropLink.setXxx()`）、`UI_INIT` / `REQUEST_CAPABILITIES` / `REQUEST_BATTERY`；
+  并把状态转发出去：`UPDATE_SYSTEM_BATTERY` → `com.android.bluetooth`（电量写进系统蓝牙栈）、
+  `ANC_CHANGED` / `BATTERY_CHANGED` → `com.android.settings`（被伪装耳机页显示）、
+  `UPDATE_PODS_NOTIFICATION` / `SEND_STRONG_TOAST` / `CANCEL_PODS_NOTIFICATION` → `com.xiaomi.bluetooth`（通知）、
+  `LOW_LATENCY_SELECT` → `com.android.bluetooth`（低延迟）。电量以 `Bundle` 传递
+  （`left` / `right` / `case` + `*_charging`；`255 = 未知`、`value or 128 = 充电中`）。
+  配套改动：`MoondropLink` 改为**监听者列表**（`addListener` / `removeListener` / `isInitialized` /
+  `requestBatteryRefresh`），桥的转发器与 UI 监听者并存互不覆盖；`MainUI` 不再重复处理
+  `*_SELECT` / `UI_INIT` / `REQUEST_*`，也不再自己连接/断开。
 
 ### 协议层与测试
 
-* `core/Gaia.kt`：GAIA V3/V4 线格式、feature/命令常量、帧构造与解析、能力位图解析、
+* `core/Gaia.kt`：GAIA V3/V4 线格式、feature/命令常量、帧构造与解析、能力解析
+  （`parseFeatureEntries` 字节对 + `parseSupportedFeaturesSmart` 两者都试）、
   ANC 路径推导（AudioCuration > ANC V2 > ANC V1）、AC 位掩码 `1/2/4`、`OnBringTwo` 设备条目解析、
-  版本探测帧 `00 0A 03 00`（已实现，连接流程未调用）。
+  版本探测帧 `00 0A 03 00`（已接入连接流程，见上「协议修正」）。
 * `core/GaiaFramer.kt`：RFCOMM/SPP 流式切帧状态机，支持官方传输帧（SOF `0xFF` + 可选校验和 /
   长度扩展）与裸 `00 1D` PDU 两种封装，半截帧保留不丢。
 * `core/SrcProtocol.kt`：中科蓝讯 9ECA 私有协议帧构造与解析（音源 / EQ / MIC 增益 / 固件信息）。
@@ -110,20 +123,34 @@
 * 单元测试 **28 例**：`GaiaProtocolTest`（13）逐字节锁定所有帧与位图解析；
   `BatteryCodecTest`（15）覆盖右耳电量修复的全部回归点。
 
+### 协议修正（文档初稿之后）
+
+* **`GET_SUPPORTED_FEATURES` 两种编码都接受**：新增 `Gaia.parseFeatureEntries()` 与
+  `parseSupportedFeaturesSmart()` —— 先按上游 moondrop-link 的 `[more][featureId][version]...` 字节对解析，
+  条目合法（feature id 落在 0..63）就采用；否则回退 FxxkMoondrop 的 32-bit word 位图解析。
+  能力探测与通知型位图都改用该函数。
+* **EDGE / EDGE2 的 ANC 读回修正**：`anc3Ac()` 现在带 `getMap = intArrayOf(0, 1, 2)`
+  （SET 仍是 AudioCuration 位掩码 `1/2/4`，GET 是 0-based 索引 `0..2`），
+  修掉了「设备回 0 时反查得到 `-1` / 状态未知」的问题。
+* **GAIA 版本探测接线**：`afterConnected()` 现在先发 `00 0A 03 00`（`Gaia.getApiVersion()`）再探测能力。
+* **CI 反馈的编译修正**：`LazyColumn` / `HorizontalPager` 改用 `androidx.compose.foundation.lazy` /
+  `androidx.compose.foundation.pager`（本构建解析到的 Miuix 制品不含 `basic.LazyColumn` / `basic.HorizontalPager`），
+  底部导航改用原生 Compose（MiuixIcons 同样不存在）。
+
 ### 未验证 / 遗留问题（1.0.0）
 
 1. **构建与真机**：本版本**未构建 APK、未真机测试**。
 2. 提示音（0x0E）命令号未证实。
-3. `GET_SUPPORTED_FEATURES` 响应体是 32-bit 位图还是 `(featureId, version)` 字节对（两派读法冲突）。
-4. EDGE 与「恒等映射」档案的 ANC 读回值域（若为 0-based，需给档案补 `getMap`，否则状态显示未知）。
-5. GAIA 版本探测未被调用；EDGE 增益映射与 `promptVolumeMax = 15` 无实测依据。
-6. **接线缺口（源码 grep 确认）**：
-   * `UPDATE_SYSTEM_BATTERY`、`SEND_STRONG_TOAST`、`UPDATE_PODS_NOTIFICATION`、
-     `CANCEL_PODS_NOTIFICATION` **只有接收端，应用进程没有发送端** → 电量不会写进系统蓝牙栈、通知不会主动发出；
-   * `ANC_SELECT` 由设置页广播但应用进程**未注册该 action** → 设置页降噪切换不回传耳机；
-   * `LOW_LATENCY_SELECT` **没有接收端** → 低延迟开关只有乐观 UI；
-   * 空间音频 / 头动追踪（`Gaia.spatialGet/Set`、`headTracking*`）未接线。
-7. 9ECA 全部功能、LHDC 打开后的稳定性、双设备连接写入/断开、充电位解析均未验证。
-8. `SettingsHeadsetHook` 的注入签名（`updateAtUiInfo / updateAncUi / refreshStatus`）需实机核对；
+3. `GET_SUPPORTED_FEATURES` 响应体究竟走哪种编码（代码两种都试，但**具体固件是否会被误判**未真机抓包确认）。
+4. EDGE / EDGE2 的 `getMap = [0,1,2]` 是按上游实测补的，**参数本身仍未真机复核**。
+5. GAIA 版本探测已接线，但**探测结果的解析与用途未真机确认**；EDGE 增益映射与 `promptVolumeMax = 15` 无实测依据。
+6. **低延迟链路已实现但未在真机验证**：`ControlBridge` → `com.android.bluetooth` 的反射桥
+   （厂商方法优先，A2DP codec `getCodecStatus` / `setCodecConfigPreference` 兜底）→ `LOW_LATENCY_CHANGED`；
+   隐藏 API 不可用时只回「保持原状态」并记日志。
+7. 空间音频 / 头动追踪（`Gaia.spatialGet/Set`、`headTracking*`）仍未接线到客户端。
+8. 9ECA 全部功能、LHDC 打开后的稳定性、双设备连接写入/断开、充电位解析均未验证。
+9. `SettingsHeadsetHook` 的注入签名（`updateAtUiInfo / updateAncUi / refreshStatus`）需实机核对；
    `MiuiHeadsetBattery` 电量控件注入未实现。
-9. 13 款「推断」机型未逐型验证；系统集成层（通知 / 设备卡 / 设置页伪装）从未在真机上运行过。
+10. 13 款「推断」机型未逐型验证；系统集成层（通知 / 设备卡 / 设置页伪装 / 跨进程控制桥）从未在真机上运行过。
+11. **构建与真机仍未完成**：本次文档修订同样没有在本机构建（环境无 JDK/SDK/网络），
+    也仍**没有任何本模块的真机测试结论**。

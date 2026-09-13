@@ -50,7 +50,7 @@ commandValue = (feature << 9) | (type << 7) | (command & 0x7F)
 ```
 
 探测确认设备 GAIA 版本为 3 之后，功能命令才走 vendor `0x001D`。
-⚠ 本模块 `Gaia.getApiVersion()` 已实现该帧，但**连接流程没有调用它**（见 [README.md](README.md) 第六节）。
+本模块 `MoondropLink.afterConnected()` **现在会先发这帧**（用 `runCatching` 包住，失败不阻塞后续），再探测能力。
 
 ---
 
@@ -186,10 +186,14 @@ RX 00 1D 00 81 <payload...>    （feature 0 / type 1? → 实际为 COMMAND 的 
 ```
 
 * 端侧分页标志：`payload[0] & 0x01` == 1 表示「还有下一页」（moondrop-link 与本项目一致）；
-* **正文编码两派读法（未裁决）**：
-  * 本项目 `Gaia.parseSupportedFeatures()`：把正文当 **32-bit word 位图**（大端），
-    word `i` 覆盖 feature `32*i .. 32*i+31`，`bit b` 置位即支持 feature `wordIdx*32 + b`；
-  * 上游 moondrop-link `features.py::get_supported_features()`：把正文当 **`(featureId, version)` 字节对**序列。
+* **正文编码：代码两种都试**（初稿之后修正）。上游两派读法互斥：
+  * 上游 moondrop-link `features.py::get_supported_features()`：正文是 **`[more][featureId][version]...` 字节对**；
+  * FxxkMoondrop：正文是 **32-bit word 位图**（大端），word `i` 覆盖 feature `32*i .. 32*i+31。
+  * 本项目 `Gaia.parseSupportedFeaturesSmart()`：**先按字节对解析**（`parseFeatureEntries()`；feature id 落在
+    0..63 才认为条目合法，否则整体判定失败），失败再回退 `Gaia.parseSupportedFeatures()` 的位图解析。
+    能力探测与通知型位图都走 `parseSupportedFeaturesSmart()`。
+  * ⚠ **仍未真机抓包确认**具体固件用哪种编码，以及「字节对恰好也构成合法位图」导致误判的风险
+    （误判会直接改变 ANC 路径选择与 UI 开关展示）。
 * `Gaia.isFeaturePayloadTruncated()`（payload 长度非 4 倍数 → 末位 word 丢失）已实现但**未被调用**。
 
 ---
@@ -538,19 +542,23 @@ PuddingPods 文档也把它归类为 `BluetoothDeviceDetailsFragment` 提供的�
 ## 12. 仍未确定（写在这里避免被当成已确认）
 
 1. **提示音（0x0E）命令号**：默认 GET=1/SET=2，未证实（见第 6 节 VOICE）。
-2. **能力位图正文编码**：32-bit word 位图 vs `(featureId, version)` 字节对，两派冲突，未裁决。
-3. **EDGE / 恒等档案的 ANC 读回值域**：AudioCuration 读回若是 0-based，`getMap=null` 的档案
-   （`setMap.indexOf()` 反查）会得到 `-1`；需要真机确认后补 `getMap`。
-4. **GAIA 版本探测**：`Gaia.getApiVersion()` 未被连接流程调用；未知设备是否必须先探测。
+2. **能力正文编码**：代码现在**两种都试**（`parseSupportedFeaturesSmart()`：字节对优先、位图兜底），
+   但**具体固件用哪种、是否会误判**仍未真机抓包裁决。
+3. **ANC 读回值域**：EDGE / EDGE2 已按上游实测补 `getMap = [0,1,2]`（SET 位掩码 `1/2/4` ↔ GET 0-based）——
+   参数本身待真机复核；`anc4Identity` 系列（`getMap=null`，`setMap.indexOf()` 反查）若读回是 0-based 仍会得到 `-1`。
+4. **GAIA 版本探测**：`00 0A 03 00` 已在连接流程中发送；**探测结果的解析与用途**（是否需要据此切换包格式）未真机确认。
 5. **LHDC 打开后的稳定性**、**双设备连接的写入/断开单台**（需双机）、**9ECA 全部功能**、
    **空间音频/头动追踪**、**充电位解析**：均未验证。
 6. 上游 FxxkMoondrop 表中把三条 ANC 路径的探测条件写成「BASIC 特性位图含 bit1 / bit3 / bit5」，
    与 feature ID（2 / 8 / 32）不是同一套编号；本项目按 feature ID 在 32-bit word 位图中取位，
    即 `bit 2`、`bit 8`、`bit 32` 对应的位。**哪套读法正确同样取决于第 2 条。**
-7. **跨进程接线缺口**（源码 grep 确认，截至 1.0.0）：`UPDATE_SYSTEM_BATTERY` /
-   `SEND_STRONG_TOAST` / `UPDATE_PODS_NOTIFICATION` / `CANCEL_PODS_NOTIFICATION` 已定义并有接收端
-   （分别位于 `hook/HeadsetStateDispatcher.kt`、`hook/MiBluetoothToastHook.kt`），但**应用进程没有发送端**；
-   `ANC_SELECT`（设置页 → 应用进程）与 `LOW_LATENCY_SELECT`（详情页）**没有接收端**。
-   也就是说：协议层能读写耳机，但「系统侧展示 / 系统侧操作回传」这条链路尚待接通。
-8. **本版本没有构建 APK、没有真机测试**：本文所有协议结论要么来自本仓库源码 + 单测，
-   要么来自上游项目的真机记录，没有一条来自本模块的真机运行。
+7. **跨进程链路已接通、但未真机验证**：`pods/ControlBridge.kt` + manifest 声明的
+   `pods.ControlReceiver` 现在既是 `PODS_*` / `*_SELECT` / `UI_INIT` / `REQUEST_*` 的接收端，
+   也是 `UPDATE_SYSTEM_BATTERY`（→ 系统蓝牙栈）、`ANC_CHANGED` / `BATTERY_CHANGED`（→ 设置页）、
+   `UPDATE_PODS_NOTIFICATION` / `SEND_STRONG_TOAST` / `CANCEL_PODS_NOTIFICATION`（→ 通知）的发送端。
+   低延迟另有一条闭环：UI → `ControlBridge` → `com.android.bluetooth`（反射厂商方法，否则 A2DP codec
+   `getCodecStatus` / `setCodecConfigPreference` 兜底）→ `LOW_LATENCY_CHANGED`。
+   这些代码路径**从未在真机上运行过**。
+8. **本模块没有任何真机测试结论**：本文所有协议结论要么来自本仓库源码 + 单测，
+   要么来自上游项目的真机记录，没有一条来自本模块的真机运行；本文档编写环境也没有构建过 APK
+   （无 JDK / Android SDK / 网络），因此**不背书任何「已生效」「已可用」的说法**。
