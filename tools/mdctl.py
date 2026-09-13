@@ -83,11 +83,39 @@ def main():
         a = sys.argv[2:7]
         print("SWIPE", a, time.strftime("%H:%M:%S"))
         sh("input swipe " + " ".join(a) + ("" if len(a) == 5 else " 400"), 15)
+    elif c == "tapdesc":
+        _tapdesc_main()
     elif c == "find":
         x = dump_xml()
         pat = re.compile(sys.argv[2], re.I)
         show([r for r in nodes(x)
               if pat.search(r["text"] or "") or pat.search(r["desc"] or "")])
+
+
+
+
+# ---- adaptive helpers (appended) ----
+def _tapdesc_main():
+    import sys as _s
+    pat = re.compile(_s.argv[2], re.I)
+    want_last = "--last" in _s.argv
+    want_all = "--all" in _s.argv
+    x = dump_xml(raise_=False, tries=10)
+    cands = [r for r in nodes(x)
+             if r["click"] and (pat.search(r["desc"] or "") or pat.search(r["text"] or ""))]
+    if not cands:
+        x = dump_xml(raise_=True, tries=10)
+        cands = [r for r in nodes(x)
+                 if r["click"] and (pat.search(r["desc"] or "") or pat.search(r["text"] or ""))]
+    if not cands:
+        print("NO MATCH for %r" % _s.argv[2]); return
+    if want_all:
+        for r in cands:
+            print("  match (%d,%d) %r" % (r["cx"], r["cy"], (r["desc"] or r["text"])[:50]))
+        return
+    r = cands[-1] if want_last else cands[0]
+    print("TAPDESC %r -> (%d,%d)" % ((r["desc"] or r["text"])[:40], r["cx"], r["cy"]))
+    sh("input tap %d %d" % (r["cx"], r["cy"]), 10)
 
 
 if __name__ == "__main__":

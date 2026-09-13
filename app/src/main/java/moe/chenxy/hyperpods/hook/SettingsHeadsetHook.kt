@@ -649,7 +649,9 @@ object SettingsHeadsetHook : HookContext() {
     private fun fragmentAddress(fragment: Any?): String? =
         SystemApisUtils.deviceAddress(
             runCatching { getObjectField(fragment, "mDevice") as? BluetoothDevice }.getOrNull()
-        ).ifEmpty { currentAddress?.orEmpty() }.takeIf { it.isNotEmpty() }
+        ).orEmpty()                     // deviceAddress 返回 String?，先归一成非空串
+            .ifEmpty { currentAddress.orEmpty() }
+            .takeIf { it.isNotEmpty() }
 
     // ── MIUI 档位 <-> 本模块 UI 下标 ─────────────────────────────────────────
 
