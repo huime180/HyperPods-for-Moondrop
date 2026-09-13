@@ -128,8 +128,8 @@ data class FeatureProfile(
     val promptTone: Boolean = false,
     /** 是否展示「提示音音量」滑条 */
     val promptVolume: Boolean = false,
-    /** 提示音音量的设备端最大值（滑条 0..max 映射到 0..255 由 raw 换算） */
-    val promptVolumeMax: Int = 15,
+    /** 提示音音量上限（官方 App 日志实测音量是 0..100 的百分比） */
+    val promptVolumeMax: Int = Gaia.VOICE_VOLUME_MAX,
     /** 是否展示「LHDC 开关」 */
     val lhdc: Boolean = false,
     /** 是否展示「双设备连接」 */
@@ -139,8 +139,9 @@ data class FeatureProfile(
     // 可覆盖的命令号（默认 = Gaia 中已确认/约定的值）
     val cmdVoiceGetEnable: Int = Gaia.C_VOICE_GET_ENABLE,
     val cmdVoiceSetEnable: Int = Gaia.C_VOICE_SET_ENABLE,
-    val cmdVoiceGetVolume: Int = Gaia.C_VOICE_GET_VOLUME,
-    val cmdVoiceSetVolume: Int = Gaia.C_VOICE_SET_VOLUME,
+    /** 提示音没有独立音量命令，这里与开关指向同一对（仅保留以便覆盖） */
+    val cmdVoiceGetVolume: Int = Gaia.C_VOICE_GET_CONF,
+    val cmdVoiceSetVolume: Int = Gaia.C_VOICE_SET_CONF,
 )
 
 /**

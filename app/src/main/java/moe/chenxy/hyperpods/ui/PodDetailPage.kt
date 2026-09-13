@@ -295,14 +295,15 @@ private fun ToggleCard(snapshot: PodSnapshot) {
 /**
  * 提示音音量。
  *
- * UI 值 0..promptVolumeMax ↔ 设备原始字节：raw = ui * 255 / max，ui = raw * max / 255。
- * 拖动过程中只改本地显示，松手才下发，避免刷屏设备。
+ * UI 值 0..promptVolumeMax 与设备值**同一单位**（0..100 百分比）——官方 App 日志实测
+ * `updateV2VoiceConf: enabled=true, volume=20, index=1`，音量不是 0..255 的原始字节。
+ * 因此这里恒等映射；拖动过程中只改本地显示，松手才下发，避免刷屏设备。
  */
 @Composable
 private fun PromptVolumeRow(snapshot: PodSnapshot) {
     val max = snapshot.promptVolumeMax.coerceAtLeast(1)
     val raw = snapshot.promptVolumeRaw
-    val uiValue = if (raw < 0) 0 else (raw * max / 255).coerceIn(0, max)
+    val uiValue = if (raw < 0) 0 else raw.coerceIn(0, max)
     val localVolume = remember(raw, max) { mutableIntStateOf(uiValue) }
 
     Column(
@@ -322,7 +323,7 @@ private fun PromptVolumeRow(snapshot: PodSnapshot) {
             max = max,
             onValueChange = { ui -> localVolume.intValue = ui },
             onCommit = { ui ->
-                MoondropLink.setPromptVolumeRaw((ui * 255 / max).coerceIn(0, 255))
+                MoondropLink.setPromptVolumeRaw(ui.coerceIn(0, max))
             }
         )
     }

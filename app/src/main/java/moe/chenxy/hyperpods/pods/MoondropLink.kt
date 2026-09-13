@@ -90,7 +90,10 @@ object MoondropLink {
     @Volatile private var gainIndex = -1
     @Volatile private var ledOn: Boolean? = null
     @Volatile private var promptToneOn: Boolean? = null
+    /** 提示音音量：**0..100 百分比**（官方 App 日志实测单位就是百分比） */
     @Volatile private var promptVolumeRaw = -1
+    /** 提示音索引（语言/主题），随同一份配置读写 */
+    @Volatile private var promptIndex = 0
     @Volatile private var lhdcOn: Boolean? = null
     @Volatile private var activeCodec = ""
     @Volatile private var dualConnectionOn: Boolean? = null
@@ -148,6 +151,7 @@ object MoondropLink {
         promptToneOn = promptToneOn,
         promptVolumeRaw = promptVolumeRaw,
         promptVolumeMax = model.features.promptVolumeMax,
+        promptIndex = promptIndex,
         lhdcOn = lhdcOn,
         activeCodec = activeCodec,
         dualConnectionOn = dualConnectionOn,
@@ -461,8 +465,8 @@ object MoondropLink {
             refreshAnc()
             if (capabilities.hasGain) refreshGain()
             if (capabilities.hasLed) refreshLed()
-            if (capabilities.hasPromptTone) refreshPromptTone()
-            if (capabilities.hasPromptVolume) refreshPromptVolume()
+            // 提示音开关与音量是**同一份配置**，读一次即可
+            if (capabilities.hasPromptTone || capabilities.hasPromptVolume) refreshPromptVoice()
             if (capabilities.hasLhdc) refreshLhdc()
             if (capabilities.hasDualConnection) refreshDualConnection()
             emitState()
@@ -551,18 +555,25 @@ object MoondropLink {
         emit(PodEvent.LedChanged(ledOn!!))
     }
 
-    suspend fun refreshPromptTone() {
-        val p = request(Gaia.promptToneGet(model.features.cmdVoiceGetEnable), ANC_TIMEOUT_MS) ?: return
-        if (p.isEmpty()) return
-        promptToneOn = (p[0].toInt() and 0xFF) == 1
-        emit(PodEvent.PromptToneChanged(promptToneOn!!))
+    /**
+     * 读提示音配置（cmd 1）。
+     *
+     * 官方 App 日志实测：回包 payload = `[enabled, volume, index]`，
+     * `VoiceRepositoryData: updateV2VoiceConf: enabled=true, volume=20, index=1`。
+     * 开关与音量来自**同一次读**。
+     */
+    suspend fun refreshPromptVoice() {
+        val p = request(Gaia.voiceGetConf(model.features.cmdVoiceGetEnable), ANC_TIMEOUT_MS) ?: return
+        val conf = Gaia.parseVoiceConf(p) ?: return
+        applyVoiceConf(conf)
     }
 
-    suspend fun refreshPromptVolume() {
-        val p = request(Gaia.promptVolumeGet(model.features.cmdVoiceGetVolume), ANC_TIMEOUT_MS) ?: return
-        if (p.isEmpty()) return
-        promptVolumeRaw = p[0].toInt() and 0xFF
-        emit(PodEvent.PromptVolumeChanged(promptVolumeRaw))
+    private fun applyVoiceConf(conf: Gaia.VoiceConf) {
+        promptToneOn = conf.enabled
+        promptVolumeRaw = conf.volume
+        promptIndex = conf.index
+        emit(PodEvent.PromptToneChanged(conf.enabled))
+        emit(PodEvent.PromptVolumeChanged(conf.volume))
     }
 
     suspend fun refreshLhdc() {
@@ -613,19 +624,38 @@ object MoondropLink {
         scope.launch { write(Gaia.ledSet(if (on) 1 else 0)); delay(300); refreshLed(); emitState() }
     }
 
-    fun setPromptTone(on: Boolean) {
+    /**
+     * 写提示音配置（cmd 2）。
+     *
+     * ⚠ 必须下发**完整三字节** `[enabled, volume, index]`：固件把三者当作一份配置，
+     * 只发开关会把音量/索引写坏（反之亦然）。
+     *
+     * @param volumePercent 0..100
+     */
+    private fun setPromptVoice(enabled: Boolean, volumePercent: Int, index: Int) {
         scope.launch {
-            write(Gaia.promptToneSet(on, model.features.cmdVoiceSetEnable))
-            delay(300); refreshPromptTone(); emitState()
+            write(
+                Gaia.voiceSetConf(
+                    enabled = enabled,
+                    volumePercent = volumePercent,
+                    index = index,
+                    cmdSet = model.features.cmdVoiceSetEnable,
+                )
+            )
+            delay(300)
+            refreshPromptVoice()
+            emitState()
         }
     }
 
-    /** @param raw 设备端原始值（0..255），由 UI 滑条按 promptVolumeMax 换算得到 */
+    fun setPromptTone(on: Boolean) {
+        // 保留当前音量与索引，只改开关
+        setPromptVoice(on, promptVolumeRaw.takeIf { it in 0..100 } ?: 50, promptIndex)
+    }
+
+    /** @param raw 提示音音量百分比 0..100（与官方 App 同一单位） */
     fun setPromptVolumeRaw(raw: Int) {
-        scope.launch {
-            write(Gaia.promptVolumeSet(raw, model.features.cmdVoiceSetVolume))
-            delay(300); refreshPromptVolume(); emitState()
-        }
+        setPromptVoice(promptToneOn ?: true, raw.coerceIn(0, Gaia.VOICE_VOLUME_MAX), promptIndex)
     }
 
     /**
@@ -689,14 +719,10 @@ object MoondropLink {
                 dualConnectionOn = (f.payload[0].toInt() and 0xFF) == 1
                 emit(PodEvent.DualConnectionChanged(dualConnectionOn!!))
             }
-            Gaia.F_VOICE -> {
-                if (f.command == model.features.cmdVoiceGetEnable && f.payload.isNotEmpty()) {
-                    promptToneOn = (f.payload[0].toInt() and 0xFF) == 1
-                    emit(PodEvent.PromptToneChanged(promptToneOn!!))
-                } else if (f.command == model.features.cmdVoiceGetVolume && f.payload.isNotEmpty()) {
-                    promptVolumeRaw = f.payload[0].toInt() and 0xFF
-                    emit(PodEvent.PromptVolumeChanged(promptVolumeRaw))
-                }
+            Gaia.F_VOICE -> if (f.command == Gaia.C_VOICE_GET_CONF ||
+                f.command == Gaia.C_VOICE_SET_CONF
+            ) {
+                Gaia.parseVoiceConf(f.payload)?.let { applyVoiceConf(it) }
             }
             Gaia.F_BASIC -> if (f.command == Gaia.C_BASIC_GET_SUPPORTED_FEATURES) {
                 // request() 已经消费；这里只做通知型位图的增量合并

@@ -5,6 +5,7 @@
 package moe.chenxy.hyperpods.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -73,11 +74,36 @@ class GaiaProtocolTest {
     }
 
     @Test
-    fun `提示音命令默认为 GET1 SET2 且可覆盖`() {
-        assertEquals("00 1D 1C 01", Gaia.hex(Gaia.promptToneGet()))
-        assertEquals("00 1D 1C 02 01", Gaia.hex(Gaia.promptToneSet(true)))
-        assertEquals("00 1D 1C 01", Gaia.hex(Gaia.promptToneGet(cmdGetEnable = 1)))
-        assertEquals("00 1D 1C 09 01", Gaia.hex(Gaia.promptToneSet(true, cmdSetEnable = 9)))
+    fun `提示音命令与官方 App 日志实测一致`() {
+        // 【2026-09-14 真机证据】V3VoicePlugin: command=1 读 / command=2 写，
+        // payload = [enabled, volume, index]（V2，size>=3）
+        assertEquals("00 1D 1C 01", Gaia.hex(Gaia.voiceGetConf()))
+        // 日志原样：data=[1, 20, 1]（开，音量 20，索引 1）
+        assertEquals("00 1D 1C 02 01 14 01", Gaia.hex(Gaia.voiceSetConf(true, 20, 1)))
+        // 日志原样：data=[0, 82, 1]（关，音量 82，索引 1）
+        assertEquals("00 1D 1C 02 00 52 01", Gaia.hex(Gaia.voiceSetConf(false, 82, 1)))
+        // 音量是百分比，越界被裁剪
+        assertEquals("00 1D 1C 02 01 64 00", Gaia.hex(Gaia.voiceSetConf(true, 250, 0)))
+    }
+
+    @Test
+    fun `提示音回包解析三个字段`() {
+        val c = Gaia.parseVoiceConf(byteArrayOf(1, 20, 1))!!
+        assertTrue(c.enabled)
+        assertEquals(20, c.volume)
+        assertEquals(1, c.index)
+        assertTrue(c.v2)
+
+        val off = Gaia.parseVoiceConf(byteArrayOf(0, 82, 1))!!
+        assertFalse(off.enabled)
+        assertEquals(82, off.volume)
+
+        // 只有开关位的旧短格式
+        val short = Gaia.parseVoiceConf(byteArrayOf(1))!!
+        assertTrue(short.enabled)
+        assertFalse(short.v2)
+
+        assertNull(Gaia.parseVoiceConf(null))
     }
 
     @Test

@@ -93,9 +93,11 @@ data class PodSnapshot(
     val ledOn: Boolean? = null,
     /** 提示音开关；null = 未知 */
     val promptToneOn: Boolean? = null,
-    /** 提示音音量的设备原始值；-1 = 未知 */
+    /** 提示音音量：**0..100 百分比**（官方 App 日志实测单位）；-1 = 未知 */
     val promptVolumeRaw: Int = -1,
-    val promptVolumeMax: Int = 15,
+    val promptVolumeMax: Int = 100,
+    /** 提示音索引（语言/主题） */
+    val promptIndex: Int = 0,
     /** LHDC 开关；null = 未知。false 时按 AAC/LDAC 等基础编码工作。 */
     val lhdcOn: Boolean? = null,
     /** 当前系统 A2DP 实际协商到的编解码名（来自系统，用于与 LHDC 开关对照） */

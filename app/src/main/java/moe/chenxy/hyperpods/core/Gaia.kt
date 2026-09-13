@@ -186,15 +186,34 @@ object Gaia {
     // ============================================================
     // VOICE(14)：提示音（voice prompt）
     //
-    // ⚠ 水月雨官方 App 的反编译数据只保留了 feature ID，未保留命令号。
-    //   这里给出与 Moondrop 自家其它开关（DAC/LED/SPATIAL/DYBASS）一致的
-    //   “GET=1 / SET=2” 编号约定，并允许在设置页逐设备覆盖（见 PromptToneProfile）。
-    //   能力位图不含 feature 14 时，UI 不会展示该开关。
+    // ✅ 命令号与 payload 已由**官方 App 自身 gaiaclient 的日志**确认
+    //    （2026-09-14 真机抓取，Xiaomi Pad 8 Pro）：
+    //
+    //      V3VoicePlugin: fetchVoiceConf
+    //      [V3VoicePlugin->onResponse] command=1, data=[1, 20, 1], size=3
+    //      VoiceRepositoryData: updateV2VoiceConf: enabled=true, volume=20, index=1
+    //      V3VoicePlugin: setVoiceConf
+    //      [V3VoicePlugin->onResponse] command=2, data=[0, 82, 1], size=3
+    //
+    //    → GET = cmd 1，SET = cmd 2
+    //    → payload(V2, size>=3) = [enabled(0/1)][volume(0..100)][index]
+    //    → ⚠ **没有**独立的音量命令：音量是同一份配置里的一个字段。
+    //      之前按「GET=1/SET=2 开关 + GET=3/SET=4 音量」的猜测是错的。
     // ============================================================
-    const val C_VOICE_GET_ENABLE = 1
-    const val C_VOICE_SET_ENABLE = 2
-    const val C_VOICE_GET_VOLUME = 3
-    const val C_VOICE_SET_VOLUME = 4
+    const val C_VOICE_GET_CONF = 1
+    const val C_VOICE_SET_CONF = 2
+
+    // 兼容旧命名（都指向同一对命令）
+    const val C_VOICE_GET_ENABLE = C_VOICE_GET_CONF
+    const val C_VOICE_SET_ENABLE = C_VOICE_SET_CONF
+    const val C_VOICE_GET_VOLUME = C_VOICE_GET_CONF
+    const val C_VOICE_SET_VOLUME = C_VOICE_SET_CONF
+
+    /** V2 配置 payload 长度：`[enabled][volume][index]` */
+    const val VOICE_CONF_V2_SIZE = 3
+
+    /** 提示音音量的取值范围（百分比）。 */
+    const val VOICE_VOLUME_MAX = 100
 
     // ============================================================
     // ONEBRINGTWO(20)：双设备连接 / 一拖二
@@ -444,19 +463,56 @@ object Gaia {
     // 命令构造：提示音 / 双设备连接（命令号可被型号档案覆盖）
     // ============================================================
 
-    fun promptToneGet(cmdGetEnable: Int = C_VOICE_GET_ENABLE): ByteArray =
-        command(F_VOICE, cmdGetEnable)
+    /** 读提示音配置（cmd 1）→ 回包 payload = `[enabled, volume, index]` */
+    fun voiceGetConf(cmdGet: Int = C_VOICE_GET_CONF): ByteArray = command(F_VOICE, cmdGet)
 
-    fun promptToneSet(enabled: Boolean, cmdSetEnable: Int = C_VOICE_SET_ENABLE): ByteArray =
-        command(F_VOICE, cmdSetEnable, byteArrayOf(if (enabled) 1 else 0))
+    /**
+     * 写提示音配置（cmd 2），payload = `[enabled, volume, index]`（V2 格式）。
+     *
+     * 必须一次把三个字段都发出去：固件把开关/音量/索引当作**一份完整配置**，
+     * 只发一个字节会把另外两个字段写坏（这正是"改音量把开关关了"类问题的来源）。
+     */
+    fun voiceSetConf(
+        enabled: Boolean,
+        volumePercent: Int,
+        index: Int,
+        cmdSet: Int = C_VOICE_SET_CONF,
+    ): ByteArray = command(
+        F_VOICE, cmdSet,
+        byteArrayOf(
+            (if (enabled) 1 else 0).toByte(),
+            volumePercent.coerceIn(0, VOICE_VOLUME_MAX).toByte(),
+            (index and 0xFF).toByte(),
+        ),
+    )
 
-    fun promptVolumeGet(cmdGetVolume: Int = C_VOICE_GET_VOLUME): ByteArray =
-        command(F_VOICE, cmdGetVolume)
+    /** 提示音配置。 */
+    data class VoiceConf(
+        val enabled: Boolean,
+        /** 0..100 */
+        val volume: Int,
+        /** 提示音索引（语言/主题） */
+        val index: Int,
+        /** 是否为 V2 三字节格式 */
+        val v2: Boolean,
+    )
 
-    fun promptVolumeSet(raw: Int, cmdSetVolume: Int = C_VOICE_SET_VOLUME): ByteArray =
-        command(F_VOICE, cmdSetVolume, byteArrayOf((raw and 0xFF).toByte()))
+    /** 解析提示音配置回包；兼容 V2(3B) / 2B / 1B 三种长度。 */
+    fun parseVoiceConf(payload: ByteArray?): VoiceConf? {
+        val p = payload ?: return null
+        return when {
+            p.size >= VOICE_CONF_V2_SIZE -> VoiceConf(
+                (p[0].toInt() and 0xFF) != 0,
+                (p[1].toInt() and 0xFF).coerceIn(0, VOICE_VOLUME_MAX),
+                p[2].toInt() and 0xFF,
+                true,
+            )
+            p.size == 2 -> VoiceConf((p[0].toInt() and 0xFF) != 0, p[1].toInt() and 0xFF, 0, false)
+            p.size == 1 -> VoiceConf((p[0].toInt() and 0xFF) != 0, 0, 0, false)
+            else -> null
+        }
+    }
 
-    /** 读双设备连接开关 */
     fun dualConnectionGet(cmdGet: Int = C_OBT_GET_STATE): ByteArray =
         command(F_ONEBRINGTWO, cmdGet)
 
