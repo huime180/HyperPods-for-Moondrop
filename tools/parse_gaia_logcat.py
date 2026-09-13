@@ -44,6 +44,27 @@ def decode(frame):
     return vend, (cw >> 9) & 0x7F, (cw >> 7) & 3, cw & 0x7F, frame[4:]
 
 
+
+# ---- feature 22 TOUCHV2: payload is 5 bytes, one per gesture -----------------
+# byte i encodes BOTH ears as two 4-bit action ids:  high nibble = LEFT, low = RIGHT
+# proven from the app's own bytecode
+# (com.qualcomm.qti.gaiaclient...TouchNewInfo.<init>: singleL=(b>>4)&0xF,
+#  singleR=b&0xF, then double/triple/ones1s/threes3s over bytes 1..4).
+TOUCH_GESTURES = ["single-tap", "double-tap", "triple-tap", "long-press-1s", "long-press-3s"]
+TOUCH_ACTIONS = {0: "NONE", 1: "PLAY/PAUSE", 2: "PREV", 3: "NEXT",
+                 4: "VOL+", 5: "VOL-", 6: "VOICE-ASSISTANT", 7: "ANC-TOGGLE"}
+
+
+def touchv2_str(pay):
+    out = []
+    for i, b in enumerate(pay[:5]):
+        L, R = (b >> 4) & 0xF, b & 0xF
+        out.append("%s L=%d/%s R=%d/%s" % (TOUCH_GESTURES[i], L,
+                                           TOUCH_ACTIONS.get(L, "id%d" % L),
+                                           R, TOUCH_ACTIONS.get(R, "id%d" % R)))
+    return " | ".join(out)
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     csvp = None
@@ -99,6 +120,11 @@ def main():
                   % (ts, d, kind, vend, "%d/%s" % (f, FEATURES.get(f, "?")),
                      TYPES.get(t, "?"), c, pay.hex(" ") or "-",
                      spp.hex(" ") if spp else ""))
+            if f == 22 and len(pay) >= 5:
+                print("        ^ TOUCHV2 cmd %d (%s): %s" % (
+                    c, "GET_CURRENT_ACTION" if c == 2 else
+                       "GET_DEFAULT_ACTION" if c == 1 else
+                       "SET_CURRENT_ACTION" if c == 3 else "?", touchv2_str(pay)))
             k = (f, t, c, d)
             a = agg.setdefault(k, {"n": 0, "pay": set(), "spp": set()})
             a["n"] += 1

@@ -103,6 +103,9 @@
     <string name="more_settings">More settings</string>
     <string name="close">Close</string>
     <string name="quick_controls">Quick controls</string>
+    <!-- quick controls collapsible header: chevron accessibility text -->
+    <string name="quick_controls_expand">Expand quick controls</string>
+    <string name="quick_controls_collapse">Collapse quick controls</string>
 
     <!-- system bluetooth entry -->
     <string name="system_bluetooth_settings">System Bluetooth settings</string>
