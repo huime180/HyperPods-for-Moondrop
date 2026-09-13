@@ -197,7 +197,7 @@ object MiBluetoothToastHook : HookContext() {
             val contentIntent = PendingIntent.getActivity(
                 context,
                 0,
-                Intent(HyperPodsAction.SHOW_UI).apply {
+                Intent(HyperPodsAction.SHOW_POPUP).apply {
                     setPackage(PKG_APP)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 },

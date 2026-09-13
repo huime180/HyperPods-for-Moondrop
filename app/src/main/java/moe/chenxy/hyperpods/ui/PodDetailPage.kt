@@ -1,16 +1,24 @@
 /*
- * HyperPods for Moondrop — 耳机详情页
+ * HyperPods for Moondrop — 详情页（单页滚动）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * 所有开关行都由 PodCapabilities 硬门控：能力位为 false 时该行根本不会出现在组合树里。
+ * 顺序照 PuddingPods 的详情页：机型 → 电量 → 降噪 → 增益 → 指示灯 → 提示音 → 提示音音量
+ *                            → LHDC → 双设备连接 → 低延迟 → 刷新 → 系统蓝牙设置 → 关于
+ * 所有功能行都由 PodCapabilities 硬门控：能力位为 false 时该行不会出现在组合树里。
  *
- * 列表容器用的是 androidx.compose.foundation.lazy.LazyColumn：
+ * 列表容器用 androidx.compose.foundation.lazy.LazyColumn：
  * 本仓库解析到的 miuix 产物没有 top.yukonga.miuix.kmp.basic.LazyColumn（CI 实测），
- * 因此 topAppBarScrollBehavior 只能作为保留参数（见下方注释），无法绑到列表上。
+ * 所以 topAppBarScrollBehavior 只能作为保留参数，无法绑到列表上。
  */
 package moe.chenxy.hyperpods.ui
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +62,10 @@ import top.yukonga.miuix.kmp.utils.getWindowSize
 
 private val VERIFIED_GREEN = Color(0xFF34C759)
 
+/** 系统设置页读取的耳机 extra（与 hook/SettingsHeadsetHook.kt 的两个常量一致）。 */
+private const val EXTRA_DEVICE = "android.bluetooth.device.extra.DEVICE"
+private const val EXTRA_BT_ADDRESS = "bluetoothaddress"
+
 /**
  * @param topAppBarScrollBehavior 保留参数：Miuix 的折叠式 LazyColumn 在当前 miuix 产物里不存在，
  *   等依赖版本支持后再用它绑定 `Modifier.nestedScroll(...)`。目前不参与布局。
@@ -65,108 +77,69 @@ fun PodDetailPage(
     snapshot: PodSnapshot,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val capabilities = snapshot.capabilities
-    val hasAnyToggle = capabilities.hasLed ||
-        capabilities.hasPromptTone ||
-        capabilities.hasLhdc ||
-        capabilities.hasDualConnection ||
-        capabilities.hasLowLatency
+    val hasSwitchRow = capabilities.hasLed || capabilities.hasPromptTone
+    val hasCodecRow = capabilities.hasLhdc || capabilities.hasDualConnection || capabilities.hasLowLatency
 
     LazyColumn(
         modifier = modifier.height(getWindowSize().height.dp),
         contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = 24.dp)
     ) {
-        item {
-            DeviceHeroCard(snapshot)
-        }
-
-        item {
-            Card(
-                modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp)
-                ) {
-                    Text(stringResource(R.string.battery_title), fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    PodStatus(snapshot.battery)
-                }
-            }
-        }
-
-        if (snapshot.ancModes.isNotEmpty()) {
+        if (!snapshot.connected) {
             item {
-                Card(
-                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp)
+                WaitingPodsPage()
+            }
+        } else {
+            item { DeviceHeroCard(snapshot) }
+            item { BatteryCard(snapshot) }
+
+            if (snapshot.ancModes.isNotEmpty()) {
+                item { AncCard(snapshot) }
+            }
+
+            if (capabilities.hasGain) {
+                item { GainCard(snapshot) }
+            }
+
+            if (hasSwitchRow) {
+                item { SwitchCard(snapshot) }
+            }
+
+            if (capabilities.hasPromptVolume) {
+                item {
+                    Card(
+                        modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp)
                     ) {
-                        Text(stringResource(R.string.anc_title), fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(8.dp))
-                        AncSwitch(
-                            modes = snapshot.ancModes,
-                            selectedIndex = snapshot.ancIndex,
-                            onSelect = { index -> MoondropLink.setAnc(index) }
-                        )
+                        PromptVolumeRow(snapshot)
                     }
                 }
             }
+
+            if (hasCodecRow) {
+                item { CodecCard(snapshot) }
+            }
         }
 
-        if (capabilities.hasGain) {
+        item { RefreshCard() }
+
+        if (snapshot.deviceAddress.isNotEmpty()) {
             item {
                 Card(
                     modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp)
-                    ) {
-                        Text(stringResource(R.string.gain_title), fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(4.dp))
-                        SegmentedSelector(
-                            labels = snapshot.gainLabels,
-                            selectedIndex = snapshot.gainIndex,
-                            onSelect = { index -> MoondropLink.setGain(index) }
-                        )
-                    }
-                }
-            }
-        }
-
-        if (hasAnyToggle) {
-            item {
-                ToggleCard(snapshot)
-            }
-        }
-
-        if (capabilities.hasPromptVolume) {
-            item {
-                Card(
-                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp)
-                ) {
-                    PromptVolumeRow(snapshot)
+                    BasicComponent(
+                        title = stringResource(R.string.system_bluetooth_settings),
+                        summary = stringResource(R.string.system_bluetooth_settings_summary),
+                        onClick = { openSystemBluetoothSettings(context, snapshot.deviceAddress) },
+                        enabled = true
+                    )
                 }
             }
         }
 
         item {
-            Card(
-                modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp)
-            ) {
-                BasicComponent(
-                    title = stringResource(R.string.refresh),
-                    summary = stringResource(R.string.refresh_summary),
-                    onClick = { MoondropLink.refreshAll() },
-                    enabled = true
-                )
-            }
+            AboutBlock(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp))
         }
     }
 }
@@ -228,12 +201,69 @@ private fun DeviceHeroCard(snapshot: PodSnapshot) {
     }
 }
 
-/** 能力门控的开关区：指示灯 / 提示音 / LHDC / 双设备连接 / 低延迟。 */
 @Composable
-private fun ToggleCard(snapshot: PodSnapshot) {
-    val context = LocalContext.current
-    val capabilities = snapshot.capabilities
+private fun BatteryCard(snapshot: PodSnapshot) {
+    Card(
+        modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            Text(stringResource(R.string.battery_title), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            PodStatus(snapshot.battery)
+        }
+    }
+}
 
+@Composable
+private fun AncCard(snapshot: PodSnapshot) {
+    Card(
+        modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            Text(stringResource(R.string.anc_title), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            AncSwitch(
+                modes = snapshot.ancModes,
+                selectedIndex = snapshot.ancIndex,
+                onSelect = { index -> MoondropLink.setAnc(index) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun GainCard(snapshot: PodSnapshot) {
+    Card(
+        modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            Text(stringResource(R.string.gain_title), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            SegmentedSelector(
+                labels = snapshot.gainLabels,
+                selectedIndex = snapshot.gainIndex,
+                onSelect = { index -> MoondropLink.setGain(index) }
+            )
+        }
+    }
+}
+
+/** 指示灯 + 提示音开关（各自能力门控）。 */
+@Composable
+private fun SwitchCard(snapshot: PodSnapshot) {
+    val capabilities = snapshot.capabilities
     Card(
         modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp)
     ) {
@@ -245,7 +275,6 @@ private fun ToggleCard(snapshot: PodSnapshot) {
                 onCheckedChange = { on -> MoondropLink.setLed(on) }
             )
         }
-
         if (capabilities.hasPromptTone) {
             SuperSwitch(
                 title = stringResource(R.string.prompt_tone_title),
@@ -254,7 +283,17 @@ private fun ToggleCard(snapshot: PodSnapshot) {
                 onCheckedChange = { on -> MoondropLink.setPromptTone(on) }
             )
         }
+    }
+}
 
+/** LHDC + 双设备连接 + 低延迟（各自能力门控）。 */
+@Composable
+private fun CodecCard(snapshot: PodSnapshot) {
+    val context = LocalContext.current
+    val capabilities = snapshot.capabilities
+    Card(
+        modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp)
+    ) {
         if (capabilities.hasLhdc) {
             SuperSwitch(
                 title = stringResource(R.string.lhdc_title),
@@ -263,7 +302,6 @@ private fun ToggleCard(snapshot: PodSnapshot) {
                 onCheckedChange = { on -> MoondropLink.setLhdc(on) }
             )
         }
-
         if (capabilities.hasDualConnection) {
             SuperSwitch(
                 title = stringResource(R.string.dual_connection_title),
@@ -272,7 +310,6 @@ private fun ToggleCard(snapshot: PodSnapshot) {
                 onCheckedChange = { on -> MoondropLink.setDualConnection(on) }
             )
         }
-
         if (capabilities.hasLowLatency) {
             SuperSwitch(
                 title = stringResource(R.string.low_latency_title),
@@ -289,6 +326,20 @@ private fun ToggleCard(snapshot: PodSnapshot) {
                 }
             )
         }
+    }
+}
+
+@Composable
+private fun RefreshCard() {
+    Card(
+        modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp)
+    ) {
+        BasicComponent(
+            title = stringResource(R.string.refresh),
+            summary = stringResource(R.string.refresh_summary),
+            onClick = { MoondropLink.refreshAll() },
+            enabled = true
+        )
     }
 }
 
@@ -328,3 +379,42 @@ private fun PromptVolumeRow(snapshot: PodSnapshot) {
         )
     }
 }
+
+/**
+ * 打开系统蓝牙设备详情页（HyperOS 上是 MiuiHeadsetActivity，已被本模块 hook 接管并路由回本模块），
+ * 里面有系统级的 LHDC / 低延迟 / 音量同步等开关。失败则退回系统蓝牙列表页。
+ *
+ * ⚠ 两个字符串常量非公开 API，取自本仓库 hook/SettingsHeadsetHook.kt（它正是从系统设置页的
+ * intent 里读这两个 extra 的），因此与实际系统页面一致。
+ */
+@SuppressLint("MissingPermission")
+@Suppress("DEPRECATION")
+private fun openSystemBluetoothSettings(context: Context, address: String) {
+    val device = runCatching {
+        if (context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+            BluetoothAdapter.getDefaultAdapter()?.getRemoteDevice(address)
+        } else {
+            null
+        }
+    }.getOrNull()
+
+    val opened = runCatching {
+        context.startActivity(
+            Intent(ACTION_BLUETOOTH_DEVICE_DETAIL_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (device != null) putExtra(EXTRA_DEVICE, device)
+                putExtra(EXTRA_BT_ADDRESS, address)
+            }
+        )
+    }.isSuccess
+    if (opened) return
+
+    runCatching {
+        context.startActivity(
+            Intent(Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }
+}
+
+/** 系统蓝牙设备详情页 action（Settings 内部常量，非 SDK 公开 API）。 */
+private const val ACTION_BLUETOOTH_DEVICE_DETAIL_SETTINGS = "android.settings.BLUETOOTH_DEVICE_DETAIL_SETTINGS"

@@ -2,7 +2,6 @@
 <!-- HyperPods for Moondrop — default (English) strings -->
 <resources>
     <string name="app_name">HyperPods for Moondrop</string>
-    <string name="pod_info">Device</string>
     <string name="about">About</string>
 
     <!-- waiting page -->
@@ -63,4 +62,13 @@
     <string name="about_credits_summary">HyperOS integration architecture based on Art-Chen/HyperPods; protocol data from bqj6666/FxxkMoondrop and MegaSuite/moondrop-link-desktop; references: lingbai-rong/PuddingPods, Leaf-lsgtky/OppoPods.</string>
     <string name="about_license_title">License</string>
     <string name="about_license_value">GPL-3.0</string>
+
+    <!-- popup -->
+    <string name="more_settings">More settings</string>
+    <string name="close">Close</string>
+    <string name="quick_controls">Quick controls</string>
+
+    <!-- system bluetooth entry -->
+    <string name="system_bluetooth_settings">System Bluetooth settings</string>
+    <string name="system_bluetooth_settings_summary">Open the system device page for system-level LHDC, low latency and volume sync</string>
 </resources>

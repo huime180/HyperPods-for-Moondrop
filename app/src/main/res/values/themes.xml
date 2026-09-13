@@ -3,4 +3,18 @@
     <style name="Theme.HyperPodsMoondrop" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@android:color/transparent</item>
     </style>
+
+    <!--
+      快速弹窗主题（ui/PopupActivity）。
+      五个 item 逐条照抄参考实现 _refs/OppoPods/app/src/main/res/values/themes.xml 的
+      Theme.OppoPods.Popup：半透明 + 透明背景 + 无标题 + 不用系统遮罩（遮罩我们在 Compose 里画，
+      这样才能同时实现「背景变暗」和「点卡片外关闭」——本仓库 miuix 产物里没有可确认的 OverlayDialog）。
+    -->
+    <style name="Theme.HyperPodsMoondrop.Popup" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
+    </style>
 </resources>

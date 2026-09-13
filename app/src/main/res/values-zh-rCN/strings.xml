@@ -2,7 +2,6 @@
 <!-- HyperPods for Moondrop — 简体中文 -->
 <resources>
     <string name="app_name">HyperPods for Moondrop</string>
-    <string name="pod_info">耳机</string>
     <string name="about">关于</string>
 
     <!-- 等待页 -->
@@ -63,4 +62,13 @@
     <string name="about_credits_summary">基于 Art-Chen/HyperPods 的 HyperOS 集成架构；协议数据来自 bqj6666/FxxkMoondrop 与 MegaSuite/moondrop-link-desktop；参考 lingbai-rong/PuddingPods、Leaf-lsgtky/OppoPods。</string>
     <string name="about_license_title">许可协议</string>
     <string name="about_license_value">GPL-3.0</string>
+
+    <!-- 快速弹窗 -->
+    <string name="more_settings">更多设置</string>
+    <string name="close">关闭</string>
+    <string name="quick_controls">快捷控制</string>
+
+    <!-- 系统蓝牙入口 -->
+    <string name="system_bluetooth_settings">系统蓝牙设置</string>
+    <string name="system_bluetooth_settings_summary">打开系统设备详情页，可设置系统级 LHDC、低延迟与音量同步</string>
 </resources>

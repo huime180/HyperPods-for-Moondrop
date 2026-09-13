@@ -28,6 +28,25 @@
         </activity>
 
         <!--
+          快速弹窗（PuddingPods 的主入口形态）：从超级岛 / 设备卡 / 通知进来只显示
+          电量 + 降噪 + 快捷控制。半透明主题 + 卡片式布局，点卡片外或「关闭」退出。
+          taskAffinity="" + excludeFromRecents="true" 与 OppoPods 的 PopupActivity 一致。
+        -->
+        <activity
+            android:name=".ui.PopupActivity"
+            android:theme="@style/Theme.HyperPodsMoondrop.Popup"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density|fontScale|uiMode|locale|layoutDirection|smallestScreenSize|colorMode">
+            <intent-filter>
+                <action android:name="chen.action.hyperpods.moondrop.show_popup" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!--
           应用侧跨进程控制桥（pods/ControlBridge.kt）。
           由 manifest 声明，因此系统各进程用显式广播即可唤醒本应用进程处理控制命令，
           不要求用户先打开本应用。显式广播（setPackage）不受 Android 8+ 隐式广播限制。

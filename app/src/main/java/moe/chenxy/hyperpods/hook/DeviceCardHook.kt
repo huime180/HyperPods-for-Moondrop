@@ -213,10 +213,10 @@ object DeviceCardHook : HookContext() {
 
     private fun openModuleUi(context: Context) {
         runCatching {
-            context.startActivity(Intent(HyperPodsAction.SHOW_UI).apply {
+            context.startActivity(Intent(HyperPodsAction.SHOW_POPUP).apply {
                 setPackage(BuildConfig.APPLICATION_ID)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             })
-        }.onFailure { Log.w(TAG, "startActivity(${HyperPodsAction.SHOW_UI}) failed", it) }
+        }.onFailure { Log.w(TAG, "startActivity(${HyperPodsAction.SHOW_POPUP}) failed", it) }
     }
 }

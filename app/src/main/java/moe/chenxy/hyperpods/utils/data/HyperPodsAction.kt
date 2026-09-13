@@ -18,6 +18,12 @@ object HyperPodsAction {
     /** 打开本模块 UI（设备卡点击、通知点击都用它） */
     const val SHOW_UI = "chen.action.hyperpods.moondrop.show_ui"
 
+    /**
+     * 打开「快速弹窗」（PuddingPods 形态的主入口）：超级岛 / 设备卡 / 通知点击走这里，
+     * 只展示电量 + 降噪 + 快捷控制，详情与设置再从弹窗进入 SHOW_UI 的详情页。
+     */
+    const val SHOW_POPUP = "chen.action.hyperpods.moondrop.show_popup"
+
     /** 设备卡点击时 SystemUI 广播索要当前耳机 MAC */
     const val GET_PODS_MAC = "chen.action.hyperpods.moondrop.get_pods_mac"
     /** 蓝牙进程回 MAC（与 GET_PODS_MAC 同名字符串，靠方向区分，与原 HyperPods 一致） */

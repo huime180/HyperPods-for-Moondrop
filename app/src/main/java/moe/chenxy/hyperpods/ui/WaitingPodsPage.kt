@@ -1,12 +1,13 @@
 /*
- * HyperPods for Moondrop — 等待耳机连接
+ * HyperPods for Moondrop — 等待耳机连接（详情页里的未连接状态块）
  * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 作为详情页 LazyColumn 的一个 item 使用，所以只占满宽度、不占满高度。
  */
 package moe.chenxy.hyperpods.ui
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -22,12 +23,11 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-fun WaitingPodsPage() {
+fun WaitingPodsPage(modifier: Modifier = Modifier) {
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(stringResource(R.string.waiting_for_pod))
