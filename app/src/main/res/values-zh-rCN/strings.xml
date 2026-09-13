@@ -21,6 +21,9 @@
     <string name="transport">传输通道</string>
     <string name="active_codec">当前编码</string>
     <string name="unknown_value">未知</string>
+    <!-- 当前编码：耳机侧 LHDC 开关与系统协商到的编码会短暂不一致，这两个是切换中的中性占位 -->
+    <string name="codec_lhdc_pending">LHDC（系统切换中）</string>
+    <string name="codec_base_pending">基础编码（系统切换中）</string>
 
     <!-- 电量 -->
     <string name="battery_title">电量</string>
@@ -77,8 +80,9 @@
     <string name="module_enable_title">启用模块</string>
     <string name="module_enable_summary">关闭后不再接管蓝牙，恢复系统原生行为</string>
     <string name="settings_section_notification">通知</string>
-    <string name="show_notification_title">连接通知</string>
-    <string name="show_notification_summary">耳机连接时显示通知</string>
+    <!-- 通知栏显示：耳机状态在系统通知栏 / 蓝牙设置里的常驻显示（默认开） -->
+    <string name="notification_display_title">通知栏显示</string>
+    <string name="notification_display_summary">在通知栏显示耳机的连接与电量状态</string>
     <string name="show_strong_toast_title">超级岛提示</string>
     <string name="show_strong_toast_summary">电量与模式变化时显示 HyperOS 强提示</string>
     <string name="show_focus_island_title">焦点通知</string>
@@ -112,9 +116,15 @@
     <string name="system_bluetooth_settings_summary">打开系统设备详情页，可设置系统级 LHDC、低延迟与音量同步</string>
     <!-- 重启作用域（等效 LSPosed 的「重启作用域」） -->
     <string name="restart_scope">重启作用域</string>
-    <string name="restart_scope_summary">会重启蓝牙 / 系统界面 / 设置 等 5 个作用域进程，界面可能短暂闪一下；等效于 LSPosed 的「重启作用域」，不需要重启手机。</string>
+    <string name="restart_scope_summary">只重启你在下面勾选的作用域进程（蓝牙 / 小米互联服务 / 小米蓝牙 / 系统界面 / 设置），界面可能短暂闪一下；等效于 LSPosed 的「重启作用域」，不需要重启手机。</string>
     <string name="restart_scope_confirm">重启</string>
-    <string name="restart_scope_done">已通知 %1$d 个作用域进程退出（若某个进程未响应，可尝试授予 root 或手动重启）</string>
+    <string name="restart_scope_done">已通知 %1$d / %2$d 个已勾选的作用域进程退出（若某个进程未响应，可尝试授予 root 或手动重启）</string>
+    <!-- 勾选框的作用域名（顺序与 META-INF/xposed/scope.list 一致） -->
+    <string name="scope_bluetooth">蓝牙</string>
+    <string name="scope_milink">小米互联服务</string>
+    <string name="scope_xiaomi_bluetooth">小米蓝牙</string>
+    <string name="scope_systemui">系统界面</string>
+    <string name="scope_settings">设置</string>
     <string name="restart_scope_denied">未能通知任何作用域进程，请在 LSPosed 中检查模块作用域，或手动重启手机</string>
 
     <!-- 手势（TOUCHV2，feature 22） -->

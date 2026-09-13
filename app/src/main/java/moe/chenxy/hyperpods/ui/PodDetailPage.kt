@@ -284,8 +284,44 @@ private fun DeviceHeroCard(snapshot: PodSnapshot) {
         )
         BasicComponent(
             title = stringResource(R.string.active_codec),
-            summary = snapshot.activeCodec.ifBlank { stringResource(R.string.unknown_value) },
+            summary = activeCodecLabel(snapshot),
         )
+    }
+}
+
+/** 系统报的编码名里带 LHDC 的（本 ROM 实测名：LHDCv5 / LHDC_V2 / LHDC_V3）。 */
+private fun isLhdcCodec(name: String): Boolean = name.contains("LHDC", ignoreCase = true)
+
+/**
+ * 「当前编码」行的显示值 —— 显示永远不与 LHDC 开关自相矛盾。
+ *
+ * 两个数据来源相互独立，而且会短暂打架：
+ *   · [PodSnapshot.activeCodec] = **系统 A2DP 实际协商到的编码**，由
+ *     pods/MoondropLink.onSystemCodecChanged() 从 CODEC_CHANGED 广播填入（数据侧不在本文件职责内）；
+ *   · [PodSnapshot.lhdcOn] = **耳机侧 GAIA 的 LHDC 开关**。
+ * 在耳机上打开 LHDC 之后，系统侧要重新协商才会从 AAC 切到 LHDC，这段时间里 activeCodec
+ * 仍然是 AAC。早先这里直接把 activeCodec 印出来，于是出现「LHDC 开关是开的、当前编码却
+ * 写着 AAC」的自相矛盾（用户报的就是这个）。
+ *
+ * 规则：
+ *   ① LHDC 开：系统报的还不是 LHDC（空 / AAC / SBC / LDAC）→ 显示「LHDC（系统切换中）」，
+ *      **绝不**在此时把 AAC 当成当前编码；系统已经协商到 LHDC 则照实显示它。
+ *   ② LHDC 关但系统还停在 LHDC：同样不能与开关冲突 → 显示「基础编码（系统切换中）」。
+ *   ③ 其余：系统编码就是事实，照实显示（AAC 只会在 LHDC 关 / 未知时走到这里）。
+ *   ④ 没读到系统编码：显示「未知」，不谎报 AAC。
+ *
+ * 真正不同步的病因在数据侧（系统编码广播与 GAIA 开关不同步、断开后 activeCodec 也不清空），
+ * 本次改动范围只到 ui/**，因此这里只保证 UI 不再背书一个与开关冲突的值。
+ */
+@Composable
+private fun activeCodecLabel(snapshot: PodSnapshot): String {
+    val systemCodec = snapshot.activeCodec.trim()
+    val systemIsLhdc = isLhdcCodec(systemCodec)
+    return when {
+        snapshot.lhdcOn == true && !systemIsLhdc -> stringResource(R.string.codec_lhdc_pending)
+        snapshot.lhdcOn == false && systemIsLhdc -> stringResource(R.string.codec_base_pending)
+        systemCodec.isNotEmpty() -> systemCodec
+        else -> stringResource(R.string.unknown_value)
     }
 }
 

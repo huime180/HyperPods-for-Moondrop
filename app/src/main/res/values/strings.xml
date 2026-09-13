@@ -21,6 +21,9 @@
     <string name="transport">Transport</string>
     <string name="active_codec">Active codec</string>
     <string name="unknown_value">Unknown</string>
+    <!-- 当前编码：耳机侧 LHDC 开关与系统协商到的编码会短暂不一致，这两个是切换中的中性占位 -->
+    <string name="codec_lhdc_pending">LHDC (system switching)</string>
+    <string name="codec_base_pending">Basic codec (system switching)</string>
 
     <!-- battery -->
     <string name="battery_title">Battery</string>
@@ -77,8 +80,9 @@
     <string name="module_enable_title">Enable module</string>
     <string name="module_enable_summary">Turning this off leaves bluetooth to the stock behaviour</string>
     <string name="settings_section_notification">Notifications</string>
-    <string name="show_notification_title">Connection notification</string>
-    <string name="show_notification_summary">Show a notification for the connected earbuds</string>
+    <!-- 通知栏显示：耳机状态在系统通知栏 / 蓝牙设置里的常驻显示（默认开） -->
+    <string name="notification_display_title">Notification display</string>
+    <string name="notification_display_summary">Show the earbuds state in the notification bar</string>
     <string name="show_strong_toast_title">Strong toast</string>
     <string name="show_strong_toast_summary">Show the HyperOS strong toast for battery and mode changes</string>
     <string name="show_focus_island_title">Focus notifications</string>
@@ -112,9 +116,15 @@
     <string name="system_bluetooth_settings_summary">Open the system device page for system-level LHDC, low latency and volume sync</string>
     <!-- restart scope (same as LSPosed manager's "Restart scope") -->
     <string name="restart_scope">Restart scope</string>
-    <string name="restart_scope_summary">Restarts the 5 hooked processes: Bluetooth, System UI, Settings, Mi Link and Xiaomi Bluetooth. The screen may flicker for a moment. This is the same as LSPosed’s “Restart scope” — no phone reboot needed.</string>
+    <string name="restart_scope_summary">Restart the hooked processes you tick below: Bluetooth, Mi Link, Xiaomi Bluetooth, System UI and Settings. The screen may flicker for a moment. This is the same as the Restart scope in LSPosed — no phone reboot needed.</string>
     <string name="restart_scope_confirm">Restart</string>
-    <string name="restart_scope_done">Notified %1$d scope processes to exit. If one does not respond, grant root or restart the phone manually.</string>
+    <string name="restart_scope_done">Notified %1$d of the %2$d selected scope processes to exit. If one does not respond, grant root or restart the phone manually.</string>
+    <!-- 勾选框的作用域名（顺序与 META-INF/xposed/scope.list 一致） -->
+    <string name="scope_bluetooth">Bluetooth</string>
+    <string name="scope_milink">Mi Link service</string>
+    <string name="scope_xiaomi_bluetooth">Xiaomi Bluetooth</string>
+    <string name="scope_systemui">System UI</string>
+    <string name="scope_settings">Settings</string>
     <string name="restart_scope_denied">Could not notify any scope process. Check the module scope in LSPosed, or restart the phone manually.</string>
 
     <!-- gesture control (TOUCHV2, feature 22) -->

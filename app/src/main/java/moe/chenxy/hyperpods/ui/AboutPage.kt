@@ -115,9 +115,11 @@ fun SettingsPage(
 
         item {
             Card {
+                // 「通知栏显示」：默认开；值落到 hyperpods_moondrop_settings 组的
+                // HyperPodsPrefsKey.SHOW_NOTIFICATION，hook 侧经 getRemotePreferences(同组名) 读取。
                 SwitchPreference(
-                    title = stringResource(R.string.show_notification_title),
-                    summary = stringResource(R.string.show_notification_summary),
+                    title = stringResource(R.string.notification_display_title),
+                    summary = stringResource(R.string.notification_display_summary),
                     checked = settings.showNotification,
                     onCheckedChange = { settings.setShowNotification(it) },
                     enabled = settings.enabled,
