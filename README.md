@@ -61,9 +61,9 @@ HyperOS 的「融合设备中心」「超级岛」「蓝牙设置页」原生只
 | **提示音开关与音量（VOICE 0x0E）** | 默认按水月雨自家开关惯例 GET=1 / SET=2；可在档案里逐设备覆盖命令号 | ⚠ **命令号未真机证实**（见下文） |
 | **LHDC 开关（CODEC_TYPE 0x10）** | cmd 5 读 / cmd 6 写（payload `01`/`00`）；同时保留 LC3、LDAC 构造器 | 帧已由单测锁定；出厂默认 LHDC 关闭（上游实测当前活动编码为 AAC） |
 | **双设备连接（ONEBRINGTWO 0x14）** | cmd 1/2 状态、3/4 超时、5/6 设备列表、7 断开单台 | 命令号有 EDGE 真机证据；写入/断开需双机实测 |
-| **低延迟模式** | **这是 HyperOS 系统侧功能，不是 GAIA 命令**；UI 开关只做乐观更新并广播状态 | ⚠ 系统侧接线尚未闭环（见第六节） |
+| **低延迟模式** | **这是 HyperOS 系统侧功能，不是 GAIA 命令**；已接通 UI → `ControlBridge` → `com.android.bluetooth`（先反射厂商直通方法，否则走 A2DP codec `getCodecStatus`/`setCodecConfigPreference` 兜底）→ 回 `LOW_LATENCY_CHANGED` | 已实现，**未真机验证**（见第六节） |
 | **超级岛与融合设备中心** | SystemUI 插件 ClassLoader 里接管耳机卡点击 → 打开模块 UI；MAC 握手在独立 HandlerThread 上完成（不阻塞 SystemUI 主线程） | 已实现，**未真机验证** |
-| **通知与电量显示** | `com.xiaomi.bluetooth` 内展示耳机电量通知（id 10003 / tag `BTHeadset<addr>` / `IMPORTANCE_MIN` 通道，复用小米蓝牙本地化字符串） | 已实现，**未真机验证**；且通知发送端尚未接线（见第六节） |
+| **通知与电量显示** | `ControlBridge` 把电量经 `UPDATE_PODS_NOTIFICATION` / `SEND_STRONG_TOAST` 发到 `com.xiaomi.bluetooth`，由该进程展示耳机电量通知（id 10003 / tag `BTHeadset<addr>` / `IMPORTANCE_MIN` 通道，复用小米蓝牙本地化字符串） | 已实现，**未真机验证** |
 | **设置页耳机入口** | `com.android.settings` 用 `01010607` 伪装四档 ANC 模板，注入 `updateAtUiInfo/updateAncUi/refreshStatus`，3 秒实时同步 | 已实现，**未真机验证**；`MiuiHeadsetBattery` 注入未做 |
 
 ---
@@ -159,6 +159,7 @@ app/src/main/java/moe/chenxy/hyperpods/
 │   └── SrcProtocol.kt             # 中科蓝讯 9ECA 私有协议
 ├── pods/
 │   ├── MoondropLink.kt            # 协议客户端（BLE GATT / SPP、能力探测、轮询、读写）
+│   ├── ControlBridge.kt           # 应用侧跨进程控制桥（ControlBridge + manifest 声明的 ControlReceiver）
 │   └── PodSnapshot.kt             # 状态模型与事件
 ├── hook/                          # libxposed API 102 系统集成层
 │   ├── XposedEntry.kt             # 模块入口（按进程分发 hook + 热重载）
@@ -181,22 +182,50 @@ app/src/test/java/.../core/                # GaiaProtocolTest / BatteryCodecTest
 |---|---|---|
 | 协议核心（线格式、机型档案、电量、切帧、9ECA） | `core/*` | ✅ 已实现 |
 | 协议客户端 | `pods/MoondropLink.kt`、`PodSnapshot.kt` | ✅ 已实现 |
+| **应用侧跨进程控制桥** | `pods/ControlBridge.kt` + manifest 里的 `ControlReceiver` | ✅ 已实现；**未真机验证**（低延迟路径见下） |
 | 单元测试 | `app/src/test/.../core/GaiaProtocolTest.kt`、`BatteryCodecTest.kt` | ✅ 已实现（28 个用例：GaiaProtocolTest 13 + BatteryCodecTest 15，逐字节锁定帧与电量回归） |
 | Xposed 入口 / 四进程 hook | `hook/*` | ✅ 已实现，**未真机验证** |
 | Compose / Miuix UI | `ui/*`、`MainActivity.kt` | ✅ 已实现，**未真机验证** |
 | 字符串资源 | `res/values/strings.xml`、`res/values-zh-rCN/strings.xml` | ✅ 已实现 |
 
-### 已知接线缺口（**截至本次文档核对，逐条由源码 grep 确认**）
+### 应用侧跨进程控制桥（已接线）
 
-| # | 缺口 | 影响 |
+协议客户端跑在应用进程，而控制入口分散在系统各进程。`pods/ControlBridge.kt` 用一个
+**manifest 声明的广播接收器**（`pods.ControlReceiver`，见 `AndroidManifest.xml`）把这条链路接通：
+因为是显式广播（`setPackage(...)`）+ manifest 声明，**即使本模块 App 没有在运行，系统也能用广播把
+应用进程拉起来执行控制命令** —— 这正是「系统设置页点降噪」这种场景需要的（用户不必先打开本 App）。
+
+| 方向 | 动作 | 效果 |
 |---|---|---|
-| 1 | `UPDATE_SYSTEM_BATTERY`（把电量写进系统蓝牙栈）**只有接收端**（`HeadsetStateDispatcher`），应用进程**没有发送端** | 系统蓝牙/状态栏的设备电量不会被本模块刷新 |
-| 2 | `SEND_STRONG_TOAST` / `UPDATE_PODS_NOTIFICATION` / `CANCEL_PODS_NOTIFICATION` **只有接收端**（`MiBluetoothToastHook`），应用进程**没有发送端** | 耳机电量通知不会主动发出 |
-| 3 | `ANC_SELECT` 由 `SettingsHeadsetHook` 广播到应用进程，但 `MainUI` 的 `IntentFilter` **没有注册该 action** | 系统设置页上的降噪切换不会作用到耳机 |
-| 4 | `LOW_LATENCY_SELECT` 由详情页广播到本应用自身，但**没有任何接收端** | 低延迟开关只有乐观 UI，不改系统状态 |
-| 5 | 空间音频 / 头动追踪（`Gaia.spatialGet/Set`、`headTracking*`）**未接线到客户端** | 档案里的空间音频能力目前不会真正读写设备 |
+| `com.android.bluetooth` → 应用进程 | `PODS_CONNECTED` / `PODS_DISCONNECTED` | 桥用 `getRemoteDevice(mac)` 取回 `BluetoothDevice` 并 `MoondropLink.connect()` / `disconnect()`；非水月雨设备直接忽略 |
+| 系统设置页 → 应用进程 | `ANC_SELECT` / `GAIN_SELECT` / `LED_SELECT` / `PROMPT_TONE_SELECT` / `PROMPT_VOLUME_SELECT` / `LHDC_SELECT` / `DUAL_CONNECTION_SELECT` | 分别路由到 `MoondropLink.setAnc/setGain/setLed/setPromptTone/setPromptVolumeRaw/setLhdc/setDualConnection` |
+| 系统侧 → 应用进程 | `UI_INIT` / `REQUEST_CAPABILITIES` / `REQUEST_BATTERY` | 触发 `refreshAll()` / `requestBatteryRefresh()` 做状态重放 |
+| 应用进程 → `com.android.bluetooth` | `UPDATE_SYSTEM_BATTERY`（带 `EXTRA_LEVEL` + `EXTRA_DEVICE`） | 经 `HeadsetStateDispatcher` 反射调用 `AdapterService.setBatteryLevel`，系统蓝牙页 / 融合设备中心显示电量 |
+| 应用进程 → `com.android.settings` | `ANC_CHANGED` / `BATTERY_CHANGED` | 喂给被伪装的系统耳机页做实时显示 |
+| 应用进程 → `com.xiaomi.bluetooth` | `UPDATE_PODS_NOTIFICATION` / `SEND_STRONG_TOAST` / `CANCEL_PODS_NOTIFICATION` | 通知 / 电量展示链路 |
+| 应用进程 → `com.android.bluetooth` → 应用进程 | `LOW_LATENCY_SELECT` → `LOW_LATENCY_CHANGED` | 见下 |
 
-> 这些缺口是**功能接线**问题，不是协议问题；核心协议与帧构造都有单测覆盖。
+电量经 `Bundle` 传递：键 `left` / `right` / `case`（+ `left_charging` / `right_charging` / `case_charging`），
+编码 `255 = 未知`、`value or 128 = 充电中`。系统蓝牙栈只需要一个单值，取左右耳较小者。
+`MoondropLink` 现在维护**监听者列表**（`addListener` / `removeListener`），因此桥的转发器与 UI 监听者可以并存，
+不会互相覆盖。
+
+**低延迟（已实现完整路径，仍未真机验证）**：UI 广播 `LOW_LATENCY_SELECT` → `ControlReceiver`（做乐观状态更新）
+→ 转发给 `com.android.bluetooth` 的 `HeadsetStateDispatcher`；那里先反射尝试厂商可能的直通方法
+（`setLowLatencyMode` / `setLowLatencyAudioEnabled` / `setLatencyMode` / `enableLowLatency`），
+都不存在时退化为 **A2DP codec 路径**（`getCodecStatus(device)` 读当前 codec，从可选能力里按
+LHDC / LDAC / aptX-adaptive / LC3 / AAC 的顺序挑候选，用 `setCodecConfigPreference(device, config)` 下发；
+关闭时恢复原 codec 配置），最后回一条 `LOW_LATENCY_CHANGED`。任何一步不可用都只回「保持原状态」并记日志。
+
+### 仍未接线 / 未验证的部分
+
+| # | 项目 | 影响 |
+|---|---|---|
+| 1 | 空间音频 / 头动追踪（`Gaia.spatialGet/Set`、`headTracking*`）**未接线到客户端** | 档案里的空间音频能力目前不会真正读写设备 |
+| 2 | 低延迟的系统侧实现 | 代码路径完整（上述反射 + A2DP codec 兜底），但**从未在真机验证**；不同 ROM 的 A2DP 隐藏 API 可能不可用 |
+| 3 | `SettingsHeadsetHook` 的状态注入 | `MiuiHeadsetFragment#updateAtUiInfo / updateAncUi / refreshStatus` 按 OppoPods 用法调用，**需实机核对**；`MiuiHeadsetBattery` 电量控件注入未实现 |
+
+> 接线桥依赖反射与系统隐藏 API，属「已实现、未真机验证」；核心协议与帧构造都有单测覆盖。
 
 ### 构建状态（非常重要）
 
@@ -212,15 +241,15 @@ app/src/test/java/.../core/                # GaiaProtocolTest / BatteryCodecTest
 | # | 项目 | 现状 |
 |---|---|---|
 | 1 | **提示音开关 / 音量（feature 0x0E）的命令号** | 官方 App 反编译数据只保留了 feature id，命令号未保留。默认按水月雨自家开关惯例 GET=1 / SET=2，**未实测**；已留逐设备命令号覆盖入口 |
-| 2 | `GET_SUPPORTED_FEATURES` 响应体的编码 | 本项目按「32-bit word 位图」解析，上游 moondrop-link 按「(featureId, version) 字节对」解析。两种读法互斥，**未真机抓包裁决**（见 PROTOCOL.md） |
-| 3 | EDGE 的 ANC 读回值域 | moondrop-link 实测为 0-based `0..2`；而 EDGE 档案用 `setMap=[1,2,4]` + `getMap=null`（反查），设备回 `0` 会得到 `-1`。**需要真机确认后补 `getMap`** |
-| 4 | GAIA 版本探测 | `Gaia.getApiVersion()`（`00 0A 03 00`）已实现但**连接流程没有调用**；当前直接按 vendor `0x001D` 发功能命令 |
+| 2 | `GET_SUPPORTED_FEATURES` 响应体的编码 | 上游两派读法互斥（`(featureId, version)` 字节对 vs 32-bit word 位图）；代码现在**两种都试**（`Gaia.parseSupportedFeaturesSmart()` 先按字节对、失败回退位图）。**具体固件用哪种、是否会被误判，仍未真机抓包确认** |
+| 3 | EDGE 的 ANC 读回值域 | 已按上游实测给 EDGE / EDGE2 补上 `getMap = [0,1,2]`（SET 仍是位掩码 `1/2/4`，GET 是 0-based `0..2`）；**该参数本身仍未真机复核** |
+| 4 | GAIA 版本探测 | 连接流程现在会先发 `00 0A 03 00`（`Gaia.getApiVersion()`）再探测能力；**探测结果的解析与用途未真机确认** |
 | 5 | 9ECA 私有协议 | `SrcProtocol.kt` 已实现帧构造与解析，但**未接线、未真机验证**（上游 FxxkMoondrop 亦标注未实机验证） |
-| 6 | LHDC 开关的实际效果 | 帧格式已由单测锁定；出厂默认 LHDC 关闭（实测活动编码为 AAC），开启后是否稳定协商**未实测** |
-| 7 | 低延迟模式 | 判定为 HyperOS 系统侧功能；系统侧接线未闭环（第六节 #4），**未验证** |
+| 6 | LHDC 开关的实际效果 | 帧格式已由单测锁定；出厂默认 LHDC 关闭（上游实测当前活动编码为 AAC），开启后是否稳定协商**未实测** |
+| 7 | 低延迟模式 | 已实现完整链路（`ControlBridge` → `com.android.bluetooth` 的反射桥 + A2DP codec 兜底 + `LOW_LATENCY_CHANGED` 回包），但**从未在真机验证**，隐藏 API 可能不可用 |
 | 8 | 13 款「推断」机型 | 芯片级推断，协议可自动识别但未逐型跑通 |
 | 9 | 双设备连接的写入与断开单台 | moondrop-link 已读取验证；**写入/断开需双机场景实测**（上游原文） |
-| 10 | 系统集成层（通知 / 超级岛 / 设备卡 / Settings 伪装） | 源码已就位，但**从未在真机上运行过**；且存在第六节列出的接线缺口 |
+| 10 | 系统集成层（通知 / 超级岛 / 设备卡 / Settings 伪装 / 跨进程控制桥） | 源码已就位并已接线，但**从未在真机上运行过** |
 | 11 | `SettingsHeadsetHook` 的状态注入签名 | `MiuiHeadsetFragment#updateAtUiInfo / updateAncUi / refreshStatus` 的真实签名与字段含义按 OppoPods 在 HyperOS 上的用法调用，需实机核对；`MiuiHeadsetBattery` 电量控件注入未实现 |
 | 12 | EDGE 增益映射、`promptVolumeMax = 15` | 均无实测依据（推断值） |
 

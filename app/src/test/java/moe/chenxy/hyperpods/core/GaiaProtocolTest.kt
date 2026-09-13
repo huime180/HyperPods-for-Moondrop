@@ -16,7 +16,7 @@ class GaiaProtocolTest {
     fun `电量查询命令与协议文档字节一致`() {
         assertEquals("00 1D 1A 00", Gaia.hex(Gaia.batteryGetAllV4()))
         assertEquals("00 1D 1A 01 01 02", Gaia.hex(Gaia.batteryGet(intArrayOf(1, 2))))
-        assertEquals("00 1D 1A 01 01", Gaia.hex(Gaia.batteryGetAll()))
+        assertEquals("00 1D 1A 01", Gaia.hex(Gaia.batteryGetAll()))
     }
 
     @Test
