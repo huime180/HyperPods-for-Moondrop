@@ -390,11 +390,20 @@ object MiBluetoothToastHook : HookContext() {
         return lines.joinToString("\n").ifEmpty { "已连接" }
     }
 
-    /** 电量原始编码 -> "标签：xx %"；未知返回 null（该行不显示）。 */
+    /**
+     * 电量原始编码 -> "标签：xx %"；未知返回 null（该行不显示）。
+     *
+     * ⚠ 未连接/无数据（level <= 0）显示「离线」而不是 `0 %`：
+     * 水月雨固件对未连接的一侧会上报 0x00 或 0xFF，两者都到达过这里，
+     * 显示 0% 会让用户误以为电量耗尽。复用小米蓝牙自己的断开文案。
+     */
     private fun batteryLine(context: Context, resName: String, fallback: String, raw: Int): String? {
         val level = SystemApisUtils.decodeLevel(raw)
         if (level < 0) return null
         val label = vendorString(context, resName) ?: fallback
+        if (level == 0) {
+            return "$label：" + (vendorString(context, RES_DISCONNECT) ?: FALLBACK_DISCONNECT)
+        }
         val charging = if (SystemApisUtils.decodeCharging(raw)) " ⚡" else ""
         return "$label：$level %$charging"
     }
