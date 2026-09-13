@@ -1,0 +1,34 @@
+[versions]
+agp = "8.13.0"
+kotlin = "2.2.20"
+coreKtx = "1.17.0"
+androidx-activity-compose = "1.11.0"
+androidx-window = "1.5.0"
+compose-plugin = "1.9.0"
+kotlinxSerializationJson = "1.9.0"
+# libxposed API 102（LSPosed >= 2.1.1 / Vector）。仅编译期，运行时由框架注入。
+libxposedApi = "102.0.0"
+yukonga-miuix = "0.5.1"
+haze = "1.6.10"
+junit = "4.13.2"
+
+[plugins]
+agp-app = { id = "com.android.application", version.ref = "agp" }
+agp-lib = { id = "com.android.library", version.ref = "agp" }
+kotlin = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+parcelize = { id = "kotlin-parcelize" }
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+jetbrains-compose = { id = "org.jetbrains.compose", version.ref = "compose-plugin" }
+lsplugin-apksign = { id = "org.lsposed.lsplugin.apksign", version = "1.4" }
+lsplugin-resopt = { id = "org.lsposed.lsplugin.resopt", version = "1.6" }
+
+[libraries]
+coreKtx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+libxposedApi = { group = "io.github.libxposed", name = "api", version.ref = "libxposedApi" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
+yukonga-miuix = { group = "top.yukonga.miuix.kmp", name = "miuix", version.ref = "yukonga-miuix" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity-compose" }
+androidx-window = { group = "androidx.window", name = "window", version.ref = "androidx-window" }
+haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }

@@ -1,0 +1,21 @@
+# 构建产物
+*.iml
+.gradle
+/local.properties
+/.idea
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+.DS_Store
+
+# 本地参考资料（上游仓库克隆）与设备日志，不随源码发布
+/_refs/
+/PuddingPods/
+/_artifacts/
+/out/
+
+# Python
+__pycache__/
+*.pyc

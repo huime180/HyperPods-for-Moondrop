@@ -1,0 +1,76 @@
+/*
+ * HyperPods for Moondrop — 跨进程广播契约
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 模块跨 4 个进程工作，进程间只靠广播通信（不共享内存、不写系统设置）：
+ *   com.android.bluetooth   —— 耳机连接状态感知 + 把电量写进系统蓝牙栈
+ *   com.xiaomi.bluetooth    —— 通知 / 超级岛电量展示
+ *   com.android.systemui    —— 融合设备中心耳机卡的点击接管
+ *   com.android.settings    —— 伪装成小米原生耳机页，把系统页面的操作路由回本模块
+ *   本应用进程               —— 协议客户端 + UI
+ *
+ * ⚠ 所有跨进程广播都必须 setPackage(...)：Android 14+ 会丢弃未指定包名的隐式广播。
+ */
+package moe.chenxy.hyperpods.utils.data
+
+object HyperPodsAction {
+
+    /** 打开本模块 UI（设备卡点击、通知点击都用它） */
+    const val SHOW_UI = "chen.action.hyperpods.moondrop.show_ui"
+
+    /** 设备卡点击时 SystemUI 广播索要当前耳机 MAC */
+    const val GET_PODS_MAC = "chen.action.hyperpods.moondrop.get_pods_mac"
+    /** 蓝牙进程回 MAC（与 GET_PODS_MAC 同名字符串，靠方向区分，与原 HyperPods 一致） */
+    const val PODS_MAC_RECEIVED = "chen.action.hyperpods.moondrop.get_pods_mac"
+
+    // ── 蓝牙进程 / 设置进程 → 应用 UI ────────────────────────────────────
+    const val PODS_CONNECTED = "chen.action.hyperpods.moondrop.pods_connected"
+    const val PODS_DISCONNECTED = "chen.action.hyperpods.moondrop.pods_disconnected"
+    const val BATTERY_CHANGED = "chen.action.hyperpods.moondrop.battery_changed"
+    const val ANC_CHANGED = "chen.action.hyperpods.moondrop.anc_changed"
+    const val GAIN_CHANGED = "chen.action.hyperpods.moondrop.gain_changed"
+    const val LED_CHANGED = "chen.action.hyperpods.moondrop.led_changed"
+    const val PROMPT_TONE_CHANGED = "chen.action.hyperpods.moondrop.prompt_tone_changed"
+    const val PROMPT_VOLUME_CHANGED = "chen.action.hyperpods.moondrop.prompt_volume_changed"
+    const val LHDC_CHANGED = "chen.action.hyperpods.moondrop.lhdc_changed"
+    const val DUAL_CONNECTION_CHANGED = "chen.action.hyperpods.moondrop.dual_connection_changed"
+    const val LOW_LATENCY_CHANGED = "chen.action.hyperpods.moondrop.low_latency_changed"
+    const val CAPABILITIES_CHANGED = "chen.action.hyperpods.moondrop.capabilities_changed"
+    const val DEBUG_LOG = "chen.action.hyperpods.moondrop.debug_log"
+
+    // ── 应用 UI → 蓝牙进程 ───────────────────────────────────────────────
+    /** 请求全量状态重放（UI 打开时调用） */
+    const val UI_INIT = "chen.action.hyperpods.moondrop.ui_init"
+    const val ANC_SELECT = "chen.action.hyperpods.moondrop.anc_select"
+    const val GAIN_SELECT = "chen.action.hyperpods.moondrop.gain_select"
+    const val LED_SELECT = "chen.action.hyperpods.moondrop.led_select"
+    const val PROMPT_TONE_SELECT = "chen.action.hyperpods.moondrop.prompt_tone_select"
+    const val PROMPT_VOLUME_SELECT = "chen.action.hyperpods.moondrop.prompt_volume_select"
+    const val LHDC_SELECT = "chen.action.hyperpods.moondrop.lhdc_select"
+    const val DUAL_CONNECTION_SELECT = "chen.action.hyperpods.moondrop.dual_connection_select"
+    const val LOW_LATENCY_SELECT = "chen.action.hyperpods.moondrop.low_latency_select"
+    /** 请求重新探测能力 */
+    const val REQUEST_CAPABILITIES = "chen.action.hyperpods.moondrop.request_capabilities"
+    /** 请求重新读取三路电量 */
+    const val REQUEST_BATTERY = "chen.action.hyperpods.moondrop.request_battery"
+
+    // ── 蓝牙进程 → 小米蓝牙进程（通知 / 超级岛） ─────────────────────────
+    const val SEND_STRONG_TOAST = "chen.action.hyperpods.moondrop.sendstrongtoast"
+    const val UPDATE_PODS_NOTIFICATION = "chen.action.hyperpods.moondrop.updatepodsnotification"
+    const val CANCEL_PODS_NOTIFICATION = "chen.action.hyperpods.moondrop.cancelpodsnotification"
+
+    // ── 蓝牙进程 → 系统蓝牙栈（把电量写进 AdapterService） ───────────────
+    /** 由蓝牙进程内的 hook 接收，调用 AdapterService.setBatteryLevel */
+    const val UPDATE_SYSTEM_BATTERY = "chen.action.hyperpods.moondrop.update_system_battery"
+
+    // extras
+    const val EXTRA_STATUS = "status"
+    const val EXTRA_BATTERY = "batteryParams"
+    const val EXTRA_DEVICE = "device"
+    const val EXTRA_DEVICE_NAME = "device_name"
+    const val EXTRA_MAC = "mac"
+    const val EXTRA_LEVEL = "level"
+    const val EXTRA_PROMPT_VOLUME_RAW = "prompt_volume_raw"
+    const val EXTRA_ENABLED = "enabled"
+    const val EXTRA_MESSAGE = "message"
+}

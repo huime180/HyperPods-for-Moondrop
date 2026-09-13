@@ -1,0 +1,9 @@
+id=moe.chenxy.hyperpods.moondrop
+name=HyperPods for Moondrop
+version=1.0.0
+versionCode=1
+author=huime180
+description=为 HyperOS 设备提供系统级 MOONDROP 水月雨耳机控制（多机型适配）
+minApiVersion=101
+targetApiVersion=102
+staticScope=true
