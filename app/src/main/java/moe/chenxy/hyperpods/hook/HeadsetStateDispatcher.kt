@@ -80,6 +80,45 @@ object HeadsetStateDispatcher : HookContext() {
     /** BluetoothCodecConfig 上的编码名字段（AOSP 的私有字段名；取不到名字时才会用到）。 */
     private val CODEC_NAME_FIELDS = arrayOf("mCodecName", "codecName")
 
+    /** BluetoothCodecStatus 上持有 config 的字段（getter 被 ROM 挡住时的兜底）。 */
+    private val CODEC_CONFIG_FIELDS = arrayOf("mCodecConfig", "codecConfig")
+
+    /**
+     * 本 ROM 的 BluetoothCodecConfig.toString() 形如 `{codecName:LHDCv5,mCodecType:19,...}`——
+     * 名字就印在里面，getter/字段都读不到时直接从 toString() 抠出来（实机日志确认过）。
+     */
+    private val CODEC_NAME_PATTERN = Regex("codecName\\s*[:=]\\s*([^,}\\s]+)")
+
+    /**
+     * 本机 dumpsys 实测的 type → 名字表（不是抄来的常量表）。
+     * 只在前三层都读不到名字时使用，并在日志里标注来源是 typeMap。
+     * 注意：这是本 ROM 内部枚举的取值，与 BluetoothCodecConfig 的公开 CODEC_TYPE_* 不是同一套
+     * （公开表里 7 不是 aptX-adaptive），所以**只能**当兜底，不能当主路径。
+     */
+    private val CODEC_TYPE_NAMES = mapOf(
+        0 to "SBC",
+        1 to "AAC",
+        2 to "AptX",
+        3 to "AptX-HD",
+        4 to "LDAC",
+        7 to "aptX-adaptive",
+        12 to "LHDC_V2",
+        13 to "LHDC_V3",
+        19 to "LHDCv5"
+    )
+
+    // ── AdapterService 访问路径（真机 dex 逐条核对）─────────────────────────────
+    private const val CLS_ADAPTER_SERVICE = "com.android.bluetooth.btservice.AdapterService"
+
+    /**
+     * 从 A2dpService 实例上取 AdapterService 的候选字段。
+     * ⚠ 参考实现用的 `mAdapterService` 在这台 ROM 上**不存在**：
+     *   A2dpService → ConnectableProfile → ProfileService，三者都没有 mAdapterService 字段；
+     *   ProfileService 实际声明的字段名是 `adapterService`（真机 dex 实证）。
+     *   保留 mAdapterService 只是为了其它 ROM 兜底。
+     */
+    private val ADAPTER_SERVICE_FIELDS = arrayOf("adapterService", "mAdapterService")
+
     // ── 低延迟（HyperOS 系统侧）候选 codec ─────────────────────────────────────
     // 数值取自 BluetoothCodecConfig 的公开/系统常量本身；这里写字面量是为了不在编译期
     // 引用框架隐藏 API（@SystemApi 成员不在公开 SDK 里）。
@@ -104,13 +143,20 @@ object HeadsetStateDispatcher : HookContext() {
     @Volatile
     private var activeName: String = ""
 
-    /** hook 到的 A2dpService 实例（Context + mAdapterService 的宿主）。 */
+    /** 我们主动 closeProfileProxy 的标记：区分「读完就关」与真正的代理掉线。 */
+    @Volatile
+    private var codecProxyCloseRequested = false
+
+    /** hook 到的 A2dpService 实例（adapterService 字段的宿主）。 */
     @Volatile
     private var a2dpService: Any? = null
 
     private var appContext: Context? = null
     private var requestReceiver: BroadcastReceiver? = null
     private var receiverContext: Context? = null
+
+    /** 「重启作用域」接收器用的进程 Context（A2dpService 连接事件里偷到的，见 dispatchConnectionState）。 */
+    override fun processContextOrNull(): Context? = appContext
 
     @Volatile
     private var receiverRegistered = false
@@ -329,17 +375,43 @@ object HeadsetStateDispatcher : HookContext() {
             Log.w(TAG, "UPDATE_SYSTEM_BATTERY level=$level but no connected Moondrop device")
             return
         }
-        // HyperPods 参考实现：getObjectField(mContext /*=A2dpService 本身*/, "mAdapterService")
-        // 再 callMethod(service, "setBatteryLevel", device, level, false)
-        val adapterService = runCatching { getObjectField(a2dpService, "mAdapterService") }.getOrNull()
-            ?: runCatching { getObjectField(appContext, "mAdapterService") }.getOrNull()
-        if (adapterService == null) {
-            Log.w(TAG, "mAdapterService unavailable; battery level=$level dropped")
+        val resolved = resolveAdapterService()
+        if (resolved == null) {
+            Log.w(
+                TAG,
+                "AdapterService unreachable (tried ${ADAPTER_SERVICE_FIELDS.joinToString()} / " +
+                    "$CLS_ADAPTER_SERVICE.sAdapterService); battery level=$level dropped"
+            )
             return
         }
+        val (adapterService, how) = resolved
         runCatching { callMethod(adapterService, "setBatteryLevel", device, level, false) }
-            .onFailure { Log.w(TAG, "AdapterService.setBatteryLevel failed", it) }
-        Log.i(TAG, "system battery level=$level -> ${SystemApisUtils.deviceAddress(device)}")
+            .onSuccess {
+                Log.i(TAG, "system battery level=$level -> ${SystemApisUtils.deviceAddress(device)} (via $how)")
+            }
+            .onFailure { Log.w(TAG, "AdapterService.setBatteryLevel failed (via $how)", it) }
+    }
+
+    /**
+     * 取 AdapterService 实例。真机 dex 逐条核对（com.android.bluetooth.apk）：
+     *   1) A2dpService → ConnectableProfile → ProfileService 这条链上**没有** mAdapterService；
+     *      ProfileService 实际声明的字段叫 `adapterService`（参考实现的字段名在这台 ROM 上是错的）。
+     *   2) AdapterService 自己声明了静态单例字段 `sAdapterService`。
+     *   3) `AdapterService.deprecatedGetAdapterService()` 也是可用的静态取用口。
+     *   4) mAdapterService 保留为其它 ROM 的兜底。
+     * 返回 (实例, 来源描述)；都取不到返回 null。
+     */
+    private fun resolveAdapterService(): Pair<Any, String>? {
+        for (field in ADAPTER_SERVICE_FIELDS) {
+            runCatching { getObjectField(a2dpService, field) }.getOrNull()
+                ?.let { return it to ("A2dpService." + field) }
+        }
+        val adapterClass = findClassOrNull(CLS_ADAPTER_SERVICE)
+        runCatching { getStaticObjectField(adapterClass, "sAdapterService") }.getOrNull()
+            ?.let { return it to ("$CLS_ADAPTER_SERVICE.sAdapterService") }
+        runCatching { callStaticMethod(adapterClass, "deprecatedGetAdapterService") }.getOrNull()
+            ?.let { return it to ("$CLS_ADAPTER_SERVICE.deprecatedGetAdapterService()") }
+        return null
     }
 
     // ── 3) 迟装兜底：模块在耳机已连接后才生效 ───────────────────────────────────
@@ -676,7 +748,7 @@ object HeadsetStateDispatcher : HookContext() {
             reportCodecFromConfig(direct, device, "A2dpService.getCodecStatus")
             return
         }
-        Log.d(TAG, "codec query: A2dpService.getCodecStatus unusable (status=$status); falling back to A2DP proxy")
+        Log.d(TAG, "codec query: A2dpService gave no readable config (config=$direct status=$status); trying A2DP proxy")
         queryCodecViaProxy(device)
     }
 
@@ -696,15 +768,24 @@ object HeadsetStateDispatcher : HookContext() {
                     val status = callMethod(proxy, "getCodecStatus", device)
                     reportCodecFromConfig(codecConfigOf(status), device, "BluetoothA2dp.getCodecStatus")
                 }.onFailure { Log.w(TAG, "codec via A2DP proxy failed", it) }
+                codecProxyCloseRequested = true
                 runCatching { callMethod(adapter, "closeProfileProxy", BluetoothProfile.A2DP, proxy) }
                     .onFailure { Log.d(TAG, "closeProfileProxy unavailable", it) }
             }
 
             override fun onServiceDisconnected(profile: Int) {
                 codecProxyListener = null
-                if (profile == BluetoothProfile.A2DP) Log.d(TAG, "A2DP proxy disconnected during codec query")
+                if (profile != BluetoothProfile.A2DP) return
+                // closeProfileProxy() 自己就会回调到这里：我们主动收掉的代理不算异常，
+                // 别把「读完就关」误报成「代理掉线」。
+                if (codecProxyCloseRequested) {
+                    Log.d(TAG, "A2DP proxy closed by us after codec read")
+                } else {
+                    Log.w(TAG, "A2DP proxy disconnected unexpectedly during codec query")
+                }
             }
         }
+        codecProxyCloseRequested = false
         codecProxyListener = listener
         val requested = runCatching {
             callMethod(adapter, "getProfileProxy", context, listener, BluetoothProfile.A2DP) as? Boolean
@@ -715,35 +796,54 @@ object HeadsetStateDispatcher : HookContext() {
         }
     }
 
-    /** BluetoothCodecStatus.getCodecConfig() → BluetoothCodecConfig（任一环不可用回 null）。 */
+    /** BluetoothCodecStatus.getCodecConfig()；getter 不可用时读 ROM 实际存在的字段。 */
     private fun codecConfigOf(status: Any?): Any? {
         if (status == null) return null
-        return runCatching { callMethod(status, "getCodecConfig") }.getOrNull()
-    }
-
-    /** BluetoothCodecConfig.getCodecName()；方法不可用时才试 AOSP 的私有名字段。 */
-    private fun codecNameOf(config: Any?): String? {
-        if (config == null) return null
-        val byMethod = runCatching { callMethod(config, "getCodecName") as? String }.getOrNull()
-        if (!byMethod.isNullOrBlank()) return byMethod
-        for (field in CODEC_NAME_FIELDS) {
-            val value = runCatching { getObjectField(config, field) as? String }.getOrNull()
-            if (!value.isNullOrBlank()) return value
+        runCatching { callMethod(status, "getCodecConfig") }.getOrNull()?.let { return it }
+        for (field in CODEC_CONFIG_FIELDS) {
+            runCatching { getObjectField(status, field) }.getOrNull()?.let { return it }
         }
         return null
     }
 
-    /** 拿不到名字时只用于日志，不做数值 → 名字的猜测映射。 */
+    /**
+     * 读编码名，返回 (名字, 来源)；四层都失败才返回 null。
+     *   1) getCodecName()
+     *   2) 私有字段 mCodecName / codecName
+     *   3) 从 config.toString() 里抠 `codecName:` —— ROM 自己就把它印出来了
+     *   4) 本机实测的 type → 名字表（标注 typeMap，表示这是映射而不是真名）
+     */
+    private fun codecNameOf(config: Any?): Pair<String, String>? {
+        if (config == null) return null
+        runCatching { callMethod(config, "getCodecName") as? String }.getOrNull()
+            ?.takeIf { it.isNotBlank() }?.let { return it to "getCodecName" }
+        for (field in CODEC_NAME_FIELDS) {
+            runCatching { getObjectField(config, field) as? String }.getOrNull()
+                ?.takeIf { it.isNotBlank() }?.let { return it to ("field:" + field) }
+        }
+        runCatching { config.toString() }.getOrNull()?.let { text ->
+            CODEC_NAME_PATTERN.find(text)?.groupValues?.getOrNull(1)?.trim()
+                ?.takeIf { it.isNotEmpty() }?.let { return it to "toString" }
+        }
+        codecTypeOf(config)?.let { type ->
+            CODEC_TYPE_NAMES[type]?.let { return it to ("typeMap(" + type + ")") }
+        }
+        return null
+    }
+
+    /** 编码数值：既用于日志，也作为 codecNameOf 最后一层「本机实测表」的输入。 */
     private fun codecTypeOf(config: Any?): Int? =
         runCatching { callMethod(config, "getCodecType") as? Int }.getOrNull()
 
-    /** 配置 → 名字 → 广播；名字读不到就当没有（宁可「未知」也不猜）。 */
+    /** 配置 → 名字 → 广播；记录名字是从哪一层读出来的（便于实机确认走了哪条路）。 */
     private fun reportCodecFromConfig(config: Any?, device: BluetoothDevice?, source: String) {
-        val name = codecNameOf(config)
-        if (name == null) {
-            if (config != null) Log.d(TAG, "codec from $source has no readable name (type=${codecTypeOf(config)})")
+        val resolved = codecNameOf(config)
+        if (resolved == null) {
+            Log.w(TAG, "codec from $source has no readable name (type=${codecTypeOf(config)})")
             return
         }
+        val (name, how) = resolved
+        Log.i(TAG, "codec name=$name source=$how type=${codecTypeOf(config)} via=$source")
         broadcastCodec(name, device, source)
     }
 

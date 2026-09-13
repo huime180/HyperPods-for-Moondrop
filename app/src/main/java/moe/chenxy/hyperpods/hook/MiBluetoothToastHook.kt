@@ -82,6 +82,9 @@ object MiBluetoothToastHook : HookContext() {
     @Volatile
     private var processContext: Context? = null
 
+    /** 「重启作用域」接收器用的进程 Context（通知构造 hook 偷到的那个，见 resolveContext）。 */
+    override fun processContextOrNull(): Context? = processContext
+
     override fun onHook() {
         hookExactConstructor(Context::class.java, Looper::class.java)
         runCatching {

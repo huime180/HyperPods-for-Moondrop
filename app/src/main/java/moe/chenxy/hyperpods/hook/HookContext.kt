@@ -15,6 +15,7 @@
  */
 package moe.chenxy.hyperpods.hook
 
+import android.content.Context
 import android.content.SharedPreferences
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
@@ -65,6 +66,15 @@ abstract class HookContext {
 
     /** 模块总开关（HyperPodsPrefsKey.ENABLE，默认 true；prefs 不可用时也不阻塞功能）。 */
     fun isEnabled(): Boolean = prefBoolean(HyperPodsPrefsKey.ENABLE, true)
+
+    /**
+     * 本进程当前可用的 Context —— 专供「重启作用域」接收器注册（hook/RestartScopeReceiver.kt）。
+     *
+     * 默认 null：XposedEntry 会退回 SystemApisUtils.currentApplication() 并延迟重试，
+     * 因此只有「手上正好有一个确定可用的 Context」的 hook 才需要覆盖它。
+     * 实现方必须容错：拿不到就返回 null，绝不允许抛异常。
+     */
+    open fun processContextOrNull(): Context? = null
 
     /** 容错读取布尔型首选项：prefs 为 null / 类型不符 / 框架异常都回落到 [def]。 */
     fun prefBoolean(key: String, def: Boolean): Boolean =

@@ -239,6 +239,18 @@ object ControlBridge {
                 }
                 is PodEvent.AncChanged ->
                     pushAnc(ctx, MoondropLink.snapshot())
+                // 双设备连接(OneBringTwo)的真实开关必须送到 milink：
+                // 那里是 multipoint 门的判定方，它不知道真实值就会一直按"未知"处理，
+                // 而"未知"时我们会保守地回答"不是多设备主机"（见 MiLinkServiceHook 的三道 gate）。
+                is PodEvent.DualConnectionChanged -> {
+                    sendTo(ctx, MILINK, HyperPodsAction.DUAL_CONNECTION_CHANGED) {
+                        it.putExtra(HyperPodsAction.EXTRA_ENABLED, event.on)
+                        it.putExtra(HyperPodsAction.EXTRA_DEVICE, connectedDevice)
+                    }
+                    sendTo(ctx, "com.android.settings", HyperPodsAction.DUAL_CONNECTION_CHANGED) {
+                        it.putExtra(HyperPodsAction.EXTRA_ENABLED, event.on)
+                    }
+                }
                 is PodEvent.Disconnected -> cancelNotification(ctx)
                 else -> Unit
             }

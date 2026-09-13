@@ -106,4 +106,10 @@
     <!-- 系统蓝牙入口 -->
     <string name="system_bluetooth_settings">系统蓝牙设置</string>
     <string name="system_bluetooth_settings_summary">打开系统设备详情页，可设置系统级 LHDC、低延迟与音量同步</string>
+    <!-- 重启作用域（等效 LSPosed 的「重启作用域」） -->
+    <string name="restart_scope">重启作用域</string>
+    <string name="restart_scope_summary">会重启蓝牙 / 系统界面 / 设置 等 5 个作用域进程，界面可能短暂闪一下；等效于 LSPosed 的「重启作用域」，不需要重启手机。</string>
+    <string name="restart_scope_confirm">重启</string>
+    <string name="restart_scope_done">已通知 %1$d 个作用域进程退出（若某个进程未响应，可尝试授予 root 或手动重启）</string>
+    <string name="restart_scope_denied">未能通知任何作用域进程，请在 LSPosed 中检查模块作用域，或手动重启手机</string>
 </resources>

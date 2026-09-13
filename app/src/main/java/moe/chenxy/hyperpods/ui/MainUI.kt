@@ -32,11 +32,14 @@ import androidx.navigation3.runtime.rememberDecoratedNavEntries
 import androidx.navigation3.ui.NavDisplay
 import moe.chenxy.hyperpods.R
 import moe.chenxy.hyperpods.pods.MoondropLink
+import moe.chenxy.hyperpods.ui.components.RestartScopeDialog
+import moe.chenxy.hyperpods.ui.components.rememberRestartScopeState
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.rememberTopAppBarState
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -71,6 +74,8 @@ fun MainUI(
                 stringResource(R.string.app_name)
             }
             val scrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
+            // 「重启作用域」确认框状态：顶栏文字动作 request()，弹框里再确认才执行
+            val restartScope = rememberRestartScopeState()
 
             Scaffold(
                 topBar = {
@@ -95,6 +100,13 @@ fun MainUI(
                                     )
                                 }
                             }
+                            // 「重启作用域」：Miuix 0.9.3 里没有可用的 restart/power 图标
+                            // （OppoPods 参考实现只用过 Back / Refresh / Settings / More / Info 等），
+                            // 所以用文字动作，而不是猜一个图标名（猜错 = CI 编译失败）。
+                            TextButton(
+                                text = stringResource(R.string.restart_scope),
+                                onClick = { restartScope.request() },
+                            )
                             IconButton(onClick = { backStack.add(Screen.Settings) }) {
                                 Icon(
                                     imageVector = MiuixIcons.Settings,
@@ -117,6 +129,8 @@ fun MainUI(
                 } else {
                     WaitingPodsPage(modifier = Modifier.padding(padding))
                 }
+                // 确认框必须挂在 Miuix Scaffold 内（OverlayDialog 渲染到根 Scaffold 的弹层宿主）
+                RestartScopeDialog(state = restartScope)
             }
         }
 

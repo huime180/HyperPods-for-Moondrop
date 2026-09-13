@@ -13,6 +13,7 @@
  */
 package moe.chenxy.hyperpods.hook
 
+import android.content.Context
 import android.util.Log
 import java.lang.reflect.Method
 
@@ -22,6 +23,13 @@ object SystemUIPluginHook : HookContext() {
     private const val CLS_PLUGIN_INSTANCE = "com.android.systemui.shared.plugins.PluginInstance"
 
     private val lock = Any()
+
+    /**
+     * 「重启作用域」接收器用的进程 Context：优先用 DeviceCardHook 偷到的，
+     * 兜底 ActivityThread.currentApplication()（插件加载阶段可能还是空的，接收器会重试）。
+     */
+    override fun processContextOrNull(): Context? =
+        DeviceCardHook.processContextOrNull() ?: SystemApisUtils.currentApplication()
 
     @Volatile
     private var hookedClassLoader: ClassLoader? = null

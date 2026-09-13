@@ -76,6 +76,9 @@ object SettingsHeadsetHook : HookContext() {
     private const val COME_FROM_DEFAULT = "MIUI_BLUETOOTH_SETTINGS"
 
     private const val REFRESH_INTERVAL_MS = 3_000L
+
+    /** 每 5 次 tick（≈15s）打一次 ANC 控件心跳：即便什么都没装上也一定能看到状态。 */
+    private const val ANC_UI_HEARTBEAT_TICKS = 5
     private const val STATE_PREFS = "hyperpods_moondrop_settings_state"
     private const val ANC_PAYLOAD_LEVELS = "0100;0101;0102;0103;0200;0201"
 
@@ -87,6 +90,9 @@ object SettingsHeadsetHook : HookContext() {
 
     private var context: Context? = null
     private var statusReceiver: BroadcastReceiver? = null
+
+    /** 「重启作用域」接收器用的进程 Context（页面/服务入口里偷到的，见 registerStatusReceiver）。 */
+    override fun processContextOrNull(): Context? = context
 
     @Volatile
     private var receiverRegistered = false
@@ -111,6 +117,9 @@ object SettingsHeadsetHook : HookContext() {
     private val refreshHandler = Handler(Looper.getMainLooper())
     private var refreshLoopStarted = false
 
+    /** 周期 tick 计数：每 ANC_UI_HEARTBEAT_TICKS 次打一条 ANC 控件心跳，避免刷屏又不至于静默。 */
+    private var refreshTick = 0
+
     private val refreshRunnable = object : Runnable {
         override fun run() {
             if (headsetFragments.keys.any { isMoondropFragment(it) }) {
@@ -124,6 +133,11 @@ object SettingsHeadsetHook : HookContext() {
                 } else {
                     headsetFragments.keys.firstOrNull { isMoondropFragment(it) }
                         ?.let { installAncUi(it, "periodic") }
+                }
+                // 心跳：保证「一条 ANC 日志都没有」这种情况再也不可能出现。
+                refreshTick++
+                if (refreshTick % ANC_UI_HEARTBEAT_TICKS == 0) {
+                    Log.i(TAG, "ANC ui heartbeat: ${NativeThreeModeAncUi.stateSummary()}")
                 }
                 refreshHandler.postDelayed(this, REFRESH_INTERVAL_MS)
             } else {
@@ -181,6 +195,9 @@ object SettingsHeadsetHook : HookContext() {
             .ifEmpty { intent.getStringExtra(EXTRA_BT_ADDRESS).orEmpty() }
         val isPods = isMoondropDevice(device) || isMoondropAddress(address)
         Log.d(TAG, "$who.onCreate device=${describe(device)} address=$address comeFrom=${intent.getStringExtra(EXTRA_COME_FROM)} isMoondrop=$isPods")
+        // 页面变体取证：本 ROM 上 MiuiHeadsetActivity 与 MiuiHeadsetActivityPlugin 是哪一条在跑，
+        // 决定原生 ANC 控件长在哪棵树里。
+        Log.i(TAG, "headset page variant=$who isMoondrop=$isPods")
         if (!isPods) return
         intent.putExtra(EXTRA_SUPPORT, FAKE_SUPPORT)
         intent.putExtra(EXTRA_COME_FROM, intent.getStringExtra(EXTRA_COME_FROM) ?: COME_FROM_DEFAULT)
@@ -480,11 +497,19 @@ object SettingsHeadsetHook : HookContext() {
             NativeThreeModeAncUi.install(fragment, currentAncUi) { index -> onAncSelectedFromNativeUi(index) }
         }.onFailure { Log.w(TAG, "install native three-mode ANC ui failed ($reason)", it) }
             .getOrDefault(false)
-        Log.d(
-            TAG,
-            "native ANC ui installed=$installed reason=$reason " +
-                "matched=${NativeThreeModeAncUi.matchedNames()} structuralGuess=${NativeThreeModeAncUi.usedStructuralGuess()}"
-        )
+        if (installed) {
+            Log.i(
+                TAG,
+                "native ANC ui installed reason=$reason " + NativeThreeModeAncUi.stateSummary()
+            )
+        } else {
+            Log.w(
+                TAG,
+                "native ANC ui NOT installed reason=$reason " +
+                    "(fragment.getView() missing or no injectable container) " +
+                    NativeThreeModeAncUi.stateSummary()
+            )
+        }
         val root = runCatching { callMethod(fragment, "getView") as? View }.getOrNull()
         root?.post { runCatching { NativeThreeModeAncUi.reassert() } }
     }
@@ -573,6 +598,8 @@ object SettingsHeadsetHook : HookContext() {
             addAction(HyperPodsAction.PODS_DISCONNECTED)
             addAction(HyperPodsAction.ANC_CHANGED)
             addAction(HyperPodsAction.BATTERY_CHANGED)
+            // 多点闸门：这个进程收到的任何一拖二状态都代转给 milink（见 forwardToMiLink）。
+            addAction(HyperPodsAction.DUAL_CONNECTION_CHANGED)
         }
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(receiverContext: Context?, intent: Intent?) {
@@ -616,6 +643,9 @@ object SettingsHeadsetHook : HookContext() {
                         updateFragments()
                         updateBatteryViews()
                         forwardToMiLink(received, "battery-changed")
+                    }
+                    HyperPodsAction.DUAL_CONNECTION_CHANGED -> {
+                        forwardToMiLink(received, "dual-connection-changed")
                     }
                 }
                 Log.d(TAG, "state $action address=$currentAddress ancUi=$currentAncUi battery=${settingsBatteryString()}")
@@ -692,7 +722,8 @@ object SettingsHeadsetHook : HookContext() {
         refreshLoopStarted = true
         refreshHandler.removeCallbacks(refreshRunnable)
         refreshHandler.postDelayed(refreshRunnable, REFRESH_INTERVAL_MS)
-        Log.d(TAG, "settings periodic refresh started")
+        refreshTick = 0
+        Log.i(TAG, "settings periodic refresh started (ANC ui heartbeat every $ANC_UI_HEARTBEAT_TICKS ticks)")
     }
 
     // ── 状态存取（设置进程本地缓存，进程重启后页面仍有值） ───────────────────

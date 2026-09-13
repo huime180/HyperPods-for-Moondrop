@@ -65,6 +65,9 @@ object NativeThreeModeAncUi {
     private val SUB_UI = intArrayOf(UI_ADAPTIVE, UI_ANTI_WIND, UI_NOISE_CANCELLATION)
 
     // 用 val 而不是 const：需要 .toInt() 把 0xFF… 收成有符号 Int，const 不允许这种表达式
+    /** 视图树 dump 上限（够看清耳机页结构，又不会刷爆 logcat）。 */
+    private const val VIEW_DUMP_LIMIT = 80
+
     private val COLOR_SELECTED = 0xFF007AFF.toInt()
     private val COLOR_SELECTED_BG = 0x1F007AFF
     private val COLOR_NORMAL = 0xFF4C4C4C.toInt()
@@ -88,6 +91,15 @@ object NativeThreeModeAncUi {
     /** 原生 ANC 行是否只靠结构猜出来（= true 时我们**不隐藏**它）。 */
     private var nativeRowGuessed = false
 
+    /** 原生 ANC 行是怎么找到的（日志取证：entryName / seekBarMax=N / anySeekBar / none）。 */
+    private var nativeRowEvidence = "none"
+
+    /** 整棵视图树每个 root 只 dump 一次（这是「真实的资源 entry 名」唯一可靠的来源）。 */
+    private var dumpedRoot: WeakReference<View>? = null
+
+    /** 4 段 ANC 滑杆的 max 通常就是 3（下标 0..3）。放宽到 2..5 覆盖各种档位模板。 */
+    private val ANC_SEEK_MAX_RANGE = 2..5
+
     /** 命名命中的全部候选（供 logcat 取证）。 */
     private val matchedEntryNames = LinkedHashSet<String>()
 
@@ -101,6 +113,11 @@ object NativeThreeModeAncUi {
         rootRef = WeakReference(root)
         selectedUi = currentUi
         if (isNoiseGroup(currentUi)) lastNoiseSub = currentUi
+
+        if (dumpedRoot?.get() !== root) {
+            dumpedRoot = WeakReference(root)
+            dumpViewTree(root)
+        }
 
         containerRef?.get()?.let { alive ->
             if (alive.parent != null) {
@@ -155,10 +172,20 @@ object NativeThreeModeAncUi {
         subButtons = emptyList()
         selectCallback = null
         nativeRowGuessed = false
+        nativeRowEvidence = "none"
+        dumpedRoot = null
         matchedEntryNames.clear()
         selectedUi = UI_OFF
         lastNoiseSub = UI_NOISE_CANCELLATION
     }
+
+    /** 周期心跳用：一眼看出 ANC 控件到底装上了没有、原生行藏掉没有、靠什么证据找到的。 */
+    fun stateSummary(): String =
+        "attached=" + isAttached() +
+            " nativeHidden=" + (nativeRowRef?.get()?.visibility == View.GONE) +
+            " evidence=" + nativeRowEvidence +
+            " guess=" + nativeRowGuessed +
+            " matched=" + matchedEntryNames.joinToString()
 
     /** 取证用：命名命中的 ANC 资源 entry 名。 */
     fun matchedNames(): List<String> = matchedEntryNames.toList()
@@ -190,8 +217,9 @@ object NativeThreeModeAncUi {
             index = host.childCount
             Log.w(
                 TAG,
-                "native ANC row not found; injecting our own row into " +
-                    "${host.javaClass.name} entry=${entryName(host)}"
+                "native ANC row NOT located; framework control stays visible. " +
+                    "Injecting our own row into ${host.javaClass.name} entry=${entryName(host)} " +
+                    "(see the 'tree ' lines above for the real entry names)"
             )
         }
 
@@ -210,14 +238,14 @@ object NativeThreeModeAncUi {
         } else if (native != null) {
             Log.w(
                 TAG,
-                "native ANC row kept visible (structural guess): class=${native.javaClass.name}; " +
-                    "expect a headset_anc* entry name in logcat to switch to name-based hiding"
+                "native ANC row kept visible (low-confidence evidence=${nativeRowEvidence}); " +
+                    "see the 'tree ' lines for a reliable entry name"
             )
         }
         Log.i(
             TAG,
             "installed three-mode ANC ui into ${parent.javaClass.name} entry=${entryName(parent)} " +
-                "index=$index matched=${matchedEntryNames.joinToString()}"
+                "index=$index evidence=$nativeRowEvidence matched=${matchedEntryNames.joinToString()}"
         )
         return true
     }
@@ -331,21 +359,35 @@ object NativeThreeModeAncUi {
         runCatching { callMethod(fragment, "getView") as? View }.getOrNull()
 
     /**
-     * 优先按资源 entry 名找（高置信，找到就隐藏）；
-     * 名字一个都没命中时退化为结构查找（低置信，**只插入不隐藏**）。
+     * 三级定位，先高置信后低置信：
+     *   1) 资源 entry 名（headset_anc* 等）—— 高置信，隐藏原生行；
+     *   2) 滑杆 max ∈ 2..5 —— 4 段 ANC 滑杆的语义特征，与名字无关，同样够格隐藏；
+     *   3) 任意滑杆 —— 低置信，**只插入不隐藏**（怕误藏页面上别的控件）。
      */
     private fun findNativeAncRow(root: View): View? {
-        val byName = findByName(root)
-        if (byName != null) {
+        findByName(root)?.let {
             nativeRowGuessed = false
-            return normaliseRow(byName)
+            nativeRowEvidence = "entryName:" + entryName(it)
+            Log.i(TAG, "native ANC row by entry name: ${nativeRowEvidence}")
+            return normaliseRow(it)
         }
-        val byStructure = findBySeekBar(root)
-        nativeRowGuessed = byStructure != null
-        if (byStructure != null) {
-            Log.w(TAG, "ANC row resolved structurally (no headset_anc* entry name matched)")
+        findBySeekBarSignature(root)?.let { row ->
+            nativeRowGuessed = false
+            nativeRowEvidence = "seekBarMax"
+            Log.i(
+                TAG,
+                "native ANC row by seekBar signature class=${row.first.javaClass.name} " +
+                    "entry=${entryName(row.first)}"
+            )
+            return row.first
         }
-        return byStructure
+        val any = findBySeekBar(root)
+        nativeRowGuessed = any != null
+        nativeRowEvidence = if (any != null) "anySeekBar" else "none"
+        if (any != null) {
+            Log.w(TAG, "ANC row resolved only as 'some seek bar' (low confidence); it will NOT be hidden")
+        }
+        return any
     }
 
     private fun findByName(root: View): View? {
@@ -365,7 +407,24 @@ object NativeThreeModeAncUi {
         return null
     }
 
-    /** 结构兜底：找到（AbsSeekBar）再往上找到「像是那一行」的容器。 */
+    /** 与名字无关的语义特征：滑杆 max ∈ 2..5，基本就是 4 段 ANC 滑杆。返回 (行, max)。 */
+    private fun findBySeekBarSignature(root: View): Pair<View, Int>? {
+        val queue = ArrayList<View>()
+        queue.add(root)
+        var i = 0
+        while (i < queue.size) {
+            val view = queue[i++]
+            if (isSeekBar(view)) {
+                val max = runCatching { callMethod(view, "getMax") as? Int }.getOrNull() ?: -1
+                Log.i(TAG, "seekBar candidate entry=${entryName(view)} class=${view.javaClass.name} max=$max")
+                if (max in ANC_SEEK_MAX_RANGE) return normaliseRow(view) to max
+            }
+            if (view is ViewGroup) for (c in 0 until view.childCount) queue.add(view.getChildAt(c))
+        }
+        return null
+    }
+
+    /** 最后兜底：任意滑杆（不判 max）。 */
     private fun findBySeekBar(root: View): View? {
         val queue = ArrayList<View>()
         queue.add(root)
@@ -376,6 +435,31 @@ object NativeThreeModeAncUi {
             if (view is ViewGroup) for (c in 0 until view.childCount) queue.add(view.getChildAt(c))
         }
         return null
+    }
+
+    /**
+     * 把 fragment 的整棵视图树打进 logcat（每个 root 一次）。
+     * 这是「本 ROM 上真实的资源 entry 名到底是什么」唯一可靠的来源——
+     * 静态反编译 resources.arsc 拿不到（release 会重命名），只能实机量。
+     */
+    private fun dumpViewTree(root: View) {
+        runCatching {
+            val lines = ArrayList<String>()
+            val queue = ArrayList<View>()
+            queue.add(root)
+            var i = 0
+            while (i < queue.size && lines.size < VIEW_DUMP_LIMIT) {
+                val v = queue[i++]
+                val kids = if (v is ViewGroup) v.childCount else 0
+                lines.add(
+                    v.javaClass.simpleName + "|" + (entryName(v) ?: "-") +
+                        "|id=0x" + v.id.toString(16) + "|kids=" + kids + "|vis=" + v.visibility
+                )
+                if (v is ViewGroup) for (c in 0 until v.childCount) queue.add(v.getChildAt(c))
+            }
+            Log.i(TAG, "fragment view tree dump: ${lines.size} nodes")
+            lines.forEach { Log.i(TAG, "  tree $it") }
+        }.onFailure { Log.w(TAG, "view tree dump failed", it) }
     }
 
     /** 命中的可能是叶子（比如标签 Text），尽量抬到它所在的「行」容器。 */

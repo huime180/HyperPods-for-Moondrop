@@ -106,4 +106,10 @@
     <!-- system bluetooth entry -->
     <string name="system_bluetooth_settings">System Bluetooth settings</string>
     <string name="system_bluetooth_settings_summary">Open the system device page for system-level LHDC, low latency and volume sync</string>
+    <!-- restart scope (same as LSPosed manager's "Restart scope") -->
+    <string name="restart_scope">Restart scope</string>
+    <string name="restart_scope_summary">Restarts the 5 hooked processes: Bluetooth, System UI, Settings, Mi Link and Xiaomi Bluetooth. The screen may flicker for a moment. This is the same as LSPosed’s “Restart scope” — no phone reboot needed.</string>
+    <string name="restart_scope_confirm">Restart</string>
+    <string name="restart_scope_done">Notified %1$d scope processes to exit. If one does not respond, grant root or restart the phone manually.</string>
+    <string name="restart_scope_denied">Could not notify any scope process. Check the module scope in LSPosed, or restart the phone manually.</string>
 </resources>

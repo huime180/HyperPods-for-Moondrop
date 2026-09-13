@@ -57,6 +57,9 @@ object DeviceCardHook : HookContext() {
     private var handlerThread: HandlerThread? = null
     private var handler: Handler? = null
 
+    /** 「重启作用域」接收器用的进程 Context（SystemUI 侧偷到的，见 registerMacReceiver）。 */
+    override fun processContextOrNull(): Context? = receiverContext
+
     @Volatile
     private var mainPanelController: Any? = null
 

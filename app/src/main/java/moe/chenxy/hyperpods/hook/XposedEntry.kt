@@ -23,6 +23,7 @@ import io.github.libxposed.api.XposedModuleInterface.HotReloadedParam
 import io.github.libxposed.api.XposedModuleInterface.HotReloadingParam
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
+import java.util.concurrent.atomic.AtomicBoolean
 import moe.chenxy.hyperpods.BuildConfig
 import moe.chenxy.hyperpods.utils.data.HyperPodsPrefsKey
 
@@ -45,6 +46,9 @@ class XposedEntry : XposedModule() {
 
     /** 本进程已经挂上的 hook（正常只有一个；SystemUI 会额外挂插件 hook）。 */
     private val hooks = LinkedHashMap<String, HookContext>()
+
+    /** 本进程是否已经开始注册「重启作用域」接收器（Tier 1，每进程一次）。 */
+    private val restartScopeInstalled = AtomicBoolean(false)
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         Log.i(TAG, "onModuleLoaded process=${param.processName} api=${runCatching { getApiVersion() }.getOrDefault(-1)}")
@@ -123,6 +127,29 @@ class XposedEntry : XposedModule() {
             hook.onHook()
             hooks[name] = hook
             Log.i(TAG, "$name hooked in $processName (classLoader=$classLoader)")
+            // hook 已经挂完，才允许本进程被「重启作用域」杀掉（顺序不能反：
+            // 早于 onHook() 注册会出现「进程还没 hook 完就被要求退出」）。
+            installRestartScopeReceiver(hook, processName)
         }.onFailure { Log.w(TAG, "hook $name skipped in $processName", it) }
+    }
+
+    /**
+     * Tier 1「重启作用域」：在本进程注册一次 RESTART_SCOPE 接收器（实现见 RestartScopeReceiver）。
+     *
+     * 被注入进程没有权限杀别的进程，因此反过来：应用 UI 显式广播给 5 个作用域包，
+     * 收到广播的进程自己 killProcess(myPid())，系统重新拉起时 LSPosed 重新注入本模块 ——
+     * 等效于 LSPosed Manager 的「重启作用域」，不需要重启手机、不需要 root。
+     *
+     * Context 优先用 hook 自己偷到的（HookContext.processContextOrNull），
+     * 兜底 ActivityThread.currentApplication()；拿不到时接收器内部会延迟重试。
+     * 注册失败只记日志 —— 绝不因「重启作用域」影响被注入进程的正常 hook。
+     */
+    private fun installRestartScopeReceiver(hook: HookContext, processName: String) {
+        if (!restartScopeInstalled.compareAndSet(false, true)) return
+        runCatching {
+            RestartScopeReceiver.install(processName) {
+                hook.processContextOrNull() ?: SystemApisUtils.currentApplication()
+            }
+        }.onFailure { Log.w(TAG, "restart-scope receiver skipped in $processName", it) }
     }
 }

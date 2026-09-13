@@ -74,6 +74,15 @@ object HyperPodsAction {
     /** 由蓝牙进程内的 hook 接收，调用 AdapterService.setBatteryLevel */
     const val UPDATE_SYSTEM_BATTERY = "chen.action.hyperpods.moondrop.update_system_battery"
 
+    // ── 应用 UI → 全部被注入进程（「重启作用域」） ─────────────────────────
+    /**
+     * 「重启作用域」Tier 1：应用 UI 显式广播（逐个 setPackage 作用域包名）给 5 个被注入进程，
+     * 进程内的 hook.RestartScopeReceiver 收到后打日志并 killProcess(myPid()) 自杀，
+     * 系统重新拉起进程时 LSPosed 会重新注入本模块 —— 等效于 LSPosed Manager 的「重启作用域」，
+     * 不需要重启手机、不需要 root（Tier 2 的 root 兜底见 ui/components/RestartScope.kt）。
+     */
+    const val RESTART_SCOPE = "chen.action.hyperpods.moondrop.restart_scope"
+
     // extras
     const val EXTRA_STATUS = "status"
     const val EXTRA_BATTERY = "batteryParams"

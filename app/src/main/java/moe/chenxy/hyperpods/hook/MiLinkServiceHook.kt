@@ -105,6 +105,32 @@ object MiLinkServiceHook : HookContext() {
     /** 面板直接渲染的数据对象（Kotlin data class，getter + componentN 双形态）。 */
     private const val CLS_HEADSET_INFO = "com.miui.headset.api.HeadsetInfo"
 
+    // ── 多点 / 一拖二（multipoint / OneBringTwo）───────────────────────────────
+    // 真机 dex 实证：这套机制**只存在于 com.milink.service**
+    //   （multipoint 标识符：milink 432 处，com.android.settings 与 com.xiaomi.bluetooth 各 0 处）。
+    // 设置页那条「正在双设备连接」只是设置自己的文案资源，判定逻辑在 milink：
+    //   isMmaHeadset single/multipoint isSupportControl= / generateSupportControlProperty
+    //   no supportControlHost / supportControlHost= / HeadsetMultipointInfo.isSupportControl
+    // 换句话说：拿不到有效「控制主机」描述时，框架就拒绝放行 ANC —— 这就是两台设备都报
+    // 「正在双设备连接」的原因；HyperOS 4 上它同时让面板完全渲染不出电量/降噪。
+    private const val CLS_MULTIPOINT_INFO = "com.miui.headset.api.MultipointInfo"
+    private const val CLS_HEADSET_MULTIPOINT_INFO = "com.miui.headset.runtime.HeadsetMultipointInfo"
+    private const val CLS_MULTIPOINT_PROCESSOR = "com.miui.headset.runtime.MultipointProcessor"
+    private const val CLS_HOST_EXTENSION = "com.miui.headset.runtime.HeadsetHostExtension"
+
+    /**
+     * 询问「这台设备的多点状态」的候选入口（不同 ROM / 版本命名不同）：
+     * 全部声明 `getMultipointInfo(String): com.miui.headset.api.MultipointInfo`（已逐条核对）。
+     * 逐个尝试，缺类静默跳过 —— 一个 APK 同时兼容 HyperOS 3 与 4。
+     */
+    private val MULTIPOINT_QUERY_CLASSES = listOf(
+        "com.miui.headset.api.Query",
+        "com.miui.headset.runtime.QueryLocal",
+        "com.miui.headset.runtime.QueryServer",
+        "com.miui.circulate.api.protocol.headset.HeadsetServiceController",
+        "com.miui.headset.api.HeadsetClient\$queryProxyAdapter\$1"
+    )
+
     private const val STATE_PREFS = "hyperpods_moondrop_milink_state"
 
     /** 面板读取电量时顺带拉一次应用状态的最小间隔（避免读一次发一次广播）。 */
@@ -121,6 +147,9 @@ object MiLinkServiceHook : HookContext() {
 
     private var context: Context? = null
     private var statusReceiver: BroadcastReceiver? = null
+
+    /** 「重启作用域」接收器用的进程 Context（MiBluetoothService/Manager 的 getInstance 参数）。 */
+    override fun processContextOrNull(): Context? = context
 
     @Volatile
     private var receiverRegistered = false
@@ -142,6 +171,31 @@ object MiLinkServiceHook : HookContext() {
     private var lastStrategy: Any? = null
     private var lastStrategyDevice: BluetoothDevice? = null
 
+    /** 最近一次见到的 HeadsetInfo 实例：构造 HeadsetMultipointInfo 时要拿它当参数。 */
+    private var lastHeadsetInfo: Any? = null
+
+    /** 最近一次见到的多点处理器：它的主机表是「是否真的存在多点主机」的权威来源。 */
+    private var lastMultipointProcessor: Any? = null
+
+    /**
+     * 应用进程报来的双设备连接（一拖二）开关状态：null = 还不知道。
+     * ⚠ 目前 ControlBridge 没有把 PodEvent.DualConnectionChanged 发给任何 hook 进程，
+     *   所以这个值通常是 null（见文件尾报告）；一旦应用侧补上广播，这里的闸门自动生效。
+     */
+    @Volatile
+    private var dualConnectionOn: Boolean? = null
+
+    /** 「已应答多点查询」只打一次日志，避免每帧刷屏。 */
+    private var multipointAnsweredLogged = false
+
+    /**
+     * 一旦框架真的登记了「远端主机」（另一台手机/平板加入），就绝不能再声称「没有其它主机」。
+     * 这是**当前就能拿到**的诚实信号（不依赖应用进程补广播）：MultipointProcessor 的
+     * remoteHost / foundHost 会被逐个观察，只记录不改写。
+     */
+    @Volatile
+    private var remoteHostSeen = false
+
     /**
      * `notifyPropertyChanged(device, updateType, delayMs)` 的第二参在本 ROM 上是
      * `com.miui.headset.api.HeadsetUpdateType` 的整数值（枚举，静态不可读）。
@@ -158,6 +212,7 @@ object MiLinkServiceHook : HookContext() {
         hookMxBluetoothRuntime()
         hookHeadsetStrategies()
         hookHeadsetInfo()
+        hookMultipoint()
     }
 
     override fun onHotReloading() {
@@ -169,6 +224,11 @@ object MiLinkServiceHook : HookContext() {
         lastStrategy = null
         lastStrategyDevice = null
         learnedUpdateType = UPDATE_TYPE_UNKNOWN
+        lastHeadsetInfo = null
+        lastMultipointProcessor = null
+        dualConnectionOn = null
+        multipointAnsweredLogged = false
+        remoteHostSeen = false
         lastPanelRefreshMs = 0L
         knownMoondropAddresses.clear()
         hookedSignatures.clear()
@@ -239,6 +299,167 @@ object MiLinkServiceHook : HookContext() {
         hookInfo("component4", reconnectOnRead = true) { miLinkBatteryLevels() }
         hookInfo("getMode") { miLinkAncState() }
         hookInfo("component5") { miLinkAncState() }
+    }
+
+    // ── 多点 / 一拖二：回答「不是多点主机、没有其它主机、控制可用」 ─────────────
+
+    private fun hookMultipoint() {
+        // 1) 多点查询本体：原生返回 null 时补一个描述。
+        hookOnceAny(
+            MULTIPOINT_QUERY_CLASSES, "getMultipointInfo", arrayOf(String::class.java)
+        ) { param, returnType ->
+            if (param.result != null) return@hookOnceAny
+            if (!shouldAnswerNoMultipoint()) return@hookOnceAny
+            val info = buildNoMultipointInfo() ?: return@hookOnceAny
+            coerceToReturnType(returnType, info)?.let { param.result = it }
+            logMultipointAnswered("getMultipointInfo", param.args.getOrNull(0)?.toString().orEmpty())
+        }
+
+        // 2) 面板/框架取「主机扩展」里的多点信息：null 会走
+        //    "wrong path, primaryHeadsetHost not have headsetMultipointInfo" 分支（面板就不渲染了）。
+        hookOnceAny(
+            listOf(CLS_HOST_EXTENSION), "getHeadsetMultipointInfo", emptyArray<Class<*>>()
+        ) { param, returnType ->
+            if (param.result != null) return@hookOnceAny
+            if (!shouldAnswerNoMultipoint()) return@hookOnceAny
+            val extension = param.instance
+            val hostId = runCatching { callMethod(extension, "getHostId") as? String }.getOrNull().orEmpty()
+            val info = buildHeadsetMultipointInfo(hostId) ?: return@hookOnceAny
+            coerceToReturnType(returnType, info)?.let { param.result = it }
+            logMultipointAnswered("HeadsetHostExtension.getHeadsetMultipointInfo", hostId)
+        }
+
+        // 3) 捕获多点处理器实例：它的主机表是「是否真有多点主机」的权威来源（只读不改）。
+        hookOnceAny(
+            listOf(CLS_MULTIPOINT_PROCESSOR), "getMultipointHeadsetHosts", emptyArray<Class<*>>()
+        ) { param, _ ->
+            lastMultipointProcessor = param.instance
+            val size = (param.result as? Map<*, *>)?.size ?: -1
+            Log.d(TAG, "multipoint host registry size=$size (processor captured for gating)")
+        }
+
+        // 4) 远端主机登记事件：只观察，用来把「没有其它主机」这句话收紧成真话。
+        hookOnceAny(
+            listOf(CLS_MULTIPOINT_PROCESSOR), "remoteHost", arrayOf(String::class.java)
+        ) { param, _ ->
+            lastMultipointProcessor = param.instance
+            noteRemoteHost("remoteHost", param.args.getOrNull(0)?.toString().orEmpty())
+        }
+        hookOnceAny(
+            listOf(CLS_MULTIPOINT_PROCESSOR), "foundHost", arrayOf(String::class.java)
+        ) { param, _ ->
+            lastMultipointProcessor = param.instance
+            noteRemoteHost("foundHost", param.args.getOrNull(0)?.toString().orEmpty())
+        }
+    }
+
+    private fun noteRemoteHost(source: String, host: String) {
+        // 这个方法可能被高频调用：只在状态第一次翻转时打日志。
+        val first = !remoteHostSeen
+        remoteHostSeen = true
+        if (first) {
+            Log.i(TAG, "multipoint remote host registered via $source host=$host -> will NOT claim 'no other hosts'")
+        }
+    }
+
+    /**
+     * 能不能用「不是多点主机 / 没有其它主机」来回答。两道闸，任一表明真的存在多点状态就不撒谎：
+     *   1) 框架自己的主机表 `MultipointProcessor.getMultipointHeadsetHosts()` 非空 —— 实机可判，无需应用配合；
+     *   2) 应用进程报来的 `dualConnectionOn == true`（用户真的开了双设备连接）。
+     */
+    private fun shouldAnswerNoMultipoint(): Boolean {
+        if (remoteHostSeen) {
+            Log.i(TAG, "multipoint passthrough: a remote multipoint host was registered")
+            return false
+        }
+        val hosts = runCatching {
+            callMethod(lastMultipointProcessor, "getMultipointHeadsetHosts") as? Map<*, *>
+        }.getOrNull()
+        if (hosts != null && hosts.isNotEmpty()) {
+            Log.i(TAG, "multipoint passthrough: framework reports ${hosts.size} multipoint host(s)")
+            return false
+        }
+        if (dualConnectionOn == true) {
+            Log.i(TAG, "multipoint passthrough: dualConnectionOn=true (OneBringTwo enabled)")
+            return false
+        }
+        return true
+    }
+
+    /** com.miui.headset.api.MultipointInfo 是 data class，构造器为 (boolean, String, List)。 */
+    private fun buildNoMultipointInfo(): Any? = runCatching {
+        val cls = findClass(CLS_MULTIPOINT_INFO)
+        val ctor = cls.getDeclaredConstructor(
+            Boolean::class.javaPrimitiveType!!, String::class.java, List::class.java
+        )
+        ctor.isAccessible = true
+        ctor.newInstance(false, "", emptyList<Any>())
+    }.onFailure {
+        Log.w(TAG, "cannot construct MultipointInfo; leaving native multipoint value", it)
+    }.getOrNull()
+
+    /**
+     * com.miui.headset.runtime.HeadsetMultipointInfo 构造器：
+     *   (HeadsetInfo, long reportTime, boolean isMultipointDevice, String primaryHost,
+     *    String supportControlHost, boolean isPrimary, boolean isSupportControl)
+     * 这里描述「单主机、不是多点设备、本机就是允许控制的主机、支持控制」。
+     */
+    private fun buildHeadsetMultipointInfo(hostId: String): Any? {
+        val headsetInfo = lastHeadsetInfo
+        if (headsetInfo == null) {
+            Log.w(TAG, "HeadsetMultipointInfo not built: no HeadsetInfo captured yet")
+            return null
+        }
+        return runCatching {
+            val cls = findClass(CLS_HEADSET_MULTIPOINT_INFO)
+            val ctor = cls.getDeclaredConstructor(
+                findClass(CLS_HEADSET_INFO),
+                Long::class.javaPrimitiveType!!,
+                Boolean::class.javaPrimitiveType!!,
+                String::class.java,
+                String::class.java,
+                Boolean::class.javaPrimitiveType!!,
+                Boolean::class.javaPrimitiveType!!
+            )
+            ctor.isAccessible = true
+            ctor.newInstance(headsetInfo, System.currentTimeMillis(), false, "", hostId, true, true)
+        }.onFailure {
+            Log.w(TAG, "cannot construct HeadsetMultipointInfo; leaving native value", it)
+        }.getOrNull()
+    }
+
+    private fun logMultipointAnswered(source: String, hostId: String) {
+        if (multipointAnsweredLogged) return
+        multipointAnsweredLogged = true
+        Log.i(
+            TAG,
+            "multipoint query answered isMultipointHost=false otherMultipointHosts=[] " +
+                "isSupportControl=true source=$source hostId=$hostId " +
+                "dualConnection=${dualConnectionOn ?: "unknown"}"
+        )
+    }
+
+    /**
+     * 候选类列表版 hook：第一个能解析出该方法签名的类胜出，缺类静默跳过。
+     * 这样同一个 APK 在 HyperOS 3 / 4 上都能挂上（两代 ROM 的类名集合不同）。
+     */
+    private fun hookOnceAny(
+        classes: List<String>,
+        methodName: String,
+        params: Array<Class<*>>,
+        block: (HookParam, Class<*>) -> Unit
+    ) {
+        for (className in classes) {
+            if (findClassOrNull(className) == null) continue
+            val resolved = runCatching { resolveMethod(className, methodName, params) }.getOrNull()
+            if (resolved == null) {
+                Log.d(TAG, "multipoint candidate $className#$methodName not found; trying next")
+                continue
+            }
+            hookOnce(className, methodName, params, "after", block)
+            return
+        }
+        Log.w(TAG, "multipoint hook $methodName/${params.size} skipped: no candidate class resolved")
     }
 
     // ── hook 回调体（保持 hook 注册处简洁）────────────────────────────────────
@@ -329,6 +550,7 @@ object MiLinkServiceHook : HookContext() {
     private fun hookInfo(methodName: String, reconnectOnRead: Boolean = false, provide: () -> Any) {
         hookOnce(CLS_HEADSET_INFO, methodName, emptyArray<Class<*>>(), "after") { param, returnType ->
             if (!isTargetHeadsetInfo(param.instance)) return@hookOnce
+            lastHeadsetInfo = param.instance
             val old = param.result
             if (reconnectOnRead) requestPanelAppStatus("HeadsetInfo.$methodName")
             val value = provide()
@@ -403,6 +625,8 @@ object MiLinkServiceHook : HookContext() {
             addAction(HyperPodsAction.PODS_DISCONNECTED)
             addAction(HyperPodsAction.BATTERY_CHANGED)
             addAction(HyperPodsAction.ANC_CHANGED)
+            // 多点闸门的输入：应用进程若把一拖二开关状态报过来（见文件尾报告），这里就能如实放行/放行。
+            addAction(HyperPodsAction.DUAL_CONNECTION_CHANGED)
         }
 
         val receiver = object : BroadcastReceiver() {
@@ -434,6 +658,18 @@ object MiLinkServiceHook : HookContext() {
                     HyperPodsAction.BATTERY_CHANGED -> {
                         batteryRaw = SystemApisUtils.readBatteryExtras(received)
                         saveState(appContext)
+                        notifyPanel()
+                    }
+                    HyperPodsAction.DUAL_CONNECTION_CHANGED -> {
+                        // 只有真的带了 EXTRA_ENABLED 才更新，避免误判成「已开启」而错误地对多点放行。
+                        val declared = if (received.hasExtra(HyperPodsAction.EXTRA_ENABLED)) {
+                            received.getBooleanExtra(HyperPodsAction.EXTRA_ENABLED, false)
+                        } else {
+                            null
+                        }
+                        dualConnectionOn = declared
+                        multipointAnsweredLogged = false
+                        Log.i(TAG, "dualConnectionOn=$declared (multipoint gate updated) extras=${received.extras?.keySet()}")
                         notifyPanel()
                     }
                     else -> Log.d(TAG, "ignored action=$action")
