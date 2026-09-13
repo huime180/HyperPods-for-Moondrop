@@ -25,7 +25,7 @@ import moe.chenxy.hyperpods.BuildConfig
 import moe.chenxy.hyperpods.R
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.LazyColumn
+import androidx.compose.foundation.lazy.LazyColumn
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme

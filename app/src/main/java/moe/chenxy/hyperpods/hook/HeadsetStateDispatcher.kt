@@ -46,6 +46,23 @@ object HeadsetStateDispatcher : HookContext() {
     private const val STATUS_BAR_ICON = "wireless_headset"
     private const val BOOTSTRAP_DELAY_MS = 1_500L
 
+    // ── 低延迟（HyperOS 系统侧）候选 codec ─────────────────────────────────────
+    // 数值取自 BluetoothCodecConfig 的公开/系统常量本身；这里写字面量是为了不在编译期
+    // 引用框架隐藏 API（@SystemApi 成员不在公开 SDK 里）。
+    private const val CODEC_TYPE_SBC = 0
+    private const val CODEC_TYPE_AAC = 1
+    private const val CODEC_TYPE_LDAC = 4
+    private const val CODEC_TYPE_APTX_ADAPTIVE = 7
+    private const val CODEC_TYPE_LHDC = 8
+    private const val CODEC_TYPE_LC3 = 10
+
+    /** BluetoothCodecConfig.CODEC_PRIORITY_HIGHEST（隐藏常量，数值固定为 0）。 */
+    private const val CODEC_PRIORITY_HIGHEST = 0
+
+    /** 低延迟候选 codec 优先级：LHDC > LDAC > aptX Adaptive > LC3 > AAC。 */
+    private val LOW_LATENCY_CODEC_TYPES =
+        intArrayOf(CODEC_TYPE_LHDC, CODEC_TYPE_LDAC, CODEC_TYPE_APTX_ADAPTIVE, CODEC_TYPE_LC3, CODEC_TYPE_AAC)
+
     /** 当前追踪的水月雨耳机（供 MAC 握手与断开判定）。 */
     @Volatile
     private var activeMac: String = ""
@@ -64,6 +81,18 @@ object HeadsetStateDispatcher : HookContext() {
     @Volatile
     private var receiverRegistered = false
 
+    /** 低延迟开关最近一次已知状态：隐藏 API 不可用时用它回一条「保持原状态」的广播。 */
+    @Volatile
+    private var lastLowLatencyEnabled = false
+
+    /** A2DP profile 代理回调（异步两段式：拿到 proxy 后立即置空并 closeProfileProxy）。 */
+    @Volatile
+    private var a2dpProxyListener: Any? = null
+
+    /** 打开低延迟前的 codec 配置，关闭时用于恢复（仅本进程生命周期内有效）。 */
+    @Volatile
+    private var lowLatencyPreviousConfig: Any? = null
+
     private var bootstrapHandler: Handler? = null
     private var bootstrapRunnable: Runnable? = null
 
@@ -81,6 +110,8 @@ object HeadsetStateDispatcher : HookContext() {
         requestReceiver = null
         receiverContext = null
         receiverRegistered = false
+        a2dpProxyListener = null
+        lowLatencyPreviousConfig = null
         a2dpService = null
         appContext = null
         activeMac = ""
@@ -182,6 +213,7 @@ object HeadsetStateDispatcher : HookContext() {
         val filter = IntentFilter().apply {
             addAction(HyperPodsAction.GET_PODS_MAC)
             addAction(HyperPodsAction.UPDATE_SYSTEM_BATTERY)
+            addAction(HyperPodsAction.LOW_LATENCY_SELECT)
         }
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
@@ -192,6 +224,8 @@ object HeadsetStateDispatcher : HookContext() {
                     HyperPodsAction.GET_PODS_MAC -> replyMac(ctx ?: appCtx)
                     HyperPodsAction.UPDATE_SYSTEM_BATTERY -> runCatching { applySystemBattery(received) }
                         .onFailure { Log.w(TAG, "applySystemBattery failed", it) }
+                    HyperPodsAction.LOW_LATENCY_SELECT -> runCatching { handleLowLatencySelect(received) }
+                        .onFailure { Log.w(TAG, "handleLowLatencySelect failed", it) }
                 }
             }
         }
@@ -302,5 +336,171 @@ object HeadsetStateDispatcher : HookContext() {
             }
             .distinctBy { SystemApisUtils.deviceAddress(it) }
             .firstOrNull { MoondropModels.match(SystemApisUtils.deviceName(it)) != null }
+    }
+
+    // ── 4) 低延迟开关（HyperOS 系统侧功能，不是 GAIA 命令） ─────────────────────
+    //
+    // ui/MainUI.kt 广播 LOW_LATENCY_SELECT{EXTRA_ENABLED}，这里 best-effort 打通：
+    //   1) 先试厂商可能存在的直通方法：setLowLatencyMode / setLowLatencyAudioEnabled /
+    //      setLatencyMode / enableLowLatency（全部反射，命中即返回）；
+    //   2) 再退化为 A2DP codec 选择：getCodecStatus(device) 读当前 codec，从
+    //      getCodecsSelectableCapabilities() 里按 LOW_LATENCY_CODEC_TYPES 挑候选，
+    //      用 setCodecConfigPreference(device, config) 下发；关闭时恢复原 codec 配置。
+    //   A2DP 代理通过 BluetoothAdapter#getProfileProxy（反射）+ 公开接口
+    //   BluetoothProfile.ServiceListener 异步获取，拿到后立即 closeProfileProxy。
+    //   ⚠ **未在真机验证**：HyperOS 是否暴露这些隐藏 API、以及「低延迟」究竟对应哪个
+    //     codec/latency 位，需要在 Xiaomi Pad 8 Pro 上按日志校准。
+    //   任何一步不可用 -> 回一条 LOW_LATENCY_CHANGED{EXTRA_ENABLED = 保持原状态} 并记日志；
+    //   不重试、不轮询、不崩溃。
+
+    private fun handleLowLatencySelect(intent: Intent) {
+        val enabled = intent.getBooleanExtra(HyperPodsAction.EXTRA_ENABLED, false)
+        val context = appContext
+        val device = SystemApisUtils.parcelableDevice(intent, HyperPodsAction.EXTRA_DEVICE)
+            ?: connectedMoondropDevice()
+        if (context == null || device == null) {
+            Log.w(TAG, "LOW_LATENCY_SELECT enabled=$enabled but context=$context device=$device")
+            replyLowLatency(lastLowLatencyEnabled, device, "no context/device")
+            return
+        }
+        val adapter = bluetoothAdapter(context)
+        if (adapter == null) {
+            Log.w(TAG, "LOW_LATENCY_SELECT: BluetoothAdapter unavailable")
+            replyLowLatency(lastLowLatencyEnabled, device, "no adapter")
+            return
+        }
+        val listener = object : BluetoothProfile.ServiceListener {
+            override fun onServiceConnected(profile: Int, proxy: BluetoothProfile?) {
+                a2dpProxyListener = null
+                if (profile != BluetoothProfile.A2DP || proxy == null) return
+                var applied = false
+                runCatching { applyLowLatency(proxy, device, enabled) }
+                    .onSuccess { applied = it }
+                    .onFailure { Log.w(TAG, "applyLowLatency failed", it) }
+                if (applied) lastLowLatencyEnabled = enabled
+                replyLowLatency(
+                    if (applied) enabled else lastLowLatencyEnabled,
+                    device,
+                    if (applied) "applied" else "unsupported by this system"
+                )
+                runCatching { callMethod(adapter, "closeProfileProxy", BluetoothProfile.A2DP, proxy) }
+                    .onFailure { Log.d(TAG, "closeProfileProxy unavailable", it) }
+            }
+
+            override fun onServiceDisconnected(profile: Int) {
+                a2dpProxyListener = null
+                if (profile == BluetoothProfile.A2DP) {
+                    Log.w(TAG, "A2DP proxy disconnected during low latency switch")
+                }
+            }
+        }
+        a2dpProxyListener = listener
+        val requested = runCatching {
+            callMethod(adapter, "getProfileProxy", context, listener, BluetoothProfile.A2DP) as? Boolean
+        }.getOrNull()
+        if (requested != true) {
+            a2dpProxyListener = null
+            Log.w(TAG, "A2DP getProfileProxy unavailable: this system does not expose the low latency switch")
+            replyLowLatency(lastLowLatencyEnabled, device, "getProfileProxy unavailable")
+        }
+    }
+
+    private fun applyLowLatency(proxy: Any, device: BluetoothDevice, enabled: Boolean): Boolean {
+        val address = SystemApisUtils.deviceAddress(device)
+        val directMethods = if (enabled) {
+            listOf("setLowLatencyMode", "setLowLatencyAudioEnabled", "setLatencyMode", "enableLowLatency")
+        } else {
+            listOf("setLowLatencyMode", "setLowLatencyAudioEnabled", "setLatencyMode", "disableLowLatency")
+        }
+        for (name in directMethods) {
+            if (runCatching { callMethod(proxy, name, device, enabled) }.isSuccess) {
+                Log.i(TAG, "low latency: $name($address, $enabled) accepted by the system")
+                return true
+            }
+        }
+
+        val status = runCatching { callMethod(proxy, "getCodecStatus", device) }.getOrNull()
+        if (status == null) {
+            Log.w(TAG, "low latency: getCodecStatus(device) unavailable")
+            return false
+        }
+        val current = runCatching { callMethod(status, "getCodecConfig") }.getOrNull()
+        val currentType = codecType(current)
+        Log.i(TAG, "low latency: device=$address requested=$enabled currentCodecType=$currentType config=$current")
+
+        if (!enabled) {
+            val previous = lowLatencyPreviousConfig
+            if (previous == null) {
+                Log.i(TAG, "low latency: nothing to restore (we never changed the codec)")
+                return true
+            }
+            val restored = runCatching { callMethod(proxy, "setCodecConfigPreference", device, previous) }.isSuccess
+            if (restored) lowLatencyPreviousConfig = null
+            Log.i(TAG, "low latency: restore previous codec config applied=$restored")
+            return restored
+        }
+
+        val selectable = selectableCodecs(status)
+        val candidates = selectable.mapNotNull { config -> codecType(config)?.let { type -> type to config } }
+        if (candidates.isEmpty()) {
+            Log.w(TAG, "low latency: the system reported no selectable codec")
+            return false
+        }
+        // 用 toList() 而不是直接对 IntArray 调 firstNotNullOfOrNull：避免依赖
+        // 基本类型数组上该扩展是否存在（Iterable 版本一定有）。
+        val preferred = LOW_LATENCY_CODEC_TYPES.toList()
+            .firstNotNullOfOrNull { wanted -> candidates.firstOrNull { it.first == wanted }?.second }
+            ?: candidates.firstOrNull { it.first != CODEC_TYPE_SBC }?.second
+        if (preferred == null) {
+            Log.w(TAG, "low latency: only SBC is selectable ($candidates)")
+            return false
+        }
+        val preferredType = codecType(preferred)
+        if (preferredType == currentType) {
+            Log.i(TAG, "low latency: already on the preferred codec type=$preferredType")
+            return true
+        }
+        if (current != null && lowLatencyPreviousConfig == null) lowLatencyPreviousConfig = current
+        runCatching { callMethod(preferred, "setCodecPriority", CODEC_PRIORITY_HIGHEST) }
+            .onFailure { Log.d(TAG, "setCodecPriority unavailable", it) }
+        val applied = runCatching { callMethod(proxy, "setCodecConfigPreference", device, preferred) }.isSuccess
+        Log.i(TAG, "low latency: codec $currentType -> $preferredType applied=$applied")
+        return applied
+    }
+
+    private fun selectableCodecs(status: Any): List<Any> {
+        for (name in listOf("getCodecsSelectableCapabilities", "getCodecsLocalCapabilities", "getCodecsCapabilities")) {
+            val list = runCatching { callMethod(status, name) }.getOrNull() as? List<*> ?: continue
+            val typed = list.filterNotNull()
+            if (typed.isNotEmpty()) {
+                Log.d(TAG, "low latency: codec list from $name size=${typed.size}")
+                return typed
+            }
+        }
+        return emptyList()
+    }
+
+    private fun codecType(config: Any?): Int? =
+        runCatching { callMethod(config, "getCodecType") as? Int }.getOrNull()
+
+    private fun bluetoothAdapter(context: Context): Any? = runCatching {
+        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        manager?.adapter ?: callMethod(manager, "getAdapter")
+    }.getOrNull()
+
+    private fun replyLowLatency(enabled: Boolean, device: BluetoothDevice?, reason: String) {
+        val context = appContext ?: return
+        runCatching {
+            context.sendBroadcast(Intent(HyperPodsAction.LOW_LATENCY_CHANGED).apply {
+                setPackage(PKG_APP)
+                putExtra(HyperPodsAction.EXTRA_ENABLED, enabled)
+                if (device != null) {
+                    putExtra(HyperPodsAction.EXTRA_MAC, SystemApisUtils.deviceAddress(device))
+                    putExtra(HyperPodsAction.EXTRA_DEVICE_NAME, SystemApisUtils.deviceName(device))
+                }
+                addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+            })
+            Log.i(TAG, "LOW_LATENCY_CHANGED enabled=$enabled reason=$reason")
+        }.onFailure { Log.w(TAG, "LOW_LATENCY_CHANGED broadcast failed", it) }
     }
 }

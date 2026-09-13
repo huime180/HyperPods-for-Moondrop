@@ -478,7 +478,10 @@ object SettingsHeadsetHook : HookContext() {
                     }
                     HyperPodsAction.PODS_DISCONNECTED -> {
                         val address = received.getStringExtra(HyperPodsAction.EXTRA_MAC)
-                        if (address.isNullOrEmpty() || address.equals(activePageAddress, ignoreCase = true)) {
+                        val pageAddress = activePageAddress
+                        if (address.isNullOrEmpty() || pageAddress == null ||
+                            address.equals(pageAddress, ignoreCase = true)
+                        ) {
                             activePageAddress = null
                         }
                         Log.d(TAG, "pods disconnected address=$address")
@@ -589,11 +592,11 @@ object SettingsHeadsetHook : HookContext() {
         if (address.isNotEmpty() && isMoondropAddress(address)) return true
         val name = SystemApisUtils.deviceName(device)
         if (MoondropModels.match(name) != null) {
-            if (address.isNotEmpty()) {
+            if (!address.isNullOrEmpty()) {
                 knownMoondropAddresses += address.uppercase()
                 currentAddress = address
             }
-            if (name.isNotEmpty()) currentName = name
+            if (!name.isNullOrEmpty()) currentName = name
             return true
         }
         return false
