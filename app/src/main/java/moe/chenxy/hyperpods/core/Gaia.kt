@@ -186,25 +186,48 @@ object Gaia {
     // ============================================================
     // TOUCHV2(22)：触控手势（feature 11 GESTURE_CONFIGURATION 本耳机不使用）
     //
-    // ✅ 真机实测（MOONDROP Pudding）：读写都是**一份 5 字节配置**，
-    //    字节顺序 = 槽位顺序：b0=单击 b1=双击 b2=三击 b3=长按1秒 b4=长按3秒。
+    // ✅ 真机实测 + 官方 App **字节码**对照（`TouchNewInfo.<init>`，MOONDROP Pudding）：
+    //    读写都是**一份 5 字节配置**，**1 字节 = 1 种手势**，顺序 = 字节顺序：
+    //      b0=单击 b1=双击 b2=三击 b3=长按1秒 b4=长按3秒
+    //
+    //    ⚠⚠ **每个字节装两只耳朵**：高 4 位 = 左耳动作 id，低 4 位 = 右耳动作 id。
+    //      字节码依据：`TouchNewInfo` 为每种手势都声明了 L/R 两个 int 字段
+    //      （singleL singleR doubleL doubleR tripleL tripleR onesL onesR threesL threesR），
+    //      并且只对 data[0..4] 取值（guard：length >= 5），其中单击那字节：
+    //
+    //        aget-byte    b = data[0]
+    //        shr-int/lit8   -> singleL = b >> 4      （高 4 位）
+    //        and-int/lit8 #15 -> singleR = b & 0x0F  （低 4 位）
+    //
+    //      ⇒ 这里 **没有** 时长字段，**没有** (gestureId, actionId) 打包，
+    //        也 **没有** 按耳分帧/带耳索引的独立命令。
     //
     //      READ   TX 00 1D 2C 02
     //             RX 00 1D 2D 02 <b0> <b1> <b2> <b3> <b4>
     //      WRITE  TX 00 1D 2C 03 <b0> <b1> <b2> <b3> <b4>
     //             RX echo 00 1D 2D 03 <同样 5 字节>
     //
-    //    ⚠ **写入必须带全部 5 字节**：固件把 5 个槽位当作一份完整配置，
-    //      只发一个槽位会把其余槽位写坏（与提示音 VoiceConf 同一个坑）。
+    //    ⚠ **写入必须带全部 5 字节**：固件把 5 个字节当作一份完整配置，
+    //      只发一个会覆盖其余（与提示音 VoiceConf 同一个坑）。
     //
-    //    ⚠ 观测到的帧来自官方 App 的**左耳**页面。是否存在右耳对应帧
-    //      （多一个参数/索引、独立命令，或按触控板区分）**尚未确认**；
-    //      在没有证据之前 UI 不提供左右耳选择器（见 ui/GesturePage.kt）。
+    //    已知明文自检（用户手工配置 ↔ 读回 1:1 对齐；唯一不对称的正是「双击＝上/下一首」）：
+    //      11  单击   L=1 播放/暂停   R=1 播放/暂停
+    //      23  双击   L=2 上一曲      R=3 下一曲
+    //      66  三击   L=6 语音助手    R=6 语音助手
+    //      77  长按1S L=7 降噪切换    R=7 降噪切换
+    //      00  长按3S L=0 无          R=0 无
     // ============================================================
-    /** 读手势配置（cmd 2），回包 payload = 5 个槽位 */
+    /** 读**当前**手势动作（cmd 2）；回包 payload = 5 个「双耳打包」字节 */
     const val C_TOUCHV2_GET_ACTION_CONF = 2
-    /** 写手势配置（cmd 3），payload = 5 个槽位（必须全量） */
+    /** 写手势动作（cmd 3）；payload = 5 个「双耳打包」字节（必须全量） */
     const val C_TOUCHV2_SET_ACTION_CONF = 3
+    /**
+     * 读**出厂默认**手势动作（cmd 1）。
+     *
+     * 字节码里确实存在（`V3TouchV2Plugin$COMMANDS.GET_DEFAULT_ACTION = 1`），但官方 App
+     * 从未发送过它，本项目**也不发送** —— 只作为协议事实登记，免得以后再猜一遍。
+     */
+    const val C_TOUCHV2_GET_DEFAULT_ACTION = 1
 
     /** 手势配置 payload 长度：单击/双击/三击/长按1秒/长按3秒 = 5 */
     const val TOUCHV2_CONF_SIZE = 5
@@ -212,14 +235,18 @@ object Gaia {
     /** 槽位数量（= [GestureSlot] 的条目数，就是 payload 的字节数） */
     const val GESTURE_SLOT_COUNT = TOUCHV2_CONF_SIZE
 
+    /** 动作 id 是**半字节**：高 4 位 = 左耳，低 4 位 = 右耳（见本段说明）。 */
+    const val TOUCH_ACTION_MASK = 0x0F
+
     /**
-     * 动作 id `0x00` = 无 / 未定义。
+     * 动作 id `0` = 无 / 未定义。
      *
-     * 真机读写 1:1 对齐确认的动作 id **只有这 5 条**（见 [TouchActions.ALL]）：
-     * `0x00` 无 / 未定义、`0x11` 播放 / 暂停、`0x23` 上一曲、
-     * `0x66` 语音助手、`0x77` 降噪切换。
-     * 完整动作表仍在从官方 App 的 dex（Qualcomm `TouchNewInfo` / TouchV2 枚举）提取，
-     * 因此这里**只播种已确认的 id，不臆造任何新 id**。
+     * 动作 id 取值范围 **0..15**（一个半字节）。**直接观测**到的 6 条（见 [TouchActions.ALL]）：
+     * `0` 无、`1` 播放/暂停、`2` 上一曲、`3` 下一曲、`6` 语音助手、`7` 降噪切换。
+     * `4` 音量+ / `5` 音量- 是**推断**：官方 App 的选择器顺序为
+     * 播放/暂停、上一曲、下一曲、音量+、音量-、语音助手，而 1/2/3/6 恰好落在这个顺序上；
+     * 表里用 [TouchAction.inferred] = true 标出，UI 文案也带「推断」。
+     * `8..15` 未观测到，一律显示 `未知(0xN)`。
      */
     const val TOUCH_ACTION_NONE = 0x00
 
@@ -626,15 +653,18 @@ object Gaia {
     // 命令构造：手势（TOUCHV2）
     // ============================================================
 
-    /** 读手势配置（feature 22 / cmd 2）→ 回包 payload = `[单击,双击,三击,长按1秒,长按3秒]` */
+    /**
+     * 读手势配置（feature 22 / cmd 2）→ 回包 payload = `[单击,双击,三击,长按1秒,长按3秒]`，
+     * 每个字节**高 4 位 = 左耳动作、低 4 位 = 右耳动作**（见文件上方 TOUCHV2 段落）。
+     */
     fun touchV2GetConf(): ByteArray = command(F_TOUCHV2, C_TOUCHV2_GET_ACTION_CONF)
 
     /**
      * 写手势配置（feature 22 / cmd 3）。**必须是完整 5 字节**（见 TOUCHV2 段落）。
      *
      * 长度不符时直接抛 [IllegalArgumentException]，而不是补齐/截断：静默补 0
-     * 会把用户没动过的槽位写成「无」，属于破坏性写入。调用方在不确定其余槽位时
-     * 应当先 [touchV2GetConf] 读回来（见 MoondropLink.setGesture）。
+     * 会把用户没动过的手势/另一只耳朵写成「无」，属于破坏性写入。调用方在不确定
+     * 其余字节时应当先 [touchV2GetConf] 读回来（见 MoondropLink.setGesture）。
      */
     fun touchV2SetConf(bytes: ByteArray): ByteArray {
         require(bytes.size == TOUCHV2_CONF_SIZE) {
@@ -644,12 +674,12 @@ object Gaia {
     }
 
     /**
-     * 手势槽位。**index 即 payload 里的字节位置**（顺序 = 实测字节顺序）。
+     * 手势种类。**index 即 payload 里的字节位置**（顺序 = 实测字节顺序）。
      *
-     * ⚠ 「长按1秒」与「长按3秒」是两个**独立**槽位（实测 payload 就是 5 个独立字节，
-     *   读回时长按3秒是 `0x00` = 无）。用户反馈官方 App UI 里两者看似互斥
-     *   （「冲突的，我手动修改了一次」），但**本模块不硬编码互斥**：
-     *   没有证据证明固件禁止两者同时配置，就不能替用户禁掉一种可能合法的组合。
+     * ⚠ 「长按1秒」与「长按3秒」在协议上是**两个完全独立**的字节：字节码里是
+     *   onesL/onesR 与 threesL/threesR 两组独立字段，读回 `... 77 00` 也证明两者可同时存在。
+     *   用户说的「冲突」是**功能层面**的、不是协议层面的：按住满 3 秒必然先满足 1 秒的
+     *   触发条件，两档绑不同动作时行为含糊。本模块照协议保留两个独立槽位，不替用户互斥。
      */
     enum class GestureSlot(val index: Int, val labelZh: String, val labelEn: String) {
         SINGLE_TAP(0, "单击", "Single tap"),
@@ -659,41 +689,71 @@ object Gaia {
         LONG_PRESS_3S(4, "长按3秒", "Long press 3s"),
     }
 
-    /** 一个手势动作：id + 双语标签 + 可选 i18n 资源名（UI 侧取 strings.xml 用）。 */
+    /**
+     * 耳朵。动作 id 就装在同一字节的两半里：**左耳 = 高 4 位，右耳 = 低 4 位**。
+     *
+     * 这不是 UI 抽象 —— 协议里只存在这 5 个打包字节，没有「按耳」的独立命令或参数。
+     */
+    enum class Ear(val labelZh: String, val labelEn: String) {
+        LEFT("左耳", "Left"),
+        RIGHT("右耳", "Right"),
+    }
+
+    /**
+     * 一个手势动作：id（半字节 0..15）+ 双语标签 + 是否**推断** + 可选 i18n 资源名。
+     *
+     * @param inferred true = 该 id 未经真机读写逐字节确认。目前只有 音量+ / 音量-。
+     *   UI 必须如实标注（文案或说明），不能让用户以为它和已确认项同等可靠。
+     */
     data class TouchAction(
         val id: Int,
         val labelZh: String,
         val labelEn: String,
         /** strings.xml 里的资源名；null = 暂无本地化条目（UI 回落到 [labelZh]）。 */
         val i18nKey: String? = null,
+        val inferred: Boolean = false,
     )
 
     /**
      * 手势动作表 —— **数据驱动的唯一来源**，新增动作只在这里加一行。
      *
-     * ⚠ **这是部分表（partial）**：只收录真机对齐过的 id。未映射的 id 由
-     *   [matchOrUnknown] 显示为 `未知(0x..)`，不会被静默吞掉变成空白。
-     *   完整枚举由兄弟任务从官方 App dex 提取（Qualcomm TouchNewInfo / TouchV2）。
+     * ⚠ id 是**半字节（0..15）**：`8..15` 未观测到，由 [matchOrUnknown] 显示为 `未知(0xN)`，
+     *   不会被静默吞掉变成空白。已观测 6 条（0/1/2/3/6/7）+ 推断 2 条（4/5，标 [TouchAction.inferred]）。
      */
     object TouchActions {
 
-        /** 无 / 未定义（该槽位不响应任何手势） */
+        /** 无 / 未定义（该手势不响应） */
         const val NONE = TOUCH_ACTION_NONE
-        /** 播放 / 暂停 */
-        const val PLAY_PAUSE = 0x11
-        /** 上一曲 */
-        const val PREVIOUS_TRACK = 0x23
-        /** 语音助手 */
-        const val VOICE_ASSISTANT = 0x66
-        /** 降噪切换 */
-        const val ANC_SWITCH = 0x77
+        /** 播放 / 暂停（已观测） */
+        const val PLAY_PAUSE = 0x1
+        /** 上一曲（已观测） */
+        const val PREVIOUS_TRACK = 0x2
+        /** 下一曲（已观测） */
+        const val NEXT_TRACK = 0x3
+        /** 音量 + （**推断**：按官方 App 选择器顺序推断，未逐字节确认） */
+        const val VOLUME_UP = 0x4
+        /** 音量 - （**推断**：同上） */
+        const val VOLUME_DOWN = 0x5
+        /** 语音助手（已观测） */
+        const val VOICE_ASSISTANT = 0x6
+        /** 降噪切换（已观测） */
+        const val ANC_SWITCH = 0x7
 
-        /** 顺序即 UI 下拉列表顺序；[NONE] 放最前（= 不响应）。 */
+        /** 顺序 = 官方 App 选择器顺序（0..7）；[NONE] 最前（= 不响应）。 */
         val ALL: List<TouchAction> = listOf(
             TouchAction(NONE, "无 / 未定义", "None / undefined", "gesture_action_none"),
             TouchAction(PLAY_PAUSE, "播放 / 暂停", "Play / Pause", "gesture_action_play_pause"),
             TouchAction(
                 PREVIOUS_TRACK, "上一曲", "Previous track", "gesture_action_previous_track",
+            ),
+            TouchAction(NEXT_TRACK, "下一曲", "Next track", "gesture_action_next_track"),
+            TouchAction(
+                VOLUME_UP, "音量 +（推断）", "Volume + (inferred)", "gesture_action_volume_up",
+                inferred = true,
+            ),
+            TouchAction(
+                VOLUME_DOWN, "音量 -（推断）", "Volume - (inferred)", "gesture_action_volume_down",
+                inferred = true,
             ),
             TouchAction(
                 VOICE_ASSISTANT, "语音助手", "Voice assistant", "gesture_action_voice_assistant",
@@ -701,9 +761,9 @@ object Gaia {
             TouchAction(ANC_SWITCH, "降噪切换", "Noise control switch", "gesture_action_anc_switch"),
         )
 
-        /** 按 id 取动作；未映射返回 null。 */
+        /** 按 id 取动作（**只看低 4 位**）；未映射返回 null。 */
         fun byId(id: Int): TouchAction? {
-            val v = id and 0xFF
+            val v = id and TOUCH_ACTION_MASK
             return ALL.firstOrNull { it.id == v }
         }
 
@@ -714,12 +774,13 @@ object Gaia {
         fun matchOrUnknown(id: Int): String {
             val a = byId(id)
             if (a != null) return a.labelZh
-            return "未知(0x%02X)".format(id and 0xFF)
+            return "未知(0x%X)".format(id and TOUCH_ACTION_MASK)
         }
     }
 
     /**
-     * 手势配置：5 个槽位，顺序同 [GestureSlot]。
+     * 手势配置：5 个字节，字节顺序同 [GestureSlot]；**每个字节打包双耳**
+     * （高 4 位 = 左耳动作 id，低 4 位 = 右耳动作 id）。
      *
      * IntArray 的 equals/hashCode 是按**引用**的，这里覆写成按**内容**比较：
      * 否则两份取值相同的配置在 State/事件比较里会被当成「变了」，UI 会反复重组。
@@ -728,13 +789,35 @@ object Gaia {
 
         val size: Int get() = slots.size
 
-        /** 取某个槽位的动作 id。 */
-        operator fun get(slot: GestureSlot): Int = slots[slot.index]
+        /** 取某个手势的**整字节**（双耳一起，0..255）。 */
+        operator fun get(slot: GestureSlot): Int = slots[slot.index] and 0xFF
 
-        /** 返回「替换了一个槽位」的新配置（不改自身）。 */
-        fun with(slot: GestureSlot, actionId: Int): GestureConf {
+        /**
+         * 取某个手势、某只耳朵的动作 id（半字节）：左耳 = 高 4 位，右耳 = 低 4 位。
+         */
+        fun action(slot: GestureSlot, ear: Ear): Int {
+            val b = slots[slot.index] and 0xFF
+            return when (ear) {
+                Ear.LEFT -> (b shr 4) and TOUCH_ACTION_MASK
+                Ear.RIGHT -> b and TOUCH_ACTION_MASK
+            }
+        }
+
+        /**
+         * 返回「只改了一只耳朵的**那一个半字节**」的新配置：不改自身，也不动另一只耳朵
+         * 与其余字节（读-改-写掩码）。
+         *
+         * 左耳：`b and 0x0F or (id shl 4)`；右耳：`b and 0xF0 or id`。
+         */
+        fun with(slot: GestureSlot, ear: Ear, actionId: Int): GestureConf {
             val next = slots.copyOf()
-            next[slot.index] = actionId and 0xFF
+            val b = next[slot.index] and 0xFF
+            val id = actionId and TOUCH_ACTION_MASK
+            val merged = when (ear) {
+                Ear.LEFT -> (b and TOUCH_ACTION_MASK) or (id shl 4)
+                Ear.RIGHT -> (b and 0xF0) or id
+            }
+            next[slot.index] = merged and 0xFF
             return GestureConf(next)
         }
 
@@ -757,8 +840,8 @@ object Gaia {
      * 解析手势配置回包。
      *
      * 长度不足 [TOUCHV2_CONF_SIZE] 返回 null；**超过 5 字节时取前 5 字节**：
-     * 多出来的字节目前无法解释（固件版本差异？左右耳索引？——未确认），
-     * 因此不据此推断任何语义，也不用它去改槽位映射。
+     * 字节码里 `TouchNewInfo` 也只声明了这 5 个字段（10 个 L/R int），多出来的字节
+     * 没有对应字段可以解释，因此不据此推断任何语义。
      */
     fun parseGestureConf(payload: ByteArray?): GestureConf? {
         val p = payload ?: return null

@@ -115,7 +115,8 @@ data class PodSnapshot(
     /** 低延迟模式（HyperOS 系统侧）；null = 未知 */
     val lowLatencyOn: Boolean? = null,
     /**
-     * 手势配置（TOUCHV2，5 个槽位，顺序见 [Gaia.GestureSlot]）；null = 尚未读到。
+     * 手势配置（TOUCHV2，5 个字节，顺序见 [Gaia.GestureSlot]；**每字节高 4 位 = 左耳动作、
+     * 低 4 位 = 右耳动作**）；null = 尚未读到。
      *
      * 用不可变的 [Gaia.GestureConf]（内部按内容 equals）而不是裸 IntArray：
      * 裸数组的 equals 是按引用的，会让状态比较永远「不相等」。

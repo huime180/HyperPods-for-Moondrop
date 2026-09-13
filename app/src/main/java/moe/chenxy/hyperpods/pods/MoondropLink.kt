@@ -105,8 +105,10 @@ object MoondropLink {
     @Volatile private var dualConnectionOn: Boolean? = null
     @Volatile private var lowLatencyOn: Boolean? = null
     /**
-     * 手势配置（TOUCHV2）的 5 个槽位（顺序见 [Gaia.GestureSlot]）；null = 还没读到过。
+     * 手势配置（TOUCHV2）的 5 个字节（顺序见 [Gaia.GestureSlot]）；null = 还没读到过。
      *
+     * ⚠ 每个字节**打包双耳**：高 4 位 = 左耳动作 id，低 4 位 = 右耳动作 id
+     * （字节码 `TouchNewInfo` 的 per-gesture L/R 字段，见 Gaia 的 TOUCHV2 段落）。
      * 内部存 IntArray（与线格式字节一一对应），对外只经 [snapshot] 暴露不可变的
      * [Gaia.GestureConf]。是否支持由能力位图判定（见 [probeCapabilities] 的 hasGestures）。
      */
@@ -681,8 +683,8 @@ object MoondropLink {
     /**
      * 读手势配置（TOUCHV2 cmd 2）。
      *
-     * 固件只提供「整份 5 字节配置」的读写，没有单槽位读：所以一次全读，
-     * UI 的 5 行都取自这一份快照（[PodSnapshot.gestureConf]）。
+     * 固件只提供「整份 5 字节配置」的读写 —— 既没有单槽位读、也没有按耳读：
+     * 所以一次全读，UI 的 10 行（5 手势 × 2 耳）都取自这一份快照（[PodSnapshot.gestureConf]）。
      */
     suspend fun refreshGestures() {
         if (!capabilities.hasGestures) return
@@ -782,29 +784,31 @@ object MoondropLink {
     }
 
     /**
-     * 写一个手势槽位。
+     * 写「某只手势的某只耳朵」的动作 —— **只改该字节里的那一个半字节**。
      *
-     * ⚠ **必须下发完整 5 字节**（见 [Gaia.touchV2SetConf]）：固件把 5 个槽位当作一份
-     * 配置，只发一个槽位会把其余槽位写坏 —— 与 [setPromptVoice] 是同一个坑。
+     * ⚠ **必须下发完整 5 字节**（见 [Gaia.touchV2SetConf]）：固件把 5 个字节当作一份
+     * 配置，只发一部分会把其余字节写坏 —— 与 [setPromptVoice] 是同一个坑。
      * 因此这里：若还没读到过配置，先读一次再写；**读不到就放弃本次写入**，
-     * 绝不用 0 补齐（那等于把用户其余槽位悄悄清成「无」）。
+     * 绝不用 0 补齐（那等于把用户其余手势 / 另一只耳朵悄悄清成「无」）。
+     * [Gaia.GestureConf.with] 负责半字节读改写：另一只耳朵与其余 4 个字节原样保留。
      *
      * 写完按既有模式 delay 后回读，保证 UI 显示的是固件真实接受了的值。
      *
-     * @param slot     目标槽位（单击 / 双击 / 三击 / 长按1秒 / 长按3秒）
-     * @param actionId [Gaia.TouchActions] 里的动作 id（未知 id 也原样下发）
+     * @param slot     手势种类（单击 / 双击 / 三击 / 长按1秒 / 长按3秒）
+     * @param ear      哪只耳朵（左 = 高 4 位，右 = 低 4 位）
+     * @param actionId 动作 id（半字节 0..15；不在 [Gaia.TouchActions] 里的值也原样下发）
      */
-    fun setGesture(slot: Gaia.GestureSlot, actionId: Int) {
+    fun setGesture(slot: Gaia.GestureSlot, ear: Gaia.Ear, actionId: Int) {
         scope.launch {
             val current = gestureConf ?: fetchGestureConf()
             if (current == null) {
-                Log.w(TAG, "setGesture($slot) skipped: gesture config unknown")
+                Log.w(TAG, "setGesture($slot/$ear) skipped: gesture config unknown")
                 return@launch
             }
-            val next = Gaia.GestureConf(current.copyOf()).with(slot, actionId)
+            val next = Gaia.GestureConf(current.copyOf()).with(slot, ear, actionId)
             Log.i(
                 TAG,
-                "setGesture ${slot.index}/${slot.labelZh} -> " +
+                "setGesture ${slot.index}/${slot.labelZh}/${ear.labelZh} -> " +
                     "${Gaia.TouchActions.matchOrUnknown(actionId)} ($next)",
             )
             write(Gaia.touchV2SetConf(next.toPayload()))

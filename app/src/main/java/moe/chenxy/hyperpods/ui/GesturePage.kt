@@ -2,24 +2,26 @@
  * HyperPods for Moondrop — 「手势操作」页
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * 一行 = 一个手势槽位（单击 / 双击 / 三击 / 长按1秒 / 长按3秒），点开选动作 → 立即下发
- * **完整 5 字节**配置（协议见 core/Gaia.kt 的 TOUCHV2 段落，下发见 pods/MoondropLink.kt 的 setGesture）。
+ * 协议（真机实测 + 官方 App 字节码，见 core/Gaia.kt 的 TOUCHV2 段落）：
+ *   feature 22 的配置是 **5 个字节**，1 字节 = 1 种手势（单击/双击/三击/长按1秒/长按3秒），
+ *   **每个字节打包双耳**：高 4 位 = 左耳动作 id，低 4 位 = 右耳动作 id。
+ *   所以本页是 **5 × 2 = 10 行**（一行 = 一种手势的一只耳朵），改一行只下发那一个半字节
+ *   （读-改-写整份 5 字节，见 pods/MoondropLink.kt 的 setGesture）。
  *
- * 组件词汇与参考实现一致（_refs/OppoPods/.../ui/PodDetailPage.kt:146,184 与 PodDetailPage.kt:175）：
+ * 组件词汇与参考实现一致（_refs/OppoPods/.../ui/PodDetailPage.kt:146,184）：
  *   androidx LazyColumn（与本项目 PodDetailPage.kt 同一写法）+ basic.SmallTitle +
  *   basic.Card + preference.OverlayDropdownPreference(title / items / selectedIndex /
  *   onSelectedIndexChange) + basic.BasicComponent(title / summary)。
  *
- * ⚠ 这一页刻意「不做什么」，全部因为协议证据不足（页面上也如实写给用户看）：
- *   1) **没有左右耳选择器**。观测到的读写帧来自官方 App 的**左耳**页面；右耳是否另有一帧
- *      （多一个参数/索引、独立命令，或按触控板区分）尚未找到证据。宁可不做，也不摆一个
- *      没有协议支撑的开关（要加时：确认帧格式后再加，并回来补这里的选择器）。
- *   2) **动作表是部分表**：只收录真机逐字节对齐过的 5 个 id（Gaia.TouchActions.ALL）。
- *      未映射的 id 不会被静默吞掉或回落成「无」，而是单列一条 `未知(0x..)` 选项
+ * ⚠ 诚实标注（页面上也写给用户看）：
+ *   1) 动作表里 **播放/暂停、上一曲、下一曲、语音助手、降噪切换** 是实测确认的；
+ *      **音量+ / 音量-** 只按官方 App 选择器顺序推断，标签里直接写「（推断）」。
+ *   2) `8..15` 未观测到：这种值不会被静默吞掉或回落成「无」，而是单列一条 `未知(0xN)` 选项
  *      （Gaia.TouchActions.matchOrUnknown）。
- *   3) **没有「重置」按钮**：没有已知的重置命令，就不发明一个（宁缺毋滥）。
- *   4) 长按1秒 / 长按3秒**不互斥**：实测回包就是 5 个独立槽位；用户反馈官方 App 看似互斥，
- *      但未经证实，因此不替用户禁掉一种可能合法的组合（见 Gaia.GestureSlot 的 KDoc）。
+ *   3) 长按1秒 / 长按3秒是协议上**两个独立字节**（字节码里 onesL/onesR 与 threesL/threesR
+ *      两组独立字段），所以照实做成 4 行、不做互斥；用户说的「冲突」是功能层面的
+ *      （按满 3 秒必然先满足 1 秒），已在说明文案里讲清楚。
+ *   4) **没有「重置」按钮**：没有已知的重置命令，就不发明一个（宁缺毋滥）。
  */
 package moe.chenxy.hyperpods.ui
 
@@ -48,19 +50,22 @@ private val GESTURE_CARD_GAP = 12.dp
  * 动作 id → 本地化文案资源。
  *
  * 表外的 id 由 [actionLabel] 回落到 [Gaia.TouchActions] 里的中文标签；两者都没有时
- * 走 [Gaia.TouchActions.matchOrUnknown] 显示 `未知(0x..)` —— 任何取值都不会变成空白。
+ * 走 [Gaia.TouchActions.matchOrUnknown] 显示 `未知(0xN)` —— 任何取值都不会变成空白。
  * 新增动作时：Gaia.TouchActions.ALL 加一行 + 两份 strings.xml 加同名键 + 这里加一行映射。
  */
 private val ACTION_LABEL_RES: Map<Int, Int> = mapOf(
     Gaia.TouchActions.NONE to R.string.gesture_action_none,
     Gaia.TouchActions.PLAY_PAUSE to R.string.gesture_action_play_pause,
     Gaia.TouchActions.PREVIOUS_TRACK to R.string.gesture_action_previous_track,
+    Gaia.TouchActions.NEXT_TRACK to R.string.gesture_action_next_track,
+    Gaia.TouchActions.VOLUME_UP to R.string.gesture_action_volume_up,
+    Gaia.TouchActions.VOLUME_DOWN to R.string.gesture_action_volume_down,
     Gaia.TouchActions.VOICE_ASSISTANT to R.string.gesture_action_voice_assistant,
     Gaia.TouchActions.ANC_SWITCH to R.string.gesture_action_anc_switch,
 )
 
 /**
- * 手势操作页。
+ * 手势操作页：10 行 = 5 种手势 × 2 只耳朵，行标题形如「单击 · 左耳」。
  *
  * @param snapshot 来自 [rememberPodSnapshot]：`gestureConf == null` 表示还没读到配置
  *                 （未支持、未连接或读取超时），此时给出说明卡片而不是空白。
@@ -95,12 +100,18 @@ fun GesturePage(
             val rows = current
             item {
                 Card {
+                    // 5 种手势 × 2 只耳朵 = 10 行；顺序：手势优先，每只手势先左后右
                     Gaia.GestureSlot.entries.forEach { slot ->
-                        GestureSlotRow(
-                            slot = slot,
-                            currentId = rows[slot],
-                            onSelect = { actionId -> MoondropLink.setGesture(slot, actionId) },
-                        )
+                        Gaia.Ear.entries.forEach { ear ->
+                            GestureRow(
+                                slot = slot,
+                                ear = ear,
+                                currentId = rows.action(slot, ear),
+                                onSelect = { actionId ->
+                                    MoondropLink.setGesture(slot, ear, actionId)
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -127,7 +138,7 @@ fun GesturePage(
             }
         }
 
-        // 如实说明（左右耳未确认 / 动作表不完整 / 长按两档未证实互斥）
+        // 如实说明（双耳打包 / 音量±是推断 / 长按两档是功能层面冲突）
         item {
             Card(modifier = Modifier.padding(top = GESTURE_CARD_GAP)) {
                 BasicComponent(
@@ -140,14 +151,16 @@ fun GesturePage(
 }
 
 /**
- * 一个槽位的下拉行。
+ * 一行 = 一种手势 + 一只耳朵。
  *
- * 当前值不在动作表里时（固件给了我们还没映射的 id），列表首项插入一条 `未知(0x..)`
- * 并选中它 —— 这条占位项**不可被选中下发**（选中它没有意义，会被 `getOrNull(-1)` 丢掉）。
+ * 当前值不在动作表里时（固件给了我们还没映射的半字节，例如 `8..15`），列表首项插入一条
+ * `未知(0xN)` 并选中它 —— 这条占位项**不可被选中下发**（选中它没有意义，会被
+ * `getOrNull(-1)` 丢掉），因此不会把未知值悄悄改成别的动作。
  */
 @Composable
-private fun GestureSlotRow(
+private fun GestureRow(
     slot: Gaia.GestureSlot,
+    ear: Gaia.Ear,
     currentId: Int,
     onSelect: (Int) -> Unit,
 ) {
@@ -162,11 +175,17 @@ private fun GestureSlotRow(
     val selectedIndex = if (unmapped) {
         0
     } else {
-        known.indexOfFirst { it.id == (currentId and 0xFF) }.coerceAtLeast(0)
+        known.indexOfFirst { it.id == (currentId and Gaia.TOUCH_ACTION_MASK) }.coerceAtLeast(0)
     }
 
     OverlayDropdownPreference(
-        title = stringResource(slotTitleRes(slot)),
+        // 「单击 · 左耳」：耳朵必须在标题里可见 —— 10 行同列，不做左右耳切换开关，
+        // 这样任何时刻都能看清自己在改哪只耳朵的哪个手势。
+        title = stringResource(
+            R.string.gesture_slot_ear,
+            stringResource(slotTitleRes(slot)),
+            stringResource(earRes(ear)),
+        ),
         items = items,
         selectedIndex = selectedIndex,
         onSelectedIndexChange = { index ->
@@ -176,16 +195,22 @@ private fun GestureSlotRow(
     )
 }
 
-/** 动作 → 本地化文案；无本地化条目时回落表里的中文标签。 */
+/** 动作 → 本地化文案；无本地化条目时回落表里的中文标签（含「（推断）」标注）。 */
 @Composable
 private fun actionLabel(action: Gaia.TouchAction): String =
     ACTION_LABEL_RES[action.id]?.let { stringResource(it) } ?: action.labelZh
 
-/** 槽位 → 标题资源（单击 / 双击 / 三击 / 长按1秒 / 长按3秒）。 */
+/** 手势种类 → 标题资源（单击 / 双击 / 三击 / 长按1秒 / 长按3秒）。 */
 private fun slotTitleRes(slot: Gaia.GestureSlot): Int = when (slot) {
     Gaia.GestureSlot.SINGLE_TAP -> R.string.gesture_slot_single_tap
     Gaia.GestureSlot.DOUBLE_TAP -> R.string.gesture_slot_double_tap
     Gaia.GestureSlot.TRIPLE_TAP -> R.string.gesture_slot_triple_tap
     Gaia.GestureSlot.LONG_PRESS_1S -> R.string.gesture_slot_long_press_1s
     Gaia.GestureSlot.LONG_PRESS_3S -> R.string.gesture_slot_long_press_3s
+}
+
+/** 耳朵 → 标题资源（左耳 / 右耳）。 */
+private fun earRes(ear: Gaia.Ear): Int = when (ear) {
+    Gaia.Ear.LEFT -> R.string.gesture_ear_left
+    Gaia.Ear.RIGHT -> R.string.gesture_ear_right
 }
