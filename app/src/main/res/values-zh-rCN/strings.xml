@@ -29,12 +29,17 @@
     <string name="batt_case">充电盒</string>
     <string name="batt_whole">整机</string>
     <string name="batt_charging">充电中</string>
+
+    <string name="batt_offline">离线</string>
     <string name="batt_unknown">正在读取电量…</string>
 
-    <!-- 降噪 -->
+    <!-- 降噪：顶部一排 = 通透 / 降噪（组）/ 关闭；
+         降噪组下展开的子排 = 自适应 / 抗风 / 普通 -->
     <string name="anc_title">降噪</string>
     <string name="anc_mode_off">关闭</string>
     <string name="anc_mode_nc">降噪</string>
+    <!-- 降噪组的子档位「普通」（= AncMode.NOISE_CANCELLATION） -->
+    <string name="anc_mode_normal">普通</string>
     <string name="anc_mode_transparency">通透</string>
     <string name="anc_mode_anti_wind">抗风</string>
     <string name="anc_mode_adaptive">自适应</string>
@@ -53,8 +58,6 @@
     <string name="lhdc_summary">关闭时使用 AAC/SBC 等基础编码（默认关闭）</string>
     <string name="dual_connection_title">双设备连接</string>
     <string name="dual_connection_summary">同时保持两台设备连接</string>
-    <string name="low_latency_title">低延迟模式</string>
-    <string name="low_latency_summary">由 HyperOS 系统蓝牙提供</string>
 
     <!-- LHDC / 双设备连接互斥（PUDDING 固件实测不能同时开启） -->
     <string name="conflict_lhdc_dual_title">LHDC 与双设备连接不能同时开启</string>

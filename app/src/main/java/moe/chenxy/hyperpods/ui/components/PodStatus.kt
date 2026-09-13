@@ -113,7 +113,7 @@ fun BatteryRow(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         BasicText(
-            text = if (charging) "$label · ${stringResource(R.string.batt_charging)}" else label,
+            text = if (charging && level > 0) "$label · ${stringResource(R.string.batt_charging)}" else label,
             style = TextStyle(
                 fontSize = 14.sp,
                 color = MiuixTheme.colorScheme.onBackground
@@ -123,21 +123,33 @@ fun BatteryRow(
     }
 }
 
-/** 电池图标 + 百分比文字。 */
+/**
+ * 电池图标 + 百分比文字。
+ *
+ * 未连接 / 无数据的组件**不显示 0 %，而显示「离线」**：
+ * 水月雨固件对未连接的一侧常上报 0x00 或 0xFF，两者都不能当成"真的 0% 电量"，
+ * 否则用户会看到一只耳显示 0% 而误以为电量耗尽。
+ */
 @Composable
 fun Battery(level: Int, charging: Boolean, darkMode: Boolean, modifier: Modifier = Modifier) {
+    val offline = level <= 0
     Row(
         modifier = modifier.width(100.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        BatteryIcon(batteryLevel = level, isCharging = charging, isDarkMode = darkMode)
+        BatteryIcon(
+            batteryLevel = level.coerceAtLeast(0),
+            isCharging = charging && !offline,
+            isDarkMode = darkMode,
+        )
         BasicText(
-            text = "$level %",
+            text = if (offline) stringResource(R.string.batt_offline) else "$level %",
             style = TextStyle(
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
-                color = batteryColor(level, charging, darkMode)
+                color = if (offline) MiuixTheme.colorScheme.onBackground.copy(alpha = 0.45f)
+                else batteryColor(level, charging, darkMode)
             )
         )
     }

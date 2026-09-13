@@ -8,11 +8,13 @@
  *   · 每块内容装在 miuix 的 Card 里，块间距 12dp；
  *   · 开关行用 preference.SwitchPreference（title + summary），
  *     下拉行用 preference.OverlayDropdownPreference，跳转行用 preference.ArrowPreference，
- *     滑条行用 preference.SliderPreference —— 与 OppoPods 同一套组件词汇。
+ *     提示音开关 + 提示音音量合并成一行（components/PromptTone.kt）—— 与 OppoPods 同一套组件词汇。
  *
- * 行顺序（本项目的功能面）：机型 + 传输/编码 → 电量 → 降噪 → 增益 → 指示灯/提示音
- *   → 提示音音量 → LHDC → 双设备连接 → 低延迟 → 刷新 → 系统蓝牙设置 → 关于。
+ * 行顺序（本项目的功能面）：机型 + 传输/编码 → 电量 → 降噪（三选一 + 子排）→ 增益
+ *   → 指示灯 / 提示音(含音量) / LHDC / 双设备连接 → 刷新 → 系统蓝牙设置 → 关于。
  * 所有功能行仍由 PodCapabilities 硬门控：能力位为 false 时该行不会出现在组合树里。
+ * 「低延迟模式」开关已按用户要求移除（系统侧功能仍在系统蓝牙详情页可用），
+ * 因此 hasLowLatency 不再门控任何 UI。
  */
 package moe.chenxy.hyperpods.ui
 
@@ -34,10 +36,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -46,8 +44,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.roundToInt
-import moe.chenxy.hyperpods.BuildConfig
 import moe.chenxy.hyperpods.R
 import moe.chenxy.hyperpods.pods.MoondropLink
 import moe.chenxy.hyperpods.pods.PodSnapshot
@@ -55,15 +51,14 @@ import moe.chenxy.hyperpods.ui.components.AncSwitch
 import moe.chenxy.hyperpods.ui.components.MutualExclusionDialog
 import moe.chenxy.hyperpods.ui.components.MutualExclusionTarget
 import moe.chenxy.hyperpods.ui.components.PodStatus
+import moe.chenxy.hyperpods.ui.components.PromptToneSection
 import moe.chenxy.hyperpods.ui.components.rememberMutualExclusionState
-import moe.chenxy.hyperpods.utils.data.HyperPodsAction
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
-import top.yukonga.miuix.kmp.preference.SliderPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
@@ -91,8 +86,12 @@ fun PodDetailPage(
     val context = LocalContext.current
     val capabilities = snapshot.capabilities
     val exclusion = rememberMutualExclusionState()
-    val hasSwitchRow = capabilities.hasLed || capabilities.hasPromptTone
-    val hasCodecRow = capabilities.hasLhdc || capabilities.hasDualConnection || capabilities.hasLowLatency
+    // 开关行卡片：任一能力位为 true 就出现（提示音与音量已合并为同一行）
+    val hasSwitchCard = capabilities.hasLed ||
+        capabilities.hasPromptTone ||
+        capabilities.hasPromptVolume ||
+        capabilities.hasLhdc ||
+        capabilities.hasDualConnection
 
     LazyColumn(
         modifier = modifier.fillMaxSize().scrollEndHaptic(),
@@ -144,7 +143,7 @@ fun PodDetailPage(
             }
         }
 
-        if (hasSwitchRow || hasCodecRow || capabilities.hasPromptVolume) {
+        if (hasSwitchCard) {
             item {
                 Card(modifier = Modifier.padding(top = CARD_GAP)) {
                     if (capabilities.hasLed) {
@@ -155,14 +154,8 @@ fun PodDetailPage(
                             onCheckedChange = { on -> MoondropLink.setLed(on) },
                         )
                     }
-                    if (capabilities.hasPromptTone) {
-                        SwitchPreference(
-                            title = stringResource(R.string.prompt_tone_title),
-                            summary = stringResource(R.string.prompt_tone_summary),
-                            checked = snapshot.promptToneOn ?: false,
-                            onCheckedChange = { on -> MoondropLink.setPromptTone(on) },
-                        )
-                    }
+                    // 提示音开关 + 提示音音量：合并成同一行（内部按能力位决定显示开关/滑条）
+                    PromptToneSection(snapshot)
                     if (capabilities.hasLhdc) {
                         SwitchPreference(
                             title = stringResource(R.string.lhdc_title),
@@ -187,25 +180,6 @@ fun PodDetailPage(
                                 }
                             },
                         )
-                    }
-                    if (capabilities.hasLowLatency) {
-                        SwitchPreference(
-                            title = stringResource(R.string.low_latency_title),
-                            summary = stringResource(R.string.low_latency_summary),
-                            checked = snapshot.lowLatencyOn ?: false,
-                            onCheckedChange = { on ->
-                                // 低延迟是 HyperOS 系统侧功能，不是 GAIA 命令：
-                                // 广播给自己包名 → manifest 的 ControlReceiver → ControlBridge 处理并转发给蓝牙进程。
-                                context.sendBroadcast(
-                                    Intent(HyperPodsAction.LOW_LATENCY_SELECT)
-                                        .setPackage(BuildConfig.APPLICATION_ID)
-                                        .putExtra(HyperPodsAction.EXTRA_ENABLED, on)
-                                )
-                            },
-                        )
-                    }
-                    if (capabilities.hasPromptVolume) {
-                        PromptVolumePreference(snapshot)
                     }
                 }
             }
@@ -298,30 +272,6 @@ private fun DeviceHeroCard(snapshot: PodSnapshot) {
             summary = snapshot.activeCodec.ifBlank { stringResource(R.string.unknown_value) },
         )
     }
-}
-
-/**
- * 提示音音量行（SliderPreference：Miuix 原生滑条行，形态与参考实现的 preference 行一致）。
- *
- * UI 值 0..promptVolumeMax 与设备值**同一单位**（0..100 百分比）——官方 App 日志实测
- * `updateV2VoiceConf: enabled=true, volume=20, index=1`，不是 0..255 的原始字节，因此恒等映射。
- * 拖动过程中只改本地显示，松手（onValueChangeFinished）才下发，避免刷屏设备。
- */
-@Composable
-private fun PromptVolumePreference(snapshot: PodSnapshot) {
-    val max = snapshot.promptVolumeMax.coerceAtLeast(1)
-    val raw = snapshot.promptVolumeRaw
-    val uiValue = if (raw < 0) 0 else raw.coerceIn(0, max)
-    var localValue by remember(raw, max) { mutableIntStateOf(uiValue) }
-
-    SliderPreference(
-        title = stringResource(R.string.prompt_volume_title),
-        value = localValue.toFloat(),
-        onValueChange = { value -> localValue = value.roundToInt().coerceIn(0, max) },
-        valueRange = 0f..max.toFloat(),
-        valueText = "$localValue / $max",
-        onValueChangeFinished = { MoondropLink.setPromptVolumeRaw(localValue) },
-    )
 }
 
 /**

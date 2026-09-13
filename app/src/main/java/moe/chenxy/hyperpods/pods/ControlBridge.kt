@@ -16,6 +16,8 @@
  *   com.android.bluetooth --PODS_CONNECTED/DISCONNECTED--> 本桥 --> MoondropLink.connect()
  *   com.android.settings  --*_SELECT / UI_INIT / REQUEST_*--> 本桥 --> MoondropLink.setXxx()
  *   本桥 --ANC_CHANGED / BATTERY_CHANGED--> com.android.settings（被伪装的耳机页显示）
+ *   com.android.bluetooth --CODEC_CHANGED--> 本桥 --> MoondropLink.onSystemCodecChanged()（详情页「当前编码」）
+ *   本桥 --UI_INIT--> com.android.bluetooth（请它重放一次系统真实编码）
  *   本桥 --UPDATE_SYSTEM_BATTERY--> com.android.bluetooth（写进 AdapterService，系统 UI 显示电量）
  *   本桥 --UPDATE_PODS_NOTIFICATION / SEND_STRONG_TOAST / CANCEL_*--> com.xiaomi.bluetooth（通知）
  */
@@ -26,6 +28,7 @@ import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -63,10 +66,14 @@ object ControlBridge {
     @Volatile private var connectedDevice: BluetoothDevice? = null
     @Volatile private var appContext: Context? = null
 
+    /** 动态注册的编码接收器（见 registerCodecReceiver 的说明；非空即已注册）。 */
+    @Volatile private var codecReceiver: BroadcastReceiver? = null
+
     /** 幂等初始化：注册跨进程状态转发器。 */
     @Synchronized
     fun ensureInit(context: Context) {
         appContext = context.applicationContext
+        registerCodecReceiver(context.applicationContext)
         if (initialized) return
         MoondropLink.init(context.applicationContext, forwarder)
         initialized = true
@@ -92,10 +99,18 @@ object ControlBridge {
                 cancelNotification(context)
             }
 
+            // 蓝牙进程报告系统实际协商的 A2DP 编码
+            HyperPodsAction.CODEC_CHANGED ->
+                runCatching { onCodecChanged(intent) }
+                    .onFailure { Log.w(TAG, "CODEC_CHANGED handling failed", it) }
+
             // 系统侧请求状态重放
             HyperPodsAction.UI_INIT,
-            HyperPodsAction.REQUEST_CAPABILITIES ->
+            HyperPodsAction.REQUEST_CAPABILITIES -> {
                 MoondropLink.refreshAll()
+                // 顺手请蓝牙进程重放一次「系统真实编码」：详情页一打开就能拿到正确编码
+                requestSystemCodec(context)
+            }
             HyperPodsAction.REQUEST_BATTERY ->
                 MoondropLink.requestBatteryRefresh()
 
@@ -125,6 +140,58 @@ object ControlBridge {
                     it.putExtra(HyperPodsAction.EXTRA_ENABLED, on)
                 }
             }
+        }
+    }
+
+    // ── 系统编码（CODEC_CHANGED） ──────────────────────────────────────────
+    //
+    // AndroidManifest 里 ControlReceiver 的 intent-filter 没有 codec_changed，而显式广播
+    // 同样必须命中 intent-filter 才会投递到 manifest 接收器；本任务只允许改这 3 个文件，
+    // 所以这里在应用进程内**动态注册**一个接收器专门收蓝牙进程报来的编码。
+    // ensureInit() 由 ControlReceiver（PODS_CONNECTED / UI_INIT 触发）与 UI
+    // （ui/PodState.kt 的 rememberPodSnapshot）各调用一次，UI 活着的时候必定已注册。
+
+    @Synchronized
+    private fun registerCodecReceiver(context: Context) {
+        if (codecReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                if (intent?.action == HyperPodsAction.CODEC_CHANGED) {
+                    runCatching { onCodecChanged(intent) }
+                        .onFailure { Log.w(TAG, "codec receiver failed", it) }
+                }
+            }
+        }
+        // 发送方是 com.android.bluetooth（另一个应用），必须 RECEIVER_EXPORTED。
+        val registered = runCatching {
+            context.registerReceiver(
+                receiver,
+                IntentFilter(HyperPodsAction.CODEC_CHANGED),
+                Context.RECEIVER_EXPORTED,
+            )
+        }.onFailure { Log.w(TAG, "register codec receiver skipped: ${it.message}") }.isSuccess
+        if (!registered) return
+        codecReceiver = receiver
+        Log.d(TAG, "codec receiver registered (${HyperPodsAction.CODEC_CHANGED})")
+    }
+
+    /** CODEC_CHANGED{EXTRA_CODEC} → MoondropLink（详情页 hero 的「当前编码」）。 */
+    private fun onCodecChanged(intent: Intent) {
+        val codec = intent.getStringExtra(HyperPodsAction.EXTRA_CODEC)
+        val mac = intent.getStringExtra(HyperPodsAction.EXTRA_MAC)
+        if (codec.isNullOrBlank()) {
+            Log.w(TAG, "CODEC_CHANGED without ${HyperPodsAction.EXTRA_CODEC} extra (mac=$mac)")
+            return
+        }
+        Log.i(TAG, "CODEC_CHANGED codec=$codec mac=$mac")
+        MoondropLink.onSystemCodecChanged(codec)
+    }
+
+    /** 请 com.android.bluetooth 里的 hook 读一次系统 A2DP 编码并回 CODEC_CHANGED。 */
+    private fun requestSystemCodec(context: Context) {
+        sendTo(context, "com.android.bluetooth", HyperPodsAction.UI_INIT) {
+            it.putExtra(HyperPodsAction.EXTRA_MAC, connectedDevice?.address)
+            it.putExtra(HyperPodsAction.EXTRA_DEVICE, connectedDevice)
         }
     }
 
@@ -271,6 +338,7 @@ object ControlBridge {
         HyperPodsAction.LHDC_SELECT,
         HyperPodsAction.DUAL_CONNECTION_SELECT,
         HyperPodsAction.LOW_LATENCY_SELECT,
+        HyperPodsAction.CODEC_CHANGED,
     )
 
     val APP_ID: String = BuildConfig.APPLICATION_ID

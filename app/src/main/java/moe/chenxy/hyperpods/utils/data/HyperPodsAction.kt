@@ -41,6 +41,11 @@ object HyperPodsAction {
     const val LHDC_CHANGED = "chen.action.hyperpods.moondrop.lhdc_changed"
     const val DUAL_CONNECTION_CHANGED = "chen.action.hyperpods.moondrop.dual_connection_changed"
     const val LOW_LATENCY_CHANGED = "chen.action.hyperpods.moondrop.low_latency_changed"
+    /**
+     * 蓝牙进程报告**系统实际协商出来的** A2DP 编码名（SBC / AAC / LDAC / LHDC…）。
+     * 应用进程收到后交给 MoondropLink.onSystemCodecChanged()，详情页「当前编码」显示它。
+     */
+    const val CODEC_CHANGED = "chen.action.hyperpods.moondrop.codec_changed"
     const val CAPABILITIES_CHANGED = "chen.action.hyperpods.moondrop.capabilities_changed"
     const val DEBUG_LOG = "chen.action.hyperpods.moondrop.debug_log"
 
@@ -78,5 +83,7 @@ object HyperPodsAction {
     const val EXTRA_LEVEL = "level"
     const val EXTRA_PROMPT_VOLUME_RAW = "prompt_volume_raw"
     const val EXTRA_ENABLED = "enabled"
+    /** CODEC_CHANGED 携带的系统编码名（String，如 "AAC" / "LHDCv5" / "LDAC" / "SBC"）。 */
+    const val EXTRA_CODEC = "codec"
     const val EXTRA_MESSAGE = "message"
 }

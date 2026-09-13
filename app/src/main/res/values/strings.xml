@@ -29,12 +29,17 @@
     <string name="batt_case">Case</string>
     <string name="batt_whole">Earbuds</string>
     <string name="batt_charging">Charging</string>
+
+    <string name="batt_offline">Offline</string>
     <string name="batt_unknown">Reading battery…</string>
 
-    <!-- ANC -->
+    <!-- ANC: top row = transparency / noise control (group) / off;
+         the sub row under "Noise control" = adaptive / anti-wind / normal -->
     <string name="anc_title">Noise control</string>
     <string name="anc_mode_off">Off</string>
     <string name="anc_mode_nc">Noise Cancelling</string>
+    <!-- sub-mode of the noise control group (= AncMode.NOISE_CANCELLATION) -->
+    <string name="anc_mode_normal">Normal</string>
     <string name="anc_mode_transparency">Transparency</string>
     <string name="anc_mode_anti_wind">Anti-Wind</string>
     <string name="anc_mode_adaptive">Adaptive</string>
@@ -53,8 +58,6 @@
     <string name="lhdc_summary">Uses basic codecs such as AAC/SBC when off (off by default)</string>
     <string name="dual_connection_title">Dual device connection</string>
     <string name="dual_connection_summary">Keep two devices connected at the same time</string>
-    <string name="low_latency_title">Low latency mode</string>
-    <string name="low_latency_summary">Provided by the HyperOS system Bluetooth stack</string>
 
     <!-- LHDC / dual connection mutual exclusion (PUDDING firmware cannot enable both) -->
     <string name="conflict_lhdc_dual_title">LHDC and Dual device connection cannot be enabled at the same time</string>

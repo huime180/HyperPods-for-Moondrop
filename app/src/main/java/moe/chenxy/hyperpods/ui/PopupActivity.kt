@@ -5,9 +5,12 @@
  * 版式与组件逐条对齐参考实现 _refs/OppoPods/app/src/main/java/moe/chenxy/oppopods/PopupActivity.kt：
  *   · 透明 Scaffold 里挂 miuix overlay.OverlayDialog（:213-251）——圆角、窗口变暗、
  *     点框外关闭都由 OverlayDialog 负责（enableWindowDim 默认 true）；
- *   · 内容是一叠 Card：电量（PodStatus）→ 降噪（AncSwitch）→ 快捷开关（SwitchPreference）（:266-287）；
+ *   · 内容是一叠 Card：电量（PodStatus）→ 降噪（AncSwitch：三选一 + 降噪子排）
+ *     → 快捷开关（提示音含音量 / LHDC / 双设备连接）（:266-287）；
  *   · 底部一排等宽 TextButton：「更多设置」+「关闭」（:288-303）。
  * 由广播 chen.action.hyperpods.moondrop.show_popup 启动（见 AndroidManifest）。
+ * 「低延迟模式」开关已按用户要求移除；hasLowLatency 不再门控任何 UI。
+ * 弹窗也可能是用户第一眼看到的界面（超级岛/通知直达），因此这里同样主动申请一次运行时权限。
  */
 package moe.chenxy.hyperpods.ui
 
@@ -34,7 +37,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import moe.chenxy.hyperpods.BuildConfig
 import moe.chenxy.hyperpods.MainActivity
 import moe.chenxy.hyperpods.R
 import moe.chenxy.hyperpods.pods.MoondropLink
@@ -44,8 +46,8 @@ import moe.chenxy.hyperpods.ui.components.MutualExclusionDialog
 import moe.chenxy.hyperpods.ui.components.MutualExclusionState
 import moe.chenxy.hyperpods.ui.components.MutualExclusionTarget
 import moe.chenxy.hyperpods.ui.components.PodStatus
+import moe.chenxy.hyperpods.ui.components.PromptToneSection
 import moe.chenxy.hyperpods.ui.components.rememberMutualExclusionState
-import moe.chenxy.hyperpods.utils.data.HyperPodsAction
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
@@ -61,6 +63,9 @@ class PopupActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
+            // 应用打开时主动申请蓝牙/通知权限（已授权则什么都不做）
+            RequestRuntimePermissionsOnLaunch()
+
             val colorSchemeMode = when (loadThemeMode(this@PopupActivity)) {
                 1 -> ColorSchemeMode.Light
                 2 -> ColorSchemeMode.Dark
@@ -94,10 +99,11 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
     }
     // 与参考实现 PopupActivity.kt:210 同一取色逻辑（弹框底色自己给，避免透明卡片看不清）
     val dialogBgColor = if (isDarkMode) Color(0xFF1A1A1A) else Color(0xFFF7F7F7)
+    // 提示音与提示音音量是同一行：任一能力位为 true 就该出现这张卡
     val hasQuickToggle = capabilities.hasPromptTone ||
+        capabilities.hasPromptVolume ||
         capabilities.hasLhdc ||
-        capabilities.hasDualConnection ||
-        capabilities.hasLowLatency
+        capabilities.hasDualConnection
 
     Scaffold(containerColor = Color.Transparent) { _ ->
         OverlayDialog(
@@ -130,7 +136,6 @@ private fun PopupBody(
     onMore: () -> Unit,
     onClose: () -> Unit,
 ) {
-    val context = LocalContext.current
     val capabilities = snapshot.capabilities
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -164,14 +169,8 @@ private fun PopupBody(
                 Spacer(Modifier.height(12.dp))
                 SmallTitle(text = stringResource(R.string.quick_controls))
                 Card(modifier = Modifier.fillMaxWidth()) {
-                    if (capabilities.hasPromptTone) {
-                        SwitchPreference(
-                            title = stringResource(R.string.prompt_tone_title),
-                            summary = stringResource(R.string.prompt_tone_summary),
-                            checked = snapshot.promptToneOn ?: false,
-                            onCheckedChange = { on -> MoondropLink.setPromptTone(on) },
-                        )
-                    }
+                    // 提示音开关 + 提示音音量：合并成同一行（内部按能力位决定显示开关/滑条）
+                    PromptToneSection(snapshot)
                     if (capabilities.hasLhdc) {
                         SwitchPreference(
                             title = stringResource(R.string.lhdc_title),
@@ -193,21 +192,6 @@ private fun PopupBody(
                                 if (exclusion.request(snapshot, MutualExclusionTarget.DUAL_CONNECTION, on)) {
                                     MoondropLink.setDualConnection(on)
                                 }
-                            },
-                        )
-                    }
-                    if (capabilities.hasLowLatency) {
-                        SwitchPreference(
-                            title = stringResource(R.string.low_latency_title),
-                            summary = stringResource(R.string.low_latency_summary),
-                            checked = snapshot.lowLatencyOn ?: false,
-                            onCheckedChange = { on ->
-                                // 系统侧功能：发给自己的 ControlReceiver → ControlBridge 处理
-                                context.sendBroadcast(
-                                    Intent(HyperPodsAction.LOW_LATENCY_SELECT)
-                                        .setPackage(BuildConfig.APPLICATION_ID)
-                                        .putExtra(HyperPodsAction.EXTRA_ENABLED, on)
-                                )
                             },
                         )
                     }

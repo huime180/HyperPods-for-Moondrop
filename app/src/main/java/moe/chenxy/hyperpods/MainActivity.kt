@@ -4,6 +4,8 @@
  *
  * 由广播 chen.action.hyperpods.moondrop.show_ui 启动（见 AndroidManifest 的 intent-filter）。
  * 主题模式的读取/持久化与参考实现 _refs/OppoPods/.../MainActivity.kt:20-48 同一写法。
+ * 首帧额外主动申请一次蓝牙/通知运行时权限（见 ui/Permissions.kt）：
+ * 冷启动兜底连接需要 BLUETOOTH_CONNECT，不申请的话第一次打开只能等用户在系统里手动给。
  */
 package moe.chenxy.hyperpods
 
@@ -19,6 +21,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import moe.chenxy.hyperpods.ui.App
+import moe.chenxy.hyperpods.ui.RequestRuntimePermissionsOnLaunch
 import moe.chenxy.hyperpods.ui.loadThemeMode
 import moe.chenxy.hyperpods.ui.saveThemeMode
 
@@ -27,6 +30,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
+            // 应用打开时主动申请蓝牙/通知权限（已授权则什么都不做）
+            RequestRuntimePermissionsOnLaunch()
+
             val context = LocalContext.current
             val themeMode = remember { mutableStateOf(loadThemeMode(context)) }
             val darkMode = when (themeMode.value) {
