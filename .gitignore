@@ -22,3 +22,4 @@ __pycache__/
 
 # CI 诊断日志
 /_ci_log*.txt
+/_l*.txt
