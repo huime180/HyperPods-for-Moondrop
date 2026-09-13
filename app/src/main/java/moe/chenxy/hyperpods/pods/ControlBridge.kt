@@ -34,6 +34,9 @@ import moe.chenxy.hyperpods.utils.data.HyperPodsAction
 
 private const val TAG = "ControlBridge"
 
+/** HyperOS 融合设备中心 / 系统耳机面板的数据层进程 */
+private const val MILINK = "com.milink.service"
+
 /** 电池编码：255 = 未知；置 bit7 表示充电中（与 MIUI 原生耳机页的约定一致）。 */
 private object BatteryCodecWire {
     const val UNKNOWN = 255
@@ -180,6 +183,13 @@ object ControlBridge {
         sendTo(context, "com.android.settings", HyperPodsAction.ANC_CHANGED) {
             it.putExtra(HyperPodsAction.EXTRA_STATUS, snap.ancIndex)
         }
+        // HyperOS 的「融合设备中心」耳机面板数据层在 com.milink.service，
+        // 不往这里发状态，系统耳机页就永远是空的。
+        sendTo(context, MILINK, HyperPodsAction.ANC_CHANGED) {
+            it.putExtra(HyperPodsAction.EXTRA_STATUS, snap.ancIndex)
+            it.putExtra(HyperPodsAction.EXTRA_DEVICE, connectedDevice)
+            it.putExtra(HyperPodsAction.EXTRA_MAC, connectedDevice?.address)
+        }
     }
 
     private fun pushBattery(context: Context, battery: BatterySnapshot) {
@@ -206,6 +216,13 @@ object ControlBridge {
         sendTo(context, "com.xiaomi.bluetooth", HyperPodsAction.UPDATE_PODS_NOTIFICATION) {
             it.putExtra(HyperPodsAction.EXTRA_BATTERY, BatteryCodecWire.toBundle(battery))
             it.putExtra(HyperPodsAction.EXTRA_DEVICE, connectedDevice)
+        }
+        // 4) 给 com.milink.service —— HyperOS 融合设备中心耳机面板的数据层
+        sendTo(context, MILINK, HyperPodsAction.BATTERY_CHANGED) {
+            it.putExtra(HyperPodsAction.EXTRA_BATTERY, BatteryCodecWire.toBundle(battery))
+            it.putExtra(HyperPodsAction.EXTRA_LEVEL, level)
+            it.putExtra(HyperPodsAction.EXTRA_DEVICE, connectedDevice)
+            it.putExtra(HyperPodsAction.EXTRA_MAC, connectedDevice?.address)
         }
     }
 
