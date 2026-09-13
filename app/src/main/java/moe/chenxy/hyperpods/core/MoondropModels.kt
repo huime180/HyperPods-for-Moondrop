@@ -264,8 +264,11 @@ object MoondropModels {
             transports = listOf(PodTransport.RFCOMM_GAIA),
             verified = true,
             anc = ancPudding(),
+            // ⚠ 真机实测修正（用户反馈「增益低和高反了」）：设备码 0=高 / 1=中 / 2=低，
+            //   因此 UI 下标[低,中,高] -> 设备码必须是 [2,1,0]。
+            //   （FxxkMoondrop 的 PUDDING 档案写的 [0,1,2] 是错的，太空漫游2 实测也是反向。）
             dc = DcProfile(
-                hasGain = true, gainMap = intArrayOf(0, 1, 2),
+                hasGain = true, gainMap = intArrayOf(2, 1, 0),
                 gainLabels = listOf("低", "中", "高"), hasLed = true,
             ),
             features = FeatureProfile(
