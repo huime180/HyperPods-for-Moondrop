@@ -135,6 +135,24 @@ object ControlBridge {
                 MoondropLink.setLhdc(intent.getBooleanExtra(HyperPodsAction.EXTRA_ENABLED, false))
             HyperPodsAction.DUAL_CONNECTION_SELECT ->
                 MoondropLink.setDualConnection(intent.getBooleanExtra(HyperPodsAction.EXTRA_ENABLED, false))
+            // 原生耳机页的「手势控制」卡片 → 改某个槽位某个耳的动作
+            HyperPodsAction.GESTURE_SELECT -> {
+                val slot = intent.getIntExtra(HyperPodsAction.EXTRA_GESTURE_SLOT, -1)
+                val ear = intent.getIntExtra(HyperPodsAction.EXTRA_GESTURE_EAR, -1)
+                val actionId = intent.getIntExtra(HyperPodsAction.EXTRA_STATUS, -1)
+                val slots = moe.chenxy.hyperpods.core.Gaia.GestureSlot.entries
+                val ears = moe.chenxy.hyperpods.core.Gaia.Ear.entries
+                if (slot in slots.indices && ear in ears.indices && actionId >= 0) {
+                    MoondropLink.setGesture(slots[slot], ears[ear], actionId)
+                } else {
+                    Log.w(TAG, "GESTURE_SELECT ignored: slot=$slot ear=$ear action=$actionId")
+                }
+            }
+            // 原生页打开/周期刷新时索要当前配置 —— 没有配置就不回，绝不回一份假值
+            HyperPodsAction.REQUEST_GESTURE -> {
+                MoondropLink.refreshAll()
+                pushGesture(context)
+            }
             HyperPodsAction.LOW_LATENCY_SELECT -> {
                 // 低延迟是 HyperOS 系统侧功能：转发给 com.android.bluetooth 里具有
                 // BLUETOOTH_PRIVILEGED 的 hook 去操作系统 A2DP 编解码。
@@ -266,6 +284,7 @@ object ControlBridge {
                         it.putExtra(HyperPodsAction.EXTRA_ENABLED, event.on)
                     }
                 }
+                is PodEvent.GestureChanged -> pushGesture(ctx, event.conf.toPayload())
                 is PodEvent.Disconnected -> cancelNotification(ctx)
                 else -> Unit
             }
@@ -326,6 +345,17 @@ object ControlBridge {
             it.putExtra(HyperPodsAction.EXTRA_BATTERY, BatteryCodecWire.toBundle(snap.battery))
             it.putExtra(HyperPodsAction.EXTRA_DEVICE_NAME, snap.deviceName)
             it.putExtra(HyperPodsAction.EXTRA_DEVICE, connectedDevice)
+        }
+    }
+
+    /**
+     * 把手势配置推给系统设置页（hook 侧用它渲染「手势控制」卡片）。
+     * 没有配置就**不发** —— 原生页会显示「未同步」，而不是回落成厂商默认值。
+     */
+    private fun pushGesture(context: Context, payload: ByteArray? = null) {
+        val bytes = payload ?: MoondropLink.snapshot().gestureConf?.toPayload() ?: return
+        sendTo(context, "com.android.settings", HyperPodsAction.GESTURE_CHANGED) {
+            it.putExtra(HyperPodsAction.EXTRA_GESTURE_PAYLOAD, bytes)
         }
     }
 

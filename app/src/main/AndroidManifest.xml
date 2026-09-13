@@ -69,6 +69,8 @@
                 <action android:name="chen.action.hyperpods.moondrop.lhdc_select" />
                 <action android:name="chen.action.hyperpods.moondrop.dual_connection_select" />
                 <action android:name="chen.action.hyperpods.moondrop.low_latency_select" />
+                <action android:name="chen.action.hyperpods.moondrop.gesture_select" />
+                <action android:name="chen.action.hyperpods.moondrop.request_gesture" />
             </intent-filter>
         </receiver>
 
