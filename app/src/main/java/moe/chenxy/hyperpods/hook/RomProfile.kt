@@ -131,6 +131,12 @@ enum class CandidateGroup {
     SETTINGS_SERVICE_IFACE,
     /** 原生耳机页里 ANC 控件本身的类（比资源 entry 名更稳的定位锚点）。 */
     NATIVE_ANC_VIEW,
+    /**
+     * 原生耳机页里**同族但不是 ANC** 的控件类（替换时必须排除）。
+     * H4 实证 `MiuiHeadsetTransparentAdjustView` 是通透档滑杆：它与 ANC 滑杆同为
+     * `AbsSeekBar` 子类，只按「滑杆 max∈2..5」定位会把它误当 ANC 行藏掉。
+     */
+    NATIVE_ANC_EXCLUDE_VIEW,
     /** com.android.bluetooth.ble.app.headset.BluetoothHeadsetService（通知构造器宿主）。 */
     BT_HEADSET_SERVICE
 }
@@ -501,6 +507,22 @@ object RomProfile {
     )
     private val ANC_VIEW_H2 = ANC_VIEW_H3
 
+    // 原生耳机页里「同族但不是 ANC」的控件类 —— 替换 ANC 控件时必须排除。
+    // H4（已核对 com.android.settings.apk dex）：通透档滑杆与 ANC 档滑杆是两个不同类。
+    private val ANC_EXCLUDE_VIEW_H4 = listOf(
+        Candidate(
+            "com.android.settings.bluetooth.MiuiHeadsetTransparentAdjustView",
+            Evidence.VERIFIED_H4_DEX
+        )
+    )
+    private val ANC_EXCLUDE_VIEW_H3 = listOf(
+        Candidate(
+            "com.android.settings.bluetooth.MiuiHeadsetTransparentAdjustView",
+            Evidence.UNVERIFIED_ON_DEVICE
+        )
+    )
+    private val ANC_EXCLUDE_VIEW_H2 = ANC_EXCLUDE_VIEW_H3
+
     /**
      * (主档, 兜底档)：主档 = 检测到的代数，兜底 = 其余代数（顺序 H4 → H3 → H2）。
      * UNKNOWN 时主档就是并集、兜底为空。对 Candidate 与 AncToken 通用。
@@ -544,6 +566,8 @@ object RomProfile {
         CandidateGroup.BT_NOTIFICATION -> forKind(NOTIFICATION_H4, NOTIFICATION_H3, NOTIFICATION_H2)
         CandidateGroup.SETTINGS_SERVICE_IFACE -> forKind(SERVICE_IFACE_H4, SERVICE_IFACE_H3, SERVICE_IFACE_H2)
         CandidateGroup.NATIVE_ANC_VIEW -> forKind(ANC_VIEW_H4, ANC_VIEW_H3, ANC_VIEW_H2)
+        CandidateGroup.NATIVE_ANC_EXCLUDE_VIEW ->
+            forKind(ANC_EXCLUDE_VIEW_H4, ANC_EXCLUDE_VIEW_H3, ANC_EXCLUDE_VIEW_H2)
         CandidateGroup.BT_HEADSET_SERVICE -> forKind(BT_SERVICE_H4, BT_SERVICE_H3, BT_SERVICE_H2)
     }
 
@@ -570,6 +594,7 @@ object RomProfile {
     val bluetoothNotificationClasses: List<String> get() = names(CandidateGroup.BT_NOTIFICATION)
     val headsetServiceIfaceClasses: List<String> get() = names(CandidateGroup.SETTINGS_SERVICE_IFACE)
     val nativeAncViewClasses: List<String> get() = names(CandidateGroup.NATIVE_ANC_VIEW)
+    val nativeAncExcludeViewClasses: List<String> get() = names(CandidateGroup.NATIVE_ANC_EXCLUDE_VIEW)
     val bluetoothHeadsetServiceClasses: List<String> get() = names(CandidateGroup.BT_HEADSET_SERVICE)
 
     /**
@@ -593,6 +618,23 @@ object RomProfile {
     //   miheadset_ancClosed/ancDepth/ancEquilibrium/ancHigh/ancLow/ancMedium/ancMild/anc_indicate/anc_manual
     // => 视图 id 极可能就是 headset_anc_layout / headset_anc_level_layout / headset_anc_level_Text 等。
     private val ANC_H4 = listOf(
+        // ── 真机 view-tree dump 实证（HyperOS 4 / Xiaomi Pad 8 Pro，2026-09-14）────────────────
+        // 原生耳机页的真实 entry 名**不是** headset_anc*，而是这一组驼峰名：
+        //   CardView|ancCard → LinearLayout|anclayout
+        //     ├ LinearLayout|ancLayoutInfo  （三档选择器：transport / openAnc / closeAnc）
+        //     ├ LinearLayout|ancAdjust      （档位滑杆行：ancAdjustView / ancAdjustView2）
+        //     ├ LinearLayout|ancAdjustText  （ancAdapterText / ancLowText / ancMediumText / ancHighText）
+        //     ├ LinearLayout|transparentAdjust     （通透档滑杆行，visibility=GONE）
+        //     └ LinearLayout|transparentAdjustText
+        // 之前这两张表只有 headset_anc* / anc_layout（下划线）——在真机上**一个都没命中**
+        // （心跳日志 matched= 为空），只有类名兜底救了场。这里按实测名补上。
+        AncToken("anclayout", Evidence.VERIFIED_H4_RES),
+        AncToken("ancLayoutInfo", Evidence.VERIFIED_H4_RES),
+        AncToken("ancAdjust", Evidence.VERIFIED_H4_RES),
+        AncToken("openAnc", Evidence.VERIFIED_H4_RES),
+        AncToken("closeAnc", Evidence.VERIFIED_H4_RES),
+        AncToken("transparentAdjust", Evidence.VERIFIED_H4_RES),
+        // ── com.android.settings 的 resources.arsc 里核对到的 dimen / entry 命名族 ──────────
         AncToken("headset_anc", Evidence.VERIFIED_H4_RES),
         AncToken("miheadset_anc", Evidence.VERIFIED_H4_RES),
         AncToken("anc_layout", Evidence.VERIFIED_H4_RES, contains = true),
@@ -613,6 +655,26 @@ object RomProfile {
     )
     private val ANC_H2 = ANC_H3
 
+    // ── 「原生 ANC 控件整块」的容器名 ─────────────────────────────────────────
+    //
+    // 只藏单独一行（滑杆行）是不够的：真机上滑杆行（ancAdjust）与三档选择器
+    // （ancLayoutInfo：transport / openAnc / closeAnc）是 **anclayout 的两个兄弟子树**，
+    // 只藏滑杆行 → 页面上同时出现「框架的三档按钮 + 我们的三档按钮」= 用户报的
+    // 「会多出新的按钮」。因此定位到 ANC 控件后，再沿父链抬到这一层容器，
+    // 整块隐藏（GONE），把我们的控件插进它的**父容器**（CardView|ancCard）同一位置。
+    // H4 实测：LinearLayout|anclayout（ancCard 的唯一子节点）。
+    private val ANC_BLOCK_H4 = listOf(
+        AncToken("anclayout", Evidence.VERIFIED_H4_RES),
+        AncToken("anc_layout", Evidence.VERIFIED_H4_RES, contains = true),
+        AncToken("anc_card", Evidence.HEURISTIC, contains = true)
+    )
+    private val ANC_BLOCK_H3 = listOf(
+        AncToken("anc_layout", Evidence.UNVERIFIED_ON_DEVICE, contains = true),
+        AncToken("headset_anc_layout", Evidence.UNVERIFIED_ON_DEVICE),
+        AncToken("audio_effect_view", Evidence.UNVERIFIED_ON_DEVICE)
+    )
+    private val ANC_BLOCK_H2 = ANC_BLOCK_H3
+
     /** 负向排除：含这些子串的 entry 名一律不算（cancel / balance / advanced 等「含 anc 但不是降噪」）。 */
     private val ANC_NEGATIVE = listOf("cancel", "balance", "advanced", "enhance", "financ")
 
@@ -626,6 +688,24 @@ object RomProfile {
         val fallback = rawFallback.distinctBy { it.token }
             .filter { fb -> primary.none { it.token == fb.token } }
         return primary to fallback
+    }
+
+    /**
+     * 返回 (主档, 兜底档)：**原生 ANC 控件整块容器**的 entry 名候选。
+     * 与 [nativeAncTokens] 同构，单独一张表（容器名和控件名不是一回事）。
+     */
+    fun nativeAncBlockTokens(): Pair<List<AncToken>, List<AncToken>> {
+        val (rawPrimary, rawFallback) = tiers(ANC_BLOCK_H4, ANC_BLOCK_H3, ANC_BLOCK_H2)
+        val primary = rawPrimary.distinctBy { it.token }
+        val fallback = rawFallback.distinctBy { it.token }
+            .filter { fb -> primary.none { it.token == fb.token } }
+        return primary to fallback
+    }
+
+    /** 某个 entry 名是否像「原生 ANC 控件整块」的容器。 */
+    fun isNativeAncBlockEntry(name: String): Boolean {
+        val (primary, fallback) = nativeAncBlockTokens()
+        return matchesNativeAncEntry(name, primary) || matchesNativeAncEntry(name, fallback)
     }
 
     /** entry 名是否命中给定 token 组（含负向排除）。 */
@@ -666,6 +746,15 @@ object RomProfile {
         if (fallback.isNotEmpty()) {
             sb.append("  NATIVE_ANC_ENTRY(fallback): ")
             sb.append(fallback.joinToString(", ") { it.token + (if (it.contains) "*" else "") + "[" + it.evidence.label + "]" })
+            sb.append('\n')
+        }
+        val (blockPrimary, blockFallback) = nativeAncBlockTokens()
+        sb.append("  NATIVE_ANC_BLOCK(primary): ")
+        sb.append(blockPrimary.joinToString(", ") { it.token + (if (it.contains) "*" else "") + "[" + it.evidence.label + "]" })
+        sb.append('\n')
+        if (blockFallback.isNotEmpty()) {
+            sb.append("  NATIVE_ANC_BLOCK(fallback): ")
+            sb.append(blockFallback.joinToString(", ") { it.token + (if (it.contains) "*" else "") + "[" + it.evidence.label + "]" })
             sb.append('\n')
         }
         return sb.toString()

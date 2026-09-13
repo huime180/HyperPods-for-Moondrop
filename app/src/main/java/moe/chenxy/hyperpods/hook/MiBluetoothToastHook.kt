@@ -30,7 +30,10 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -40,7 +43,9 @@ import android.os.Bundle
 import android.os.Looper
 import android.util.Log
 import moe.chenxy.hyperpods.BuildConfig
+import moe.chenxy.hyperpods.core.MoondropModels
 import moe.chenxy.hyperpods.utils.data.HyperPodsAction
+import moe.chenxy.hyperpods.utils.data.HyperPodsPrefsKey
 
 @SuppressLint("MissingPermission")
 object MiBluetoothToastHook : HookContext() {
@@ -88,6 +93,17 @@ object MiBluetoothToastHook : HookContext() {
     @Volatile
     private var processContext: Context? = null
 
+    /**
+     * 「通知栏显示」开关（HyperPodsPrefsKey.SHOW_NOTIFICATION，默认 true）最近一次取值。
+     * null = 还没读过；非 null 时只在该值**发生变化**时记一条日志（应用每 ~3s 推一次电量，不能刷屏）。
+     */
+    @Volatile
+    private var lastNotificationEnabled: Boolean? = null
+
+    /** 本进程最近一次解析到的水月雨设备 —— EXTRA_DEVICE 缺失时的兜底（见 resolveNotificationDevice）。 */
+    @Volatile
+    private var lastMoondropDevice: BluetoothDevice? = null
+
     /** 「重启作用域」接收器用的进程 Context（通知构造 hook 偷到的那个，见 resolveContext）。 */
     override fun processContextOrNull(): Context? = processContext
 
@@ -124,6 +140,8 @@ object MiBluetoothToastHook : HookContext() {
         receiver = null
         receiverContext = null
         processContext = null
+        lastMoondropDevice = null
+        lastNotificationEnabled = null
         hookedConstructors.clear()
         synchronized(loggedStatusBarActions) { loggedStatusBarActions.clear() }
         synchronized(loggedUpdateParamClasses) { loggedUpdateParamClasses.clear() }
@@ -251,13 +269,28 @@ object MiBluetoothToastHook : HookContext() {
         when (action) {
             HyperPodsAction.SEND_STRONG_TOAST,
             HyperPodsAction.UPDATE_PODS_NOTIFICATION -> {
-                val device = SystemApisUtils.parcelableDevice(intent, HyperPodsAction.EXTRA_DEVICE)
-                if (device == null) {
-                    Log.w(TAG, "$action without ${HyperPodsAction.EXTRA_DEVICE}")
+                // 应用侧「通知栏显示」开关：关掉时连已经发出去的那条也撤掉，不只是不再发新的。
+                if (!notificationDisplayEnabled()) {
+                    cancelNotification(context, "")
                     return
                 }
+                val resolved = resolveNotificationDevice(context, intent)
+                if (resolved == null) {
+                    Log.w(
+                        TAG,
+                        "$action without ${HyperPodsAction.EXTRA_DEVICE}/${HyperPodsAction.EXTRA_MAC} " +
+                            "and no connected Moondrop device; notification skipped"
+                    )
+                    return
+                }
+                val device = resolved.first
+                val via = resolved.second
                 val battery = SystemApisUtils.readBatteryExtras(intent)
                 val message = intent.getStringExtra(HyperPodsAction.EXTRA_MESSAGE)
+                Log.d(
+                    TAG,
+                    "$action device resolved via=$via address=${SystemApisUtils.deviceAddress(device)}"
+                )
                 postNotification(context, device, battery, message)
             }
             HyperPodsAction.CANCEL_PODS_NOTIFICATION -> {
@@ -269,9 +302,102 @@ object MiBluetoothToastHook : HookContext() {
         }
     }
 
+    // ── 通知开关 / 设备解析 ────────────────────────────────────────────────────
+
+    /**
+     * 是否显示耳机电量通知（[HyperPodsPrefsKey.SHOW_NOTIFICATION]，应用侧设置项，默认 true）。
+     *
+     * ⚠ 只影响**通知栏/强提示**这一个界面。写进系统蓝牙栈的电量是**另一个**界面：
+     *   com.android.bluetooth 的 HeadsetStateDispatcher 收 UPDATE_SYSTEM_BATTERY
+     *   → AdapterService.setBatteryLevel(device, level)，供系统蓝牙页 / 融合设备中心显示。
+     *   两者互相独立：关掉通知**不会**也不应该停掉系统蓝牙页的电量。
+     *
+     * 读不到 prefs（null / 框架异常 / 类型不符）时按 true 处理 —— 宁可多显示，也不要因为
+     * 读设置失败而静默不显示。每次取值变化只打一条日志（见文件头 TAG）。
+     */
+    private fun notificationDisplayEnabled(): Boolean {
+        val enabled = prefBoolean(HyperPodsPrefsKey.SHOW_NOTIFICATION, true)
+        if (lastNotificationEnabled != enabled) {
+            lastNotificationEnabled = enabled
+            if (enabled) {
+                Log.i(
+                    TAG,
+                    "notification display enabled (pref ${HyperPodsPrefsKey.SHOW_NOTIFICATION}=true)"
+                )
+            } else {
+                Log.i(
+                    TAG,
+                    "notification display disabled by pref " +
+                        "(${HyperPodsPrefsKey.SHOW_NOTIFICATION}=false); earbud notification suppressed"
+                )
+            }
+        }
+        return enabled
+    }
+
+    /**
+     * 解析这条通知该贴到哪个设备上，返回 (设备, 用的是哪条证据)；全失败返回 null。
+     *
+     * ⚠ 真机实测（2026-09-14）：应用进程 ControlBridge 的 UPDATE_PODS_NOTIFICATION /
+     *   SEND_STRONG_TOAST 里 `EXTRA_DEVICE` 是**可空的** —— 它的 `connectedDevice` 在
+     *   「应用刚被拉起 / 还没收到 PODS_CONNECTED」时是 null，于是每条通知都命中
+     *   `without device` 被丢弃（logcat 每 3s 一条 `HyperPods-MiBtToast: …without device`），
+     *   表现就是用户报的「蓝牙设置中通知栏显示失效了」。这里按 1→2→3→4 兜底，
+     *   不再把「发送方没给 parcelable」当成「没有设备」。
+     *   1) EXTRA_DEVICE（正常情况，发送方给对了）
+     *   2) EXTRA_MAC -> BluetoothAdapter.getRemoteDevice(mac)
+     *   3) 本进程最近一次解析到的水月雨设备（缓存）
+     *   4) 从系统里扫当前已连接的 A2DP/HFP 水月雨设备
+     */
+    private fun resolveNotificationDevice(context: Context, intent: Intent): Pair<BluetoothDevice, String>? {
+        SystemApisUtils.parcelableDevice(intent, HyperPodsAction.EXTRA_DEVICE)?.let {
+            lastMoondropDevice = it
+            return it to "extra"
+        }
+        val mac = intent.getStringExtra(HyperPodsAction.EXTRA_MAC)
+        if (!mac.isNullOrEmpty()) {
+            remoteDevice(context, mac)?.let {
+                lastMoondropDevice = it
+                return it to "extra-mac"
+            }
+        }
+        lastMoondropDevice?.let { return it to "cached" }
+        connectedMoondropDevice(context)?.let {
+            lastMoondropDevice = it
+            return it to "connected-scan"
+        }
+        return null
+    }
+
+    /** MAC -> BluetoothDevice（BluetoothAdapter.getRemoteDevice；非法 MAC 直接当失败）。 */
+    private fun remoteDevice(context: Context, mac: String): BluetoothDevice? = runCatching {
+        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        val adapter = manager?.adapter ?: BluetoothAdapter.getDefaultAdapter()
+        adapter?.getRemoteDevice(mac)
+    }.getOrNull()
+
+    /** 当前已连接的水月雨设备（A2DP / HFP 两个 profile 都看，按设备名匹配）。 */
+    private fun connectedMoondropDevice(context: Context): BluetoothDevice? = runCatching {
+        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        if (manager == null) return null
+        listOf(BluetoothProfile.A2DP, BluetoothProfile.HEADSET)
+            .asSequence()
+            .flatMap { profile ->
+                runCatching { manager.getConnectedDevices(profile).orEmpty().asSequence() }
+                    .getOrElse { emptySequence() }
+            }
+            .distinctBy { SystemApisUtils.deviceAddress(it) }
+            .firstOrNull { MoondropModels.match(SystemApisUtils.deviceName(it)) != null }
+    }.getOrNull()
+
     // ── 通知构建 ───────────────────────────────────────────────────────────────
 
     private fun postNotification(context: Context, device: BluetoothDevice, battery: IntArray, message: String?) {
+        // 兜底再查一次开关：将来若有别的调用方绕过 handle()，也不会漏掉这个设置。
+        if (!notificationDisplayEnabled()) {
+            cancelNotification(context, "")
+            return
+        }
         val address = SystemApisUtils.deviceAddress(device)
         if (address.isEmpty()) {
             Log.w(TAG, "postNotification without address")

@@ -50,6 +50,7 @@ import android.util.Log
 import android.view.View
 import java.util.WeakHashMap
 import moe.chenxy.hyperpods.BuildConfig
+import moe.chenxy.hyperpods.core.Gaia
 import moe.chenxy.hyperpods.core.MoondropModels
 import moe.chenxy.hyperpods.utils.data.HyperPodsAction
 
@@ -105,6 +106,13 @@ object SettingsHeadsetHook : HookContext() {
     private const val STATE_PREFS = "hyperpods_moondrop_settings_state"
     private const val ANC_PAYLOAD_LEVELS = "0100;0101;0102;0103;0200;0201"
 
+    /**
+     * 原生耳机页里「手势/按键配置」入口的 preference key（res/xml/headsetlayout.xml，H4 实证）。
+     * 点它原本会打开 MiuiHeadsetKeyConfigFragment（读的是厂商 AIDL 的 12 字符配置串），
+     * 我们把这个入口接管掉（见 hookGestureEntry）。
+     */
+    private const val PREF_KEY_GESTURE = "key_config"
+
     private val knownMoondropAddresses = LinkedHashSet<String>()
     private val headsetFragments = WeakHashMap<Any, Boolean>()
 
@@ -137,6 +145,12 @@ object SettingsHeadsetHook : HookContext() {
     /** 三路电量的原始 HyperOS 编码：255 = 未知，`value or 128` = 充电中（约定见 SystemApisUtils 文件头）。 */
     private var batteryRaw: IntArray = intArrayOf(255, 255, 255)
 
+    /**
+     * 应用进程同步过来的手势配置（feature 22 TOUCHV2，5 字节，每字节高 4 位=左耳 / 低 4 位=右耳）。
+     * null = 还没同步到 —— 此时原生页的手势卡片显示「未同步」，绝不回落到厂商那套默认值。
+     */
+    private var gestureConf: Gaia.GestureConf? = null
+
     private val refreshHandler = Handler(Looper.getMainLooper())
     private var refreshLoopStarted = false
 
@@ -157,10 +171,18 @@ object SettingsHeadsetHook : HookContext() {
                     headsetFragments.keys.firstOrNull { isMoondropFragment(it) }
                         ?.let { installAncUi(it, "periodic") }
                 }
-                // 心跳：保证「一条 ANC 日志都没有」这种情况再也不可能出现。
+                // 手势控件：同样先重声明；厂商会把 key_config preference 放回来。
+                if (NativeGestureUi.isAttached()) {
+                    runCatching { NativeGestureUi.reassert() }
+                } else {
+                    headsetFragments.keys.firstOrNull { isMoondropFragment(it) }
+                        ?.let { installGestureUi(it, "periodic") }
+                }
+                // 心跳：保证「一条 ANC / 手势日志都没有」这种情况再也不可能出现。
                 refreshTick++
                 if (refreshTick % ANC_UI_HEARTBEAT_TICKS == 0) {
                     Log.i(TAG, "ANC ui heartbeat: ${NativeThreeModeAncUi.stateSummary()}")
+                    Log.i(TAG, "gesture ui heartbeat: ${NativeGestureUi.stateSummary()}")
                 }
                 refreshHandler.postDelayed(this, REFRESH_INTERVAL_MS)
             } else {
@@ -197,6 +219,8 @@ object SettingsHeadsetHook : HookContext() {
         headsetFragments.clear()
         batteryViews.clear()
         NativeThreeModeAncUi.reset()
+        NativeGestureUi.reset()
+        gestureConf = null
     }
 
     // ── 1) 冒充身份：改写 intent + 强制 getter ────────────────────────────────
@@ -513,6 +537,38 @@ object SettingsHeadsetHook : HookContext() {
         ) { args ->
             miuiAncFromLevel(args.getOrNull(0) as? String ?: "")
         }
+        hookGestureEntry()
+    }
+
+    /**
+     * 手势入口接管：`onPreferenceTreeClick(PreferenceScreen, Preference): Boolean`（H4 DEX 实证签名）。
+     *
+     * 按参数个数 2 定位（**不引用 androidx.preference 的编译期符号**，与本模块「只用反射碰目标 ROM」
+     * 的约定一致），key 用反射 `getKey()` 读。命中 key_config 时返回 true 吞掉原导航，
+     * 改为广播 SHOW_UI 打开本模块的手势页 —— 真值在应用进程，厂商那个子页对本耳机显示的是默认值。
+     */
+    private fun hookGestureEntry() {
+        runCatching {
+            val click = findMethodByParamCountOrNull(clsFragment, "onPreferenceTreeClick", 2)
+            if (click == null) {
+                Log.w(TAG, "onPreferenceTreeClick/2 not found; native gesture entry not intercepted")
+                return
+            }
+            hookBefore(click) {
+                if (!isMoondropFragment(instance)) return@hookBefore
+                val preference = args.getOrNull(1) ?: return@hookBefore
+                val key = runCatching { callMethod(preference, "getKey") as? String }.getOrNull()
+                if (key != PREF_KEY_GESTURE) return@hookBefore
+                Log.i(
+                    TAG,
+                    "native gesture entry ($key) intercepted -> SHOW_UI " +
+                        "(vendor key-config page shows framework defaults, not our device)"
+                )
+                openAppUi("native-gesture-entry")
+                result = true
+            }
+            Log.d(TAG, "hooked $clsFragment#onPreferenceTreeClick (gesture entry routing)")
+        }.onFailure { Log.w(TAG, "hook $clsFragment.onPreferenceTreeClick skipped", it) }
     }
 
     private fun onFragmentAlive(param: HookParam, reason: String) {
@@ -525,6 +581,8 @@ object SettingsHeadsetHook : HookContext() {
         startPeriodicRefresh()
         injectFragmentStatus(param.instance)
         installAncUi(param.instance, reason)
+        installGestureUi(param.instance, reason)
+        requestGestureState(reason)
     }
 
     /**
@@ -554,6 +612,81 @@ object SettingsHeadsetHook : HookContext() {
         }
         val root = runCatching { callMethod(fragment, "getView") as? View }.getOrNull()
         root?.post { runCatching { NativeThreeModeAncUi.reassert() } }
+    }
+
+    /**
+     * 原生耳机页「手势控制」段：藏掉厂商那条 key_config preference，托管我们自己的手势卡片。
+     *
+     * 为什么是「藏 + 托管」而不是驱动厂商那套 UI：厂商的按键模型（左/右 × 双击/三击/长按 共 6 槽）
+     * 与 Pudding 的 feature 22 TOUCHV2（5 槽 × 双耳 = 10 个半字节，动作 id 空间也不同）不是一回事，
+     * 硬映射只会显示一份与实际不符的手势状态。决策依据见 hook/NativeGestureUi.kt 文件头。
+     */
+    private fun installGestureUi(fragment: Any?, reason: String) {
+        val installed = runCatching {
+            NativeGestureUi.install(
+                fragment,
+                gestureConf,
+                onOpenApp = { openAppUi("native-gesture-card") },
+                onSelect = { slot, ear, action -> onGestureSelectedFromNativeUi(slot, ear, action) }
+            )
+        }.onFailure { Log.w(TAG, "install native gesture ui failed ($reason)", it) }
+            .getOrDefault(false)
+        if (installed) {
+            Log.i(TAG, "native gesture ui installed reason=$reason " + NativeGestureUi.stateSummary())
+        } else {
+            Log.w(TAG, "native gesture ui NOT installed reason=$reason " + NativeGestureUi.stateSummary())
+        }
+    }
+
+    /** 用户在托管的原生手势卡片里改了一个「手势 × 耳朵」：转发给应用进程（真值只在那边）。 */
+    private fun onGestureSelectedFromNativeUi(slot: Int, ear: Int, actionId: Int) {
+        Log.i(TAG, "native gesture ui selected slot=$slot ear=$ear action=$actionId")
+        sendGestureSelect(slot, ear, actionId)
+    }
+
+    /** 用户点了「打开 App 手势设置」/ 原生 key_config 入口被我们接管时的落地动作。 */
+    private fun openAppUi(reason: String) {
+        val ctx = context ?: run {
+            Log.w(TAG, "SHOW_UI skipped: no context ($reason)")
+            return
+        }
+        runCatching {
+            ctx.sendBroadcast(Intent(HyperPodsAction.SHOW_UI).apply {
+                setPackage(PKG_APP)
+                addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+            })
+            Log.i(TAG, "SHOW_UI -> $PKG_APP ($reason)")
+        }.onFailure { Log.w(TAG, "SHOW_UI broadcast failed", it) }
+    }
+
+    /** 把手势槽位选择广播给应用进程（真值只在应用进程；这里读-改-写下发）。 */
+    private fun sendGestureSelect(slot: Int, ear: Int, actionId: Int) {
+        val ctx = context ?: run {
+            Log.w(TAG, "GESTURE_SELECT skipped: no context (slot=$slot ear=$ear action=$actionId)")
+            return
+        }
+        runCatching {
+            ctx.sendBroadcast(Intent(HyperPodsAction.GESTURE_SELECT).apply {
+                setPackage(PKG_APP)
+                putExtra(HyperPodsAction.EXTRA_GESTURE_SLOT, slot)
+                putExtra(HyperPodsAction.EXTRA_GESTURE_EAR, ear)
+                putExtra(HyperPodsAction.EXTRA_STATUS, actionId)
+                addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+            })
+            Log.i(TAG, "GESTURE_SELECT slot=$slot ear=$ear action=$actionId -> $PKG_APP")
+        }.onFailure { Log.w(TAG, "GESTURE_SELECT broadcast failed", it) }
+    }
+
+    /** 向应用进程要一次当前手势配置（native 手势卡片打开时 / 周期刷新时调用）。 */
+    private fun requestGestureState(reason: String) {
+        val ctx = context ?: return
+        runCatching {
+            ctx.sendBroadcast(Intent(HyperPodsAction.REQUEST_GESTURE).apply {
+                setPackage(PKG_APP)
+                addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+            })
+            Log.d(TAG, "requested ${HyperPodsAction.REQUEST_GESTURE} reason=$reason")
+        }.onFailure { Log.w(TAG, "request ${HyperPodsAction.REQUEST_GESTURE} failed", it) }
     }
 
     /** 用户在原生页的三档控件里选了档位：与系统控件走完全相同的通道（广播给应用进程）。 */
@@ -643,6 +776,8 @@ object SettingsHeadsetHook : HookContext() {
             addAction(HyperPodsAction.PODS_DISCONNECTED)
             addAction(HyperPodsAction.ANC_CHANGED)
             addAction(HyperPodsAction.BATTERY_CHANGED)
+            // 手势配置（feature 22 TOUCHV2）：应用进程是唯一真值来源，这里只负责显示。
+            addAction(HyperPodsAction.GESTURE_CHANGED)
             // 多点闸门：这个进程收到的任何一拖二状态都代转给 milink（见 forwardToMiLink）。
             addAction(HyperPodsAction.DUAL_CONNECTION_CHANGED)
         }
@@ -692,6 +827,17 @@ object SettingsHeadsetHook : HookContext() {
                     HyperPodsAction.DUAL_CONNECTION_CHANGED -> {
                         forwardToMiLink(received, "dual-connection-changed")
                     }
+                    HyperPodsAction.GESTURE_CHANGED -> {
+                        val payload = received.getByteArrayExtra(HyperPodsAction.EXTRA_GESTURE_PAYLOAD)
+                        val parsed = Gaia.parseGestureConf(payload)
+                        if (parsed != null) {
+                            gestureConf = parsed
+                            Log.i(TAG, "gesture conf synced from app: $parsed")
+                        } else {
+                            Log.w(TAG, "GESTURE_CHANGED without a valid ${Gaia.TOUCHV2_CONF_SIZE}-byte payload")
+                        }
+                        runCatching { NativeGestureUi.refresh(gestureConf) }
+                    }
                 }
                 Log.d(TAG, "state $action address=$currentAddress ancUi=$currentAncUi battery=${settingsBatteryString()}")
             }
@@ -714,7 +860,11 @@ object SettingsHeadsetHook : HookContext() {
      */
     private fun requestAppStatus(reason: String) {
         val ctx = context ?: return
-        listOf(HyperPodsAction.UI_INIT, HyperPodsAction.REQUEST_BATTERY).forEach { action ->
+        listOf(
+            HyperPodsAction.UI_INIT,
+            HyperPodsAction.REQUEST_BATTERY,
+            HyperPodsAction.REQUEST_GESTURE
+        ).forEach { action ->
             runCatching {
                 ctx.sendBroadcast(Intent(action).apply {
                     setPackage(PKG_APP)

@@ -40,6 +40,12 @@ object HyperPodsAction {
     const val PROMPT_VOLUME_CHANGED = "chen.action.hyperpods.moondrop.prompt_volume_changed"
     const val LHDC_CHANGED = "chen.action.hyperpods.moondrop.lhdc_changed"
     const val DUAL_CONNECTION_CHANGED = "chen.action.hyperpods.moondrop.dual_connection_changed"
+    /**
+     * 手势配置变化（应用进程 → 设置进程）。载荷 = feature 22 TOUCHV2 的 **5 字节** 配置
+     * （每字节高 4 位 = 左耳动作 id、低 4 位 = 右耳动作 id，见 core/Gaia.GestureConf）。
+     * 设置进程用它把原生耳机页里我们自己托管的手势控件刷成真实值。
+     */
+    const val GESTURE_CHANGED = "chen.action.hyperpods.moondrop.gesture_changed"
     const val LOW_LATENCY_CHANGED = "chen.action.hyperpods.moondrop.low_latency_changed"
     /**
      * 蓝牙进程报告**系统实际协商出来的** A2DP 编码名（SBC / AAC / LDAC / LHDC…）。
@@ -53,6 +59,11 @@ object HyperPodsAction {
     /** 请求全量状态重放（UI 打开时调用） */
     const val UI_INIT = "chen.action.hyperpods.moondrop.ui_init"
     const val ANC_SELECT = "chen.action.hyperpods.moondrop.anc_select"
+    /**
+     * 手势槽位选择（设置页 → 应用进程）：用户在原生耳机页托管的手势控件里改了一个半字节。
+     * 应用进程按 (EXTRA_GESTURE_SLOT, EXTRA_GESTURE_EAR, EXTRA_STATUS) 调 MoondropLink.setGesture。
+     */
+    const val GESTURE_SELECT = "chen.action.hyperpods.moondrop.gesture_select"
     const val GAIN_SELECT = "chen.action.hyperpods.moondrop.gain_select"
     const val LED_SELECT = "chen.action.hyperpods.moondrop.led_select"
     const val PROMPT_TONE_SELECT = "chen.action.hyperpods.moondrop.prompt_tone_select"
@@ -64,6 +75,8 @@ object HyperPodsAction {
     const val REQUEST_CAPABILITIES = "chen.action.hyperpods.moondrop.request_capabilities"
     /** 请求重新读取三路电量 */
     const val REQUEST_BATTERY = "chen.action.hyperpods.moondrop.request_battery"
+    /** 请求重放一次当前手势配置（设置进程打开原生耳机页时调用） */
+    const val REQUEST_GESTURE = "chen.action.hyperpods.moondrop.request_gesture"
 
     // ── 蓝牙进程 → 小米蓝牙进程（通知 / 超级岛） ─────────────────────────
     const val SEND_STRONG_TOAST = "chen.action.hyperpods.moondrop.sendstrongtoast"
@@ -95,4 +108,12 @@ object HyperPodsAction {
     /** CODEC_CHANGED 携带的系统编码名（String，如 "AAC" / "LHDCv5" / "LDAC" / "SBC"）。 */
     const val EXTRA_CODEC = "codec"
     const val EXTRA_MESSAGE = "message"
+
+    // ── 手势（TOUCHV2）extras ────────────────────────────────────────────────
+    /** GESTURE_CHANGED 携带的 5 字节配置（ByteArray，高 4 位 = 左耳 / 低 4 位 = 右耳）。 */
+    const val EXTRA_GESTURE_PAYLOAD = "gesture_payload"
+    /** 手势槽位下标（Int，0 单击 / 1 双击 / 2 三击 / 3 长按1秒 / 4 长按3秒）。 */
+    const val EXTRA_GESTURE_SLOT = "gesture_slot"
+    /** 耳朵（Int，0 = 左耳 / 1 = 右耳）。 */
+    const val EXTRA_GESTURE_EAR = "gesture_ear"
 }

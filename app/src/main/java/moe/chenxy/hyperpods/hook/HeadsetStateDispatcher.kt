@@ -145,6 +145,14 @@ object HeadsetStateDispatcher : HookContext() {
     @Volatile
     private var activeName: String = ""
 
+    /**
+     * 最近一次确认连接的水月雨设备。应用进程 UPDATE_SYSTEM_BATTERY 的 EXTRA_DEVICE 是可空的
+     * （ControlBridge.connectedDevice 在「应用刚拉起」时是 null），断线重连的瞬间也可能
+     * `connectedMoondropDevice()` 扫不到 —— 这个缓存是最后一道兜底。
+     */
+    @Volatile
+    private var lastMoondropDevice: BluetoothDevice? = null
+
     /** 我们主动 closeProfileProxy 的标记：区分「读完就关」与真正的代理掉线。 */
     @Volatile
     private var codecProxyCloseRequested = false
@@ -220,6 +228,7 @@ object HeadsetStateDispatcher : HookContext() {
         appContext = null
         activeMac = ""
         activeName = ""
+        lastMoondropDevice = null
     }
 
     // ── 1) 连接状态 ────────────────────────────────────────────────────────────
@@ -285,6 +294,7 @@ object HeadsetStateDispatcher : HookContext() {
     }
 
     private fun dispatchConnected(device: BluetoothDevice, name: String) {
+        lastMoondropDevice = device
         val context = appContext ?: return
         val intent = Intent(HyperPodsAction.PODS_CONNECTED).apply {
             setPackage(PKG_APP)
@@ -372,12 +382,17 @@ object HeadsetStateDispatcher : HookContext() {
             Log.w(TAG, "UPDATE_SYSTEM_BATTERY with invalid level=$level")
             return
         }
-        val device = SystemApisUtils.parcelableDevice(intent, HyperPodsAction.EXTRA_DEVICE)
-            ?: connectedMoondropDevice()
-        if (device == null) {
-            Log.w(TAG, "UPDATE_SYSTEM_BATTERY level=$level but no connected Moondrop device")
+        val resolvedDevice = resolveBatteryDevice(intent)
+        if (resolvedDevice == null) {
+            Log.w(
+                TAG,
+                "UPDATE_SYSTEM_BATTERY level=$level but no Moondrop device " +
+                    "(extra / extra-mac / connected-scan / cache all empty)"
+            )
             return
         }
+        val device = resolvedDevice.first
+        val deviceVia = resolvedDevice.second
         val resolved = resolveAdapterService()
         if (resolved == null) {
             Log.w(
@@ -390,10 +405,51 @@ object HeadsetStateDispatcher : HookContext() {
         val (adapterService, how) = resolved
         runCatching { callMethod(adapterService, "setBatteryLevel", device, level, false) }
             .onSuccess {
-                Log.i(TAG, "system battery level=$level -> ${SystemApisUtils.deviceAddress(device)} (via $how)")
+                Log.i(
+                    TAG,
+                    "system battery level=$level -> ${SystemApisUtils.deviceAddress(device)} " +
+                        "(adapter via=$how device via=$deviceVia)"
+                )
             }
             .onFailure { Log.w(TAG, "AdapterService.setBatteryLevel failed (via $how)", it) }
     }
+
+    /**
+     * 解析电量该写给哪个设备，返回 (设备, 用的是哪条证据)；全失败返回 null。
+     *
+     * ⚠ 真机实测（2026-09-14）：应用进程 UPDATE_SYSTEM_BATTERY 里的 `EXTRA_DEVICE` 是可空的
+     *   （ControlBridge 的 connectedDevice 在应用刚被拉起、还没收到 PODS_CONNECTED 时是 null），
+     *   而 `connectedMoondropDevice()` 在断线/重连那一瞬也可能扫不到 —— 于是电量被
+     *   `no connected Moondrop device` 丢掉（logcat 每 3s 一条），系统蓝牙页/融合设备中心
+     *   就一直看不到真实电量。这里 1)→2)→3)→4) 逐级兜底。
+     *   1) EXTRA_DEVICE（正常情况）  2) EXTRA_MAC -> BluetoothAdapter.getRemoteDevice
+     *   3) 当前已连接的 A2DP/HFP 水月雨设备  4) 本进程最近一次确认连接的设备（缓存）
+     */
+    private fun resolveBatteryDevice(intent: Intent): Pair<BluetoothDevice, String>? {
+        SystemApisUtils.parcelableDevice(intent, HyperPodsAction.EXTRA_DEVICE)?.let {
+            lastMoondropDevice = it
+            return it to "extra"
+        }
+        val mac = intent.getStringExtra(HyperPodsAction.EXTRA_MAC)
+        if (!mac.isNullOrEmpty()) {
+            remoteDevice(mac)?.let {
+                lastMoondropDevice = it
+                return it to "extra-mac"
+            }
+        }
+        connectedMoondropDevice()?.let {
+            lastMoondropDevice = it
+            return it to "connected-scan"
+        }
+        lastMoondropDevice?.let { return it to "cached" }
+        return null
+    }
+
+    /** MAC -> BluetoothDevice（非法 MAC 直接当失败）。 */
+    private fun remoteDevice(mac: String): BluetoothDevice? = runCatching {
+        val manager = appContext?.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        manager?.adapter?.getRemoteDevice(mac)
+    }.getOrNull()
 
     /**
      * 取 AdapterService 实例。真机 dex 逐条核对（com.android.bluetooth.apk）：
