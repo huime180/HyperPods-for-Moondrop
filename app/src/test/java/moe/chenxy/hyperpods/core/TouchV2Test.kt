@@ -36,6 +36,9 @@ class TouchV2Test {
     /** 用户已知配置对应的 5 个「双耳打包」字节（与 measuredReadBack 同一份）。 */
     private val knownSlots = intArrayOf(0x11, 0x23, 0x66, 0x77, 0x00)
 
+    /** IntArray 没有 toByteArray()（Kotlin stdlib 不提供）—— CI 曾因此报 Unresolved reference。 */
+    private fun IntArray.toBytes(): ByteArray = ByteArray(size) { this[it].toByte() }
+
     private fun confOf(vararg bytes: Int): Gaia.GestureConf =
         Gaia.GestureConf(IntArray(bytes.size) { bytes[it] })
 
@@ -63,7 +66,7 @@ class TouchV2Test {
         assertEquals(Gaia.TYPE_COMMAND, f.type)
         assertEquals(Gaia.C_TOUCHV2_SET_ACTION_CONF, f.command)
         // payload 必须**原样**是那 5 个字节（顺序 = 手势顺序，不允许被重排）
-        assertTrue(knownSlots.toByteArray().contentEquals(f.payload))
+        assertTrue(knownSlots.toBytes().contentEquals(f.payload))
     }
 
     @Test
@@ -74,7 +77,7 @@ class TouchV2Test {
             Gaia.F_TOUCHV2,
             Gaia.TYPE_RESPONSE,
             Gaia.C_TOUCHV2_GET_ACTION_CONF,
-            knownSlots.toByteArray(),
+            knownSlots.toBytes(),
         )
         assertEquals("00 1D 2D 02 11 23 66 77 00", Gaia.hex(back))
         assertTrue(back.contentEquals(measuredReadBack))
@@ -86,7 +89,7 @@ class TouchV2Test {
                     Gaia.F_TOUCHV2,
                     Gaia.TYPE_RESPONSE,
                     Gaia.C_TOUCHV2_SET_ACTION_CONF,
-                    knownSlots.toByteArray(),
+                    knownSlots.toBytes(),
                 )
             ),
         )
@@ -303,12 +306,12 @@ class TouchV2Test {
         assertNull(Gaia.parseGestureConf(null))
         assertNull(Gaia.parseGestureConf(ByteArray(0)))
         assertNull(Gaia.parseGestureConf(byteArrayOf(0x11, 0x23, 0x66, 0x77)))
-        assertNotNull(Gaia.parseGestureConf(knownSlots.toByteArray()))
+        assertNotNull(Gaia.parseGestureConf(knownSlots.toBytes()))
     }
 
     @Test
     fun `回包多于 5 字节时只取前 5（额外字节没有对应字段）`() {
-        val longer = knownSlots.toByteArray() + byteArrayOf(0x7F, 0x01)
+        val longer = knownSlots.toBytes() + byteArrayOf(0x7F, 0x01)
         val conf = Gaia.parseGestureConf(longer)!!
         assertEquals(Gaia.TOUCHV2_CONF_SIZE, conf.size)
         assertTrue(knownSlots.contentEquals(conf.slots))
