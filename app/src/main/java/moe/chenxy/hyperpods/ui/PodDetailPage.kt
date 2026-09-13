@@ -2,8 +2,11 @@
  * HyperPods for Moondrop — 耳机详情页
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * 所有开关行都由 [moe.chenxy.hyperpods.pods.PodCapabilities] 硬门控：
- * 能力位为 false 时该行根本不会出现在组合树里（不是 disabled，是隐藏）。
+ * 所有开关行都由 PodCapabilities 硬门控：能力位为 false 时该行根本不会出现在组合树里。
+ *
+ * 列表容器用的是 androidx.compose.foundation.lazy.LazyColumn：
+ * 本仓库解析到的 miuix 产物没有 top.yukonga.miuix.kmp.basic.LazyColumn（CI 实测），
+ * 因此 topAppBarScrollBehavior 只能作为保留参数（见下方注释），无法绑到列表上。
  */
 package moe.chenxy.hyperpods.ui
 
@@ -17,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -42,7 +46,6 @@ import moe.chenxy.hyperpods.ui.components.SegmentedSelector
 import moe.chenxy.hyperpods.utils.data.HyperPodsAction
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
-import androidx.compose.foundation.lazy.LazyColumn
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.extra.SuperSwitch
@@ -51,6 +54,10 @@ import top.yukonga.miuix.kmp.utils.getWindowSize
 
 private val VERIFIED_GREEN = Color(0xFF34C759)
 
+/**
+ * @param topAppBarScrollBehavior 保留参数：Miuix 的折叠式 LazyColumn 在当前 miuix 产物里不存在，
+ *   等依赖版本支持后再用它绑定 `Modifier.nestedScroll(...)`。目前不参与布局。
+ */
 @Composable
 fun PodDetailPage(
     topAppBarScrollBehavior: ScrollBehavior,
@@ -67,8 +74,7 @@ fun PodDetailPage(
 
     LazyColumn(
         modifier = modifier.height(getWindowSize().height.dp),
-        contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = 24.dp),
-        topAppBarScrollBehavior = topAppBarScrollBehavior
+        contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = 24.dp)
     ) {
         item {
             DeviceHeroCard(snapshot)
@@ -273,14 +279,13 @@ private fun ToggleCard(snapshot: PodSnapshot) {
                 summary = stringResource(R.string.low_latency_summary),
                 checked = snapshot.lowLatencyOn ?: false,
                 onCheckedChange = { on ->
-                    // 低延迟是 HyperOS 系统蓝牙侧的功能，不是 GAIA 命令：
-                    // 走跨进程广播，让蓝牙进程去改系统开关；同时乐观更新本进程快照。
+                    // 低延迟是 HyperOS 系统侧功能，不是 GAIA 命令：
+                    // 广播给自己包名 → manifest 的 ControlReceiver → ControlBridge 处理并转发给蓝牙进程。
                     context.sendBroadcast(
                         Intent(HyperPodsAction.LOW_LATENCY_SELECT)
                             .setPackage(BuildConfig.APPLICATION_ID)
                             .putExtra(HyperPodsAction.EXTRA_ENABLED, on)
                     )
-                    MoondropLink.onLowLatencyChanged(on)
                 }
             )
         }

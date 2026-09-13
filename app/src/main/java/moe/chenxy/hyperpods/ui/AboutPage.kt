@@ -1,6 +1,9 @@
 /*
  * HyperPods for Moondrop — 关于页
  * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * 列表容器用 androidx.compose.foundation.lazy.LazyColumn：
+ * 本仓库解析到的 miuix 产物没有 top.yukonga.miuix.kmp.basic.LazyColumn（CI 实测）。
  */
 package moe.chenxy.hyperpods.ui
 
@@ -12,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -25,12 +29,15 @@ import moe.chenxy.hyperpods.BuildConfig
 import moe.chenxy.hyperpods.R
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
-import androidx.compose.foundation.lazy.LazyColumn
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.getWindowSize
 
+/**
+ * @param topAppBarScrollBehavior 保留参数：Miuix 的折叠式 LazyColumn 在当前 miuix 产物里不存在，
+ *   等依赖版本支持后再用它绑定 `Modifier.nestedScroll(...)`。目前不参与布局。
+ */
 @Composable
 fun AboutPage(
     topAppBarScrollBehavior: ScrollBehavior,
@@ -38,8 +45,7 @@ fun AboutPage(
 ) {
     LazyColumn(
         modifier = Modifier.height(getWindowSize().height.dp).padding(12.dp),
-        contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = 24.dp),
-        topAppBarScrollBehavior = topAppBarScrollBehavior
+        contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = 24.dp)
     ) {
         item {
             Column(
