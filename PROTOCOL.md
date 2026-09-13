@@ -71,10 +71,10 @@ commandValue = (feature << 9) | (type << 7) | (command & 0x7F)
 | 电量：查询左右+盒 | `00 1D 1A 01 01 02 03` | 单测 `cmd1 带类型列表的查询帧与协议文档一致` |
 | 电量：查询全部 4 类 | `00 1D 1A 01 00 01 02 03` | `FALLBACK_QUERY_IDS = [0,1,2,3]` |
 | 电量：老固件查全部（无 payload） | `00 1D 1A 01` | `Gaia.batteryGetAll()` |
-| 提示音：读开关 | `00 1D 1C 01` | feature `0x0E`/cmd 1 ⚠ 命令号未证实 |
-| 提示音：开开关 | `00 1D 1C 02 01` | cmd 2 + `01` ⚠ 命令号未证实 |
-| 提示音：读音量 | `00 1D 1C 03` | cmd 3 ⚠ 命令号未证实 |
-| 提示音：写音量 | `00 1D 1C 04 07` | cmd 4 + raw `07` ⚠ 命令号未证实 |
+| 提示音：读配置 | `00 1D 1C 01` | feature `0x0E`/cmd 1；✅ 官方 App logcat 实机确认 |
+| 提示音：写配置（开/音量 20/索引 1） | `00 1D 1C 02 01 14 01` | cmd 2 + `[enabled][volume][index]`；✅ 官方 App logcat 原样数据 `data=[1, 20, 1]` |
+| 提示音：写配置（关/音量 82/索引 1） | `00 1D 1C 02 00 52 01` | ✅ 官方 App logcat 原样数据 `data=[0, 82, 1]` |
+| 提示音：写配置（越界裁剪） | `00 1D 1C 02 01 64 00` | 音量 250 被裁剪为 100（`0x64`）、索引 0；单测锁定 |
 | 增益：读 | `00 1D 1E 01` | feature `0x0F`/cmd 1 |
 | 增益：写 0 | `00 1D 1E 02 00` | cmd 2 + 设备码 |
 | LHDC：读 | `00 1D 20 05` | feature `0x10`/cmd 5；单测 `LHDC 编解码开关命令` |
@@ -155,7 +155,7 @@ commandValue = (feature << 9) | (type << 7) | (command & 0x7F)
 | 11 | `F_GESTURE_CONFIGURATION` | 手势配置 | — |
 | 12 | `F_STATISTICS` | 统计 | — |
 | 13 | `0x0D` `F_BATTERY` | 电量 | ✅ |
-| 14 | `0x0E` `F_VOICE` | 提示音（voice prompt） | ⚠ 命令号待验证 |
+| 14 | `0x0E` `F_VOICE` | 提示音（voice prompt） | ✅ 命令号与 payload 已由官方 App logcat 实机确认 |
 | 15 | `0x0F` `F_DAC_GAIN` | 增益 | ✅ |
 | 16 | `0x10` `F_CODEC_TYPE` | 编解码（LC3 / LDAC / LHDC） | ✅ LHDC（LC3/LDAC 未接线） |
 | 17 | `F_LIGHT_SENSOR` | 光线传感器 | — |
@@ -229,6 +229,10 @@ BAT_RIGHT_DEVICE=2 / BAT_CHARGER_CASE=3 / BAT_LEVEL_UNKNOWN=255`，names 为
 * 布丁 PUDDING 三路齐全：type 1=左耳、2=右耳、3=充电盒（PuddingPods 文档），查询用
   `00 1D 1A 00` 或 `00 1D 1A 01 01 02`，回包 `00 1D 1B ...`；
 * 梦回2（GA2）实测**只有左右耳，没有充电盒电量**（FxxkMoondrop）。
+* 官方 App 自己的 logcat（2026-09-14 真机）显示电量变化是以**通知帧**到达的：
+  `BatteryPlugin: onNotification: packet = Packet{version=V3, vendor=001D, command=Command{type=NOTIFICATION, feature=000D, command=0001}}`
+  —— 即 `feature=0x0D`、`command=0x01`、`type=NOTIFICATION`（`00 1D 1A 81 …` 形态），
+  与本模块 `MoondropLink.dispatch()` 里对电量通知的处理一致（该处理路径因此得到旁证，但本模块自身仍未在真机跑过）。
 
 ### 5.4 解析规则（`BatteryCodec.parse`）
 
@@ -318,20 +322,42 @@ ANC V2 模式枚举（官方 `AncV2Handler` / moondrop-link `constants.py` 一�
 见第 5 节。常量：`C_BATT_GET_BATTERY_LEVELS=1`、`C_BATT_GET_BATTERY_LEVELS_V4=0`、
 `C_BATT_GET_SUPPORTED_BATTERIES=0`（后两者同值，语义分别是「V4 无 payload 查全部」与「查支持的 type」）。
 
-### VOICE（14，提示音）⚠
+### VOICE（14，提示音）✅ 已实机确认
 
-| 命令 | 本项目默认值 | 说明 |
+> 证据：2026-09-14 在真机（Xiaomi Pad 8 Pro）上抓取**水月雨官方 App 自身 `com.qualcomm.qti.gaiaclient`
+> 的 logcat**，它把收发帧直接打印了出来（原文）：
+>
+> ```
+> V3VoicePlugin: fetchVoiceConf
+> [V3VoicePlugin->onResponse] command=1, data=[1, 20, 1], size=3
+> [V3VoicePlugin->onResponse] Using V2 format (size >= 3)
+> VoiceRepositoryData: updateV2VoiceConf: enabled=true, volume=20, index=1
+> ...
+> V3VoicePlugin: setVoiceConf
+> [V3VoicePlugin->onResponse] command=2, data=[0, 82, 1], size=3
+> ```
+
+| 命令 | 值 | 说明 |
 |---|---:|---|
-| GET_ENABLE | 1 | 未证实 |
-| SET_ENABLE | 2 | 未证实 |
-| GET_VOLUME | 3 | 未证实 |
-| SET_VOLUME | 4 | 未证实 |
+| `C_VOICE_GET_CONF` | **1** | 读整份提示音配置 |
+| `C_VOICE_SET_CONF` | **2** | 写整份提示音配置 |
 
-上游（moondrop-link 逆向自官方 App 内嵌 `gaiaclient`）只保留了 **feature id `0x0E`**，
-**没有保留命令号**。本项目按水月雨自家其它开关（DAC/LED/SPATIAL/DYBASS）一致的
-「GET=1 / SET=2」惯例给出默认值，并在档案里留了 `cmdVoiceGetEnable/SetEnable/GetVolume/SetVolume`
-四个覆盖字段（对应设置键 `HyperPodsPrefsKey.VOICE_CMD_*`），UI 是否展示则由能力位图决定。
-**这几个命令号必须真机验证后才能确信。**
+* **没有独立的音量命令**：旧文档里的「音量 GET=3 / SET=4」是**错的**，代码已废弃，
+  `C_VOICE_GET_VOLUME` / `C_VOICE_SET_VOLUME` 现在只是 `C_VOICE_GET_CONF` / `C_VOICE_SET_CONF` 的**兼容别名**。
+* **V2 payload = `[enabled(0/1)][volume(0..100)][index]`**（`size >= 3` 即 V2 格式）。
+  * `volume` 是**百分比 0..100**（`Gaia.VOICE_VOLUME_MAX = 100`），**不是** 0..255 的原始字节，
+    也不是滑条量程外的设备自定义值；
+  * `index` 是提示音索引（语言/主题），**取值语义未确认**；
+  * `parseVoiceConf()` 兼容 V2 三字节、以及只有开关位的 2 字节 / 1 字节短格式。
+* ⚠ **写入必须一次给出完整三字节**：固件把 enabled/volume/index 当作**一份配置**，
+  只发开关位会把音量与索引一起写坏（这正是「改开关把音量清零」类问题的来源）。
+  `MoondropLink.setPromptTone()` 会保留当前音量与索引，`setPromptVolumeRaw()` 会保留开关与索引。
+* 字节示例：`00 1D 1C 01`（读）；`00 1D 1C 02 01 14 01`（开/20/1，日志原样 `data=[1,20,1]`）；
+  `00 1D 1C 02 00 52 01`（关/82/1，日志原样 `data=[0,82,1]`）。以上由单测逐字节锁定。
+* 档案里仍保留 `cmdVoiceGetEnable` / `cmdVoiceSetEnable` / `cmdVoiceGetVolume` / `cmdVoiceSetVolume`
+  覆盖字段（默认即上述已确认值），UI 是否展示由能力位图（feature 14）或档案开关决定。
+* **仍未验证的部分**：`index` 的取值含义；以及本模块**自身**尚未在真机上跑通提示音读写
+  （命令与 payload 由官方 App 的日志证实，不是本模块的实机结论）。
 
 ### DAC_GAIN（15）/ LED（19）/ SPATIAL_AUDIO（18）/ LR_CHANNEL（30）/ POWER_CONTROL（24）/ DYBASS（27）
 
@@ -354,6 +380,18 @@ ANC V2 模式枚举（官方 `AncV2Handler` / moondrop-link `constants.py` 一�
 
 **LHDC 出厂默认关闭**：上游实测（连接中的耳机）主机侧广告 LHDCv5 / LHDC_V3 / LHDC_V2 / LDAC / aptX-adaptive，
 而耳机实际活动编码是 **AAC**。所以「默认跑 AAC/SBC」是正常出厂状态，开关打开后能否稳定协商需真机验证。
+
+官方 App 自己的 logcat（2026-09-14 真机）也把这条命令原样打了出来，可作为**帧格式**的旁证：
+
+```
+CodecRepositoryImpl setLhdcState
+SetCodecRequest run: info=CODEC_LHDC, value=0
+V3CodecPlugin setInfo CODEC_LHDC, value: 0
+V3Plugin: sendPacket command = 6 data = 0
+Plugin: send: packet = 0x00 0x1D 0x20 0x06 0x00
+```
+
+即「关闭 LHDC」= `00 1D 20 06 00`（feature `0x10`、cmd 6、payload `00`），与本项目 `Gaia.lhdcSet(false)` 一致。
 
 ### ONEBRINGTWO（20，双设备连接）
 
@@ -531,6 +569,7 @@ PuddingPods 文档也把它归类为 `BluetoothDeviceDetailsFragment` 提供的�
 | PUDDING：RFCOMM/SPP + GAIA V4、ANC V2 五档枚举、三路电量、增益、指示灯、Device ID `01010607` | `_refs/PuddingPods/PUDDING_ADAPTATION.md`（仓库根 `PuddingPods/`） |
 | HyperOS 设置页伪装原生耳机（`HeadsetIDConstants`、`IMiuiHeadsetService$Stub$Proxy`） | `_refs/OppoPods/app/src/main/java/moe/chenxy/oppopods/hook/SettingsHeadsetHook.kt` |
 | 融合设备中心设备卡点击（`deviceType == "third_headset"`）、`AdapterService.setBatteryLevel` | `_refs/HyperPods/app/src/main/java/moe/chenxy/hyperpods/hook/DeviceCardHook.kt`、`pods/L2CAPController.kt` |
+| **提示音命令号与 payload**（GET=cmd1 / SET=cmd2、`[enabled,volume,index]`、音量 0..100）、**LHDC 关** `00 1D 20 06 00`、**电量以通知帧到达**（feature `0x0D` cmd `0x01` type NOTIFICATION） | 2026-09-14 真机（Xiaomi Pad 8 Pro）抓取的**水月雨官方 App 自身 `gaiaclient` logcat**（`V3VoicePlugin` / `V3CodecPlugin` / `BatteryPlugin`） |
 | 逐字节期望值（回归锁定） | `app/src/test/java/moe/chenxy/hyperpods/core/GaiaProtocolTest.kt`、`BatteryCodecTest.kt` |
 
 > 上游 moondrop-link 的 `constants.py` 里还写着一句「legacy GAIA/SPP `00001107-d102-…`
@@ -541,7 +580,9 @@ PuddingPods 文档也把它归类为 `BluetoothDeviceDetailsFragment` 提供的�
 
 ## 12. 仍未确定（写在这里避免被当成已确认）
 
-1. **提示音（0x0E）命令号**：默认 GET=1/SET=2，未证实（见第 6 节 VOICE）。
+1. **提示音**：命令号（GET=1 / SET=2）与 payload `[enabled, volume(0..100), index]` 已由官方 App logcat
+   实机确认（见第 6 节 VOICE）；剩下未确认的是 **`index` 字段的取值语义**，以及**本模块自身**
+   从未在真机上跑通提示音读写。
 2. **能力正文编码**：代码现在**两种都试**（`parseSupportedFeaturesSmart()`：字节对优先、位图兜底），
    但**具体固件用哪种、是否会误判**仍未真机抓包裁决。
 3. **ANC 读回值域**：EDGE / EDGE2 已按上游实测补 `getMap = [0,1,2]`（SET 位掩码 `1/2/4` ↔ GET 0-based）——
@@ -559,6 +600,7 @@ PuddingPods 文档也把它归类为 `BluetoothDeviceDetailsFragment` 提供的�
    低延迟另有一条闭环：UI → `ControlBridge` → `com.android.bluetooth`（反射厂商方法，否则 A2DP codec
    `getCodecStatus` / `setCodecConfigPreference` 兜底）→ `LOW_LATENCY_CHANGED`。
    这些代码路径**从未在真机上运行过**。
-8. **本模块没有任何真机测试结论**：本文所有协议结论要么来自本仓库源码 + 单测，
-   要么来自上游项目的真机记录，没有一条来自本模块的真机运行；本文档编写环境也没有构建过 APK
-   （无 JDK / Android SDK / 网络），因此**不背书任何「已生效」「已可用」的说法**。
+8. **本模块没有任何真机功能验证结论**：本文所有协议结论要么来自本仓库源码 + 单测，
+   要么来自上游项目/官方 App 的真机记录（含 2026-09-14 抓取的官方 App gaiaclient logcat），
+   没有一条来自本模块自身的真机运行；CI 已通过编译与单测并产出 APK（见 [README.md](README.md) 构建状态），
+   但因此**不背书任何「已在设备上生效/可用」的说法**。

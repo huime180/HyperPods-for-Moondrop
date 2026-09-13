@@ -210,23 +210,23 @@ data class DcProfile(
 data class FeatureProfile(
     val promptTone: Boolean = false,        // 展示「提示音开关」
     val promptVolume: Boolean = false,      // 展示「提示音音量」滑条
-    val promptVolumeMax: Int = 15,          // 设备端音量最大值（滑条 0..max 换算到 0..255）
+    val promptVolumeMax: Int = Gaia.VOICE_VOLUME_MAX,   // = 100；音量是百分比，UI 与设备同单位
     val lhdc: Boolean = false,              // 展示「LHDC 开关」
     val dualConnection: Boolean = false,    // 展示「双设备连接」
     val lowLatency: Boolean = false,        // 展示「低延迟模式」
-    // 可覆盖的命令号（默认 = Gaia 中已确认/约定的值）
-    val cmdVoiceGetEnable: Int = Gaia.C_VOICE_GET_ENABLE,   // 1
-    val cmdVoiceSetEnable: Int = Gaia.C_VOICE_SET_ENABLE,   // 2
-    val cmdVoiceGetVolume: Int = Gaia.C_VOICE_GET_VOLUME,   // 3
-    val cmdVoiceSetVolume: Int = Gaia.C_VOICE_SET_VOLUME,   // 4
+    // 可覆盖的命令号（默认 = 官方 App logcat 实机确认的值）
+    val cmdVoiceGetEnable: Int = Gaia.C_VOICE_GET_ENABLE,   // = C_VOICE_GET_CONF = 1
+    val cmdVoiceSetEnable: Int = Gaia.C_VOICE_SET_ENABLE,   // = C_VOICE_SET_CONF = 2
+    val cmdVoiceGetVolume: Int = Gaia.C_VOICE_GET_CONF,     // 同一对命令：没有独立音量命令
+    val cmdVoiceSetVolume: Int = Gaia.C_VOICE_SET_CONF,     // 同上
 )
 ```
 
 | 字段 | 说明 | 是否已实测 |
 |---|---|---|
-| `promptTone` / `promptVolume` | 是否**默认**展示提示音开关与音量；实际展示条件是「档案为 true **或** 能力位图含 feature 14」 | ❌ 命令号未证实 |
-| `promptVolumeMax` | 音量滑条量程；`MoondropLink` 只透出该值，不做换算（换算在 UI 层） | 默认 15，**无实测依据** |
-| `cmdVoice*` | 逐设备覆盖提示音命令号（`HyperPodsPrefsKey.VOICE_CMD_*` 也是同一用途） | ❌ 默认 1/2/3/4 是**惯例推测** |
+| `promptTone` / `promptVolume` | 是否**默认**展示提示音开关与音量；实际展示条件是「档案为 true **或** 能力位图含 feature 14」 | ✅ 命令号与 payload 已由官方 App logcat 实机确认 |
+| `promptVolumeMax` | 音量滑条量程 = `Gaia.VOICE_VOLUME_MAX` = **100**；音量是百分比，UI 与设备**同单位**（恒等映射） | ✅ 单位由官方 App logcat 确认（`updateV2VoiceConf: volume=20`） |
+| `cmdVoice*` | 逐设备覆盖提示音命令号；默认即已确认值（GET=1 / SET=2），`cmdVoiceGetVolume/SetVolume` 现在指向同一对命令 | ✅ 默认值已确认；覆盖入口保留备用 |
 | `lhdc` | 是否默认展示 LHDC 开关（feature `0x10`，cmd 5 读 / cmd 6 写） | 帧已由单测锁定；行为未实测 |
 | `dualConnection` | 是否默认展示双设备连接（feature `0x14`） | ✅ 命令号有真机证据（EDGE） |
 | `lowLatency` | 是否默认展示低延迟；**这是 HyperOS 系统侧功能，不是 GAIA 命令** | ❌ 系统侧未验证 |
@@ -235,14 +235,21 @@ data class FeatureProfile(
 
 | 机型 | promptTone | promptVolume | lhdc | dualConnection | lowLatency |
 |---|---|---|---|---|---|
-| `edge` | ✅ | ✅ | ✅ | ✅ | ✅ 实测 |
-| `edge2` | — | — | ✅ | ✅ | ✅ 实测 |
+| `edge` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `edge2` | — | — | ✅ | ✅ | ✅ |
 | `pudding` | — | — | ✅ | — | — |
 | `golden_ages_2` / `golden_ages` | — | — | ✅ | — | — |
 | `alice` / `sparks` / `voyager` | — | — | ✅ | — | — |
 | `space_travel_2` / `space_travel_2_ultra` / `moca` / `nekocake` / `pill` / `ultrasonic` / `robin` / `block` / `space_travel` | — | — | — | — | — |
 
 > 也就是说：提示音开关目前**只有 EDGE 档案默认展示**（其余机型要等能力位图出现 feature 14）。
+> 表中 ✅ 只表示「档案默认展示该行」，不代表已真机验证；尤其 `lowLatency` 是 HyperOS 系统侧功能，**未真机验证**。
+
+**提示音 payload（官方 App logcat 实机确认）**：`VOICE(0x0E)` 的 GET=cmd 1 / SET=cmd 2，
+payload(V2, size>=3) = `[enabled(0/1)][volume(0..100)][index]`；**没有独立音量命令**；
+写入必须一次给全三字节（固件把三者当一份配置，只发开关位会写坏音量/索引）。
+新增机型若这个 feature 有差异，改 `cmdVoice*` 覆盖字段，不要另造命令。
+仍未确认：`index`（语言/主题）的取值语义。
 
 ---
 
@@ -363,12 +370,12 @@ data class FeatureProfile(
 
 | # | 未知项 | 现状 / 建议验证方式 |
 |---|---|---|
-| 1 | 提示音（feature 0x0E）命令号 | 只保留 feature id；默认 GET=1/SET=2。用官方 App 抓 btsnoop 后回填 `cmdVoice*` |
+| 1 | 提示音 `index` 字段 | 命令号（GET=1/SET=2）与 payload `[enabled, volume(0..100), index]` **已由官方 App logcat 实机确认**；`index`（语言/主题）的取值语义未知，本模块自身也未真机跑通 |
 | 2 | `GET_SUPPORTED_FEATURES` 响应体编码 | 代码两种都试（`parseSupportedFeaturesSmart`）；**具体固件用哪种、会不会误判**仍需抓原始回包裁决 |
 | 3 | ANC 读回值域 | EDGE / EDGE2 已按上游实测补 `getMap=[0,1,2]`（参数待真机复核）；`anc4Identity` 系列仍是 `getMap=null` 反查，若这些机型也是 0-based 读回会得到 `-1` |
 | 4 | GAIA 版本探测 | 已在连接流程中发送（`00 0A 03 00`）；**探测结果的解析与用途**（是否需要据此切换包格式）未真机确认 |
 | 5 | EDGE 增益映射 | 档案为恒等 `[0,1,2]`，无实测证据 |
-| 6 | `promptVolumeMax = 15` | 无实测依据；不同固件量程可能不同 |
+| 6 | 提示音音量量程 | 已确认为 **0..100 百分比**（官方 App logcat）；但**不同固件是否仍为 100** 未确认，档案可逐机型覆盖 `promptVolumeMax` |
 | 7 | 9ECA 私有协议 | 已实现但未接线、未验证（上游亦标注未实机验证） |
 | 8 | 空间音频 / 头动追踪 | 档案与能力字段存在，客户端无读写路径 |
 | 9 | `AudioCuration cmd 41/42`（ANC 切换配置） | 上游 FxxkMoondrop 记录 GA2 对 cmd 41 回包不稳定，**不推荐**；本项目也未使用 |

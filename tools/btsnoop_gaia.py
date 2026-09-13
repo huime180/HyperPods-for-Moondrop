@@ -1,27 +1,34 @@
 #!/usr/bin/env python3
-"""btsnoop -> Qualcomm GAIA (QTiL) extractor.   v2, stack-walking.
+"""btsnoop -> Qualcomm GAIA (QTiL) extractor  (stack-walking, v3)
 
-Reality of this ROM's snoop log (verified on Xiaomi Pad 8 / HyperOS 4.0):
-  * datalink 0x03EA = HCI H4, records are standard 24-byte-header btsnoop records
-  * ACL packets ARE TRUNCATED: incl_len < orig_len, only the first 10 bytes of
-    ACL data survive (158/1747 records in a sample).  HCI identity (handle +
-    dlen) and the 4-byte L2CAP header always survive; GAIA payload is partial.
-  * the Moondrop app talks GAIA over **RFCOMM / SPP (BR/EDR)**, not BLE GATT.
-    Its RFCOMM channel shows up on a dynamic L2CAP CID (0x0140/0x0046/... on
-    individual records), so we do NOT filter on CID 3.
-  * the app wraps each GAIA frame in a 4-byte SPP header:
-        FF 04 00 <n>  +  <GAIA frame>          (0x04 = protocolVersion 4)
-    where <n> = number of GAIA bytes AFTER the 4-byte GAIA header.
+WHAT THIS ROM ACTUALLY DOES  (verified: Xiaomi Pad 8 Pro / HyperOS 4.0)
+---------------------------------------------------------------------
+* datalink 0x03EA = HCI H4; records use the standard 24-byte btsnoop header.
+* ACL records are TRUNCATED: `incl_len < orig_len` and only the first
+  **10 bytes of ACL data** are stored (158/1747 records in a 86 KB sample).
+  Those 10 bytes are consumed by L2CAP(4) + RFCOMM(3) + the app's 3-byte SPP
+  wrapper, so the GAIA frame itself is NEVER present in the snoop log.
+  => GAIA bytes must be taken from the app's own logcat
+     (tools/parse_gaia_logcat.py).  This tool still proves the TRANSPORT.
+* The Moondrop app talks GAIA over **RFCOMM / SPP on BR/EDR** (it opens an
+  RFCOMM socket to the buds), NOT over BLE GATT.  dumpsys reports the bond as
+  `[ACL BR/EDR:Y LE:N]` and there is no LE connection at all.
+* RFCOMM traffic appears on a dynamic L2CAP CID (this ROM logs the per-record
+  channel id: 0x0040..0x0052 / 0x0140..0x0144), so we do NOT filter on CID 3.
+* The app wraps each GAIA frame in a 4-byte SPP header:
+        FF 04 00 <n>   +   <GAIA frame>
+  where 0x04 is the app's "protocolVersion 4" and <n> counts the GAIA bytes
+  that follow the 4-byte GAIA header (vendor u16 + commandWord u16).
 
-Walk:  HCI H4 -> ACL(reassemble by handle/PB) -> L2CAP -> payload
-         payload -> RFCOMM frame -> info -> GAIA
-         payload -> ATT PDU (cid 4)      -> value -> GAIA        (BLE path)
-         payload -> raw GAIA scan                                 (fallback)
+Walk: HCI H4 -> ACL (reassembled per handle/PB) -> L2CAP -> payload
+        payload -> RFCOMM frame -> info -> GAIA   (this device's real path)
+        payload -> ATT PDU (cid 0x0004)  -> value -> GAIA   (BLE path)
+        payload -> raw GAIA scan                            (fallback)
 
 Usage:
-  python3 tools/btsnoop_gaia.py <log> [more logs] [--all] [--att] [--csv F]
+  python3 tools/btsnoop_gaia.py <log> [...] [--att] [--spp] [--csv F]
 """
-import struct, sys, datetime, csv, collections
+import struct, sys, datetime, collections, csv
 
 FEATURES = {
     0: "BASIC", 1: "EARBUD", 2: "ANC_V1", 3: "VOICE_UI", 4: "DEBUG", 5: "MUSIC",
@@ -30,27 +37,18 @@ FEATURES = {
     15: "DAC_GAIN", 16: "CODEC_TYPE", 17: "LIGHT", 18: "SPATIAL", 19: "LED",
     20: "ONEBRINGTWO", 21: "BT_ADDR", 22: "TOUCHV2", 23: "AUDIO_RESOURCE",
     24: "POWER", 25: "POWER_TIMEOUT", 26: "TOUCHV3", 27: "DYBASS",
-    28: "?28", 29: "FILE_STORAGE", 30: "LR_CHANNEL", 31: "?31", 32: "ANC_V2",
-    33: "?33", 40: "?40", 41: "?41", 65: "?65",
+    29: "FILE_STORAGE", 30: "LR_CHANNEL", 32: "ANC_V2",
 }
 TYPES = {0: "COMMAND", 1: "NOTIFICATION", 2: "RESPONSE", 3: "ERROR"}
 RFCOMM_CTRL = {0x2F, 0x3F, 0x63, 0x73, 0x0F, 0x1F, 0x43, 0x53,
                0xEF, 0xFF, 0x03, 0x13, 0xE3, 0xF3}
-
-
-def uuid_str(b):
-    if len(b) == 2:
-        return "0x%04X" % struct.unpack("<H", b)[0]
-    if len(b) == 16:
-        s = b[::-1].hex()
-        return "%s-%s-%s-%s-%s" % (s[0:8], s[8:12], s[12:16], s[16:20], s[20:32])
-    return b.hex()
+SPP_MAGIC = b"\xff\x04\x00"
 
 
 def ts_str(us):
     try:
         return datetime.datetime.fromtimestamp(
-            946684800 + us / 1e6, datetime.UTC).strftime("%H:%M:%S.%f")[:12]
+            946684800 + us / 1e6 + 8 * 3600, datetime.UTC).strftime("%H:%M:%S.%f")[:12]
     except Exception:
         return str(us)
 
@@ -58,7 +56,7 @@ def ts_str(us):
 def iter_records(path):
     data = open(path, "rb").read()
     if not data.startswith(b"btsnoop\x00"):
-        raise SystemExit("%s: not btsnoop" % path)
+        raise SystemExit("%s: not a btsnoop file" % path)
     off, n = 16, len(data)
     while off + 24 <= n:
         orig, incl, flags, drops = struct.unpack(">IIII", data[off:off + 16])
@@ -71,35 +69,38 @@ def iter_records(path):
 
 
 def decode_gaia(buf):
-    """Return (vendor, feature, type, cmd, payload) if buf starts with a GAIA frame."""
+    """GAIA V3 frame = [vendor u16][commandWord u16][payload]. Vendor 0x001D."""
     if len(buf) < 4:
         return None
     vend = (buf[0] << 8) | buf[1]
-    if vend not in (0x001D, 0x000A, 0x0000):
+    if vend != 0x001D:                     # only V3 -- avoids 00 00 false hits
         return None
     cw = (buf[2] << 8) | buf[3]
-    return vend, (cw >> 9) & 0x7F, (cw >> 7) & 3, cw & 0x7F, bytes(buf[4:])
+    f, t, c = (cw >> 9) & 0x7F, (cw >> 7) & 3, cw & 0x7F
+    if f > 33:                             # implausible feature -> not GAIA
+        return None
+    return vend, f, t, c, bytes(buf[4:])
 
 
 def gaia_in(info):
-    """Find a GAIA frame inside an RFCOMM/ATT payload, with or without the
-    app's 'FF 04 00 <n>' SPP wrapper.  Returns (frame_tuple, offset, wrapped)."""
-    if len(info) >= 6 and info[0] == 0xFF and info[1] == 0x04:
+    """Find GAIA in an RFCOMM/ATT payload: SPP-wrapped or bare."""
+    if info.startswith(SPP_MAGIC):
         f = decode_gaia(info[4:])
         if f:
-            return f, 4, True
+            return f, True
+        return ("TRUNCATED-BY-ROM",) + (info[4:].hex(" "),), True
     f = decode_gaia(info)
     if f:
-        return f, 0, False
-    for i in range(1, min(len(info), 8)):
+        return f, False
+    i = info.find(b"\x00\x1d")
+    if 0 < i < 8:
         f = decode_gaia(info[i:])
         if f:
-            return f, i, False
+            return f, False
     return None
 
 
 def rfcomm_infos(pl):
-    """Yield (dlci, info) for each RFCOMM frame in an L2CAP payload."""
     i, n = 0, len(pl)
     while i + 3 <= n:
         addr, ctrl = pl[i], pl[i + 1]
@@ -112,32 +113,34 @@ def rfcomm_infos(pl):
             ln = b >> 1
             j += 1
         else:
+            if j + 1 >= n:
+                return
             ln = (b >> 1) | (pl[j + 1] << 7)
             j += 2
         yield dlci, bytes(pl[j:j + ln])
         i = j + ln
 
 
-def analyze(path, args, acc):
-    frames, attlog, gatt = [], [], {}
-    aclbuf, trunc = {}, collections.Counter()
+def analyze(path, args):
+    frames, spp_ev, cidstat, gatt, aclbuf = [], [], collections.Counter(), {}, {}
+    trunc_n = acl_n = 0
     for ts, flags, orig, incl, pkt in iter_records(path):
         if not pkt:
             continue
         d = "bud->app" if (flags & 1) else "app->bud"
         if pkt[0] != 0x02:
             continue
+        acl_n += 1
         if incl < orig:
-            trunc["truncated_acl"] += 1
+            trunc_n += 1
         hp = struct.unpack("<H", pkt[1:3])[0]
         dlen = struct.unpack("<H", pkt[3:5])[0]
         pb, h = (hp >> 12) & 3, hp & 0xFFF
-        body = pkt[5:5 + dlen]
         key = (h, d)
         if pb == 1:
-            aclbuf[key] = bytes(aclbuf.get(key, b"")) + body
+            aclbuf[key] = aclbuf.get(key, b"") + pkt[5:5 + dlen]
             continue
-        aclbuf[key] = body
+        aclbuf[key] = pkt[5:5 + dlen]
         buf = aclbuf[key]
         if len(buf) < 4:
             continue
@@ -146,58 +149,60 @@ def analyze(path, args, acc):
         pl = buf[4:4 + l2len]
         if not pl:
             continue
-        hit = None
-        if cid == 0x0004:                      # ATT (BLE / EDR)
-            attlog.append((ts, d, pl))
-            hit = gaia_in(pl[3:]) if pl[0] in (0x12, 0x52, 0x1B, 0x1D) else None
-        else:
-            for dlci, info in rfcomm_infos(pl):
-                if not info:
-                    continue
-                hit = gaia_in(info)
-                if hit:
-                    hit = (hit[0], hit[1], hit[2], dlci)
-                    break
-            if not hit:
-                hit = gaia_in(pl)
-                if hit:
-                    hit = (hit[0], hit[1], hit[2], None)
-        if hit:
-            (vend, feat, typ, cmd, pay), off, wrapped, *rest = hit if len(hit) == 4 else (*hit, None)
-            dlci = rest[0] if rest else None
-            frames.append((ts, d, "RFCOMM" if cid != 4 else "ATT", h, dlci,
-                           vend, feat, typ, cmd, pay, wrapped, incl < orig))
-    # ---------------- report
-    print("\n" + "=" * 104)
+        cidstat[(hex(cid), incl < orig)] += 1
+        if cid == 0x0004:                                  # ATT
+            if pl[0] in (0x12, 0x52, 0x1B, 0x1D):
+                r = gaia_in(pl[3:])
+                if r:
+                    frames.append((ts, d, "ATT", h, None, r))
+            continue
+        got = False
+        for dlci, info in rfcomm_infos(pl):
+            if not info:
+                continue
+            if info.startswith(SPP_MAGIC):
+                spp_ev.append((ts, d, cid, info))
+            r = gaia_in(info)
+            if r:
+                frames.append((ts, d, "RFCOMM", h, dlci, r))
+                got = True
+                break
+        if not got:
+            r = gaia_in(pl)
+            if r:
+                frames.append((ts, d, "RFCOMM", h, None, r))
+
+    print("\n" + "=" * 100)
     print("=== %s" % path)
-    print("    GAIA frames: %d   (ACL records truncated by ROM: %d)"
-          % (len(frames), trunc["truncated_acl"]))
-    if not frames:
-        print("    (no GAIA frames)")
-        return frames
-    print("  %-12s %-8s %-7s %-6s %-6s %-16s %-12s %-4s  %s"
-          % ("time", "dir", "trans", "hdl", "dlci", "feature", "type", "cmd", "payload"))
-    for ts, d, tr, h, dlci, vend, f, t, c, pay, wrapped, wastr in frames:
-        print("  %-12s %-8s %-7s %-6s %-6s %-16s %-12s %-4d  %s"
-              % (ts_str(ts), d, tr, h, dlci if dlci is not None else "-",
-                 "%d/%s" % (f, FEATURES.get(f, "?")), TYPES.get(t, "?"), c,
-                 pay.hex(" ")))
-    print("\n  --- distinct (feature,type,cmd,direction) ---")
-    agg = collections.OrderedDict()
-    for ts, d, tr, h, dlci, vend, f, t, c, pay, wrapped, wastr in frames:
-        k = (f, t, c, d)
-        a = agg.setdefault(k, {"n": 0, "pay": set(), "first": ts})
-        a["n"] += 1
-        a["pay"].add(pay.hex(" ") or "(none)")
-        a["first"] = min(a["first"], ts)
-    print("  %-22s %-12s %-4s %-8s %-5s %s"
-          % ("feature", "type", "cmd", "dir", "n", "payload(s)"))
-    for (f, t, c, d), a in sorted(agg.items()):
-        print("  %-22s %-12s %-4d %-8s %-5d %s"
-              % ("%d/%s" % (f, FEATURES.get(f, "?")), TYPES.get(t, "?"), c, d, a["n"],
-                 " | ".join(sorted(a["pay"]))))
-    acc.append(path)
-    return frames
+    print("    ACL records: %d   truncated by ROM: %d (%.0f%%)   L2CAP CIDs: %s"
+          % (acl_n, trunc_n, 100.0 * trunc_n / max(acl_n, 1),
+             ", ".join("%s%s" % (c, "*" if t else "")
+                       for (c, t) in sorted(cidstat))))
+    print("    ('*' = that CID only ever appeared in truncated ACL records)")
+    print("    SPP-wrapped GAIA writes seen (FF 04 00 ...): %d" % len(spp_ev))
+    if spp_ev:
+        print("      first few: " + "; ".join(
+            "%s %s cid=0x%04X %s" % (ts_str(t), dd, c, i.hex(" "))
+            for t, dd, c, i in spp_ev[:5]))
+    if frames:
+        print("\n  %-12s %-8s %-7s %-5s %-5s %-16s %-12s %-4s  %s"
+              % ("time", "dir", "trans", "hdl", "dlci", "feature", "type", "cmd", "payload"))
+        for ts, d, tr, h, dlci, r in frames:
+            inner, wrapped = r
+            if inner[0] == "TRUNCATED-BY-ROM":
+                print("  %-12s %-8s %-7s %-5s %-5s GAIA frame cut by ROM truncation: %s"
+                      % (ts_str(ts), d, tr, h, dlci if dlci is not None else "-", inner[1]))
+                continue
+            vend, f, t, c, pay = inner
+            print("  %-12s %-8s %-7s %-5s %-5s %-16s %-12s %-4d  %s"
+                  % (ts_str(ts), d, tr, h, dlci if dlci is not None else "-",
+                     "%d/%s" % (f, FEATURES.get(f, "?")), TYPES.get(t, "?"), c,
+                     pay.hex(" ")))
+    else:
+        print("\n    No complete GAIA frame is recoverable from this log.")
+        print("    Reason: every RFCOMM-bearing ACL record was truncated to 10 bytes")
+        print("    of ACL data, which ends inside the app's SPP wrapper. Use the app's")
+        print("    own logcat (tools/parse_gaia_logcat.py) for the GAIA bytes.")
 
 
 def main():
@@ -207,9 +212,8 @@ def main():
     if not files:
         print(__doc__)
         return
-    acc = []
     for p in files:
-        analyze(p, type("A", (), {})(), acc)
+        analyze(p, type("A", (), {})())
 
 
 if __name__ == "__main__":

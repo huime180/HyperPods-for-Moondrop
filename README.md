@@ -13,7 +13,7 @@
 
 | 项 | 状态 |
 |---|---|
-| 单元测试 | ✅ CI 通过，28 用例（协议帧构造 13 + 电量解析 15），含「单设备电量左右耳都显示」的回归用例 |
+| 单元测试 | ✅ CI 通过，29 用例（协议帧构造 14 + 电量解析 15），含「单设备电量左右耳都显示」的回归用例与官方 App logcat 原样字节用例 |
 | 编译 | ✅ CI `:app:assembleDebug` / `assembleRelease` 通过（AGP 8.13 / Kotlin 2.2.20 / JDK 17） |
 | APK | ✅ GitHub Actions 产出 `app-debug.apk`（可直接安装）与 `app-release-unsigned.apk`（需自行签名） |
 | 装机 | ✅ 已用 `pm install` 装到目标平板（Xiaomi Pad 8 Pro / Android 17 / HyperOS 4.0） |
@@ -71,7 +71,7 @@ HyperOS 的「融合设备中心」「超级岛」「蓝牙设置页」原生只
 | **降噪（三条 ANC 路径）** | 自动从能力位图选路径：AudioCuration(8) > ANC V2(32) > ANC V1(2)；每型号独立映射表 | 协议层已实现；GA2 / 太空漫游2 / PUDDING / EDGE 映射有上游实测依据 |
 | **增益（DAC_GAIN 0x0F）** | `DcProfile.gainMap`：低/中/高 → 设备码；GA2 与太空漫游2 为反向映射 | 已实现 |
 | **指示灯（LED 0x13）** | `DcProfile.hasLed`；0/1 开关 | 已实现（PUDDING 有上游实测） |
-| **提示音开关与音量（VOICE 0x0E）** | 默认按水月雨自家开关惯例 GET=1 / SET=2；可在档案里逐设备覆盖命令号 | ⚠ **命令号未真机证实**（见下文） |
+| **提示音开关与音量（VOICE 0x0E）** | ✅ 命令号与 payload 已由**官方 App 自身 gaiaclient 的 logcat** 实机确认：GET=cmd 1 / SET=cmd 2，payload(V2)=`[enabled, volume, index]`，**音量是 0..100 百分比**（没有独立的音量命令）；写入必须一次给全三字节 | 命令与 payload **已确认**；`index` 语义未知，且本模块自身尚未真机跑通 |
 | **LHDC 开关（CODEC_TYPE 0x10）** | cmd 5 读 / cmd 6 写（payload `01`/`00`）；同时保留 LC3、LDAC 构造器 | 帧已由单测锁定；出厂默认 LHDC 关闭（上游实测当前活动编码为 AAC） |
 | **双设备连接（ONEBRINGTWO 0x14）** | cmd 1/2 状态、3/4 超时、5/6 设备列表、7 断开单台 | 命令号有 EDGE 真机证据；写入/断开需双机实测 |
 | **低延迟模式** | **这是 HyperOS 系统侧功能，不是 GAIA 命令**；已接通 UI → `ControlBridge` → `com.android.bluetooth`（先反射厂商直通方法，否则走 A2DP codec `getCodecStatus`/`setCodecConfigPreference` 兜底）→ 回 `LOW_LATENCY_CHANGED` | 已实现，**未真机验证**（见第六节） |
@@ -196,7 +196,7 @@ app/src/test/java/.../core/                # GaiaProtocolTest / BatteryCodecTest
 | 协议核心（线格式、机型档案、电量、切帧、9ECA） | `core/*` | ✅ 已实现 |
 | 协议客户端 | `pods/MoondropLink.kt`、`PodSnapshot.kt` | ✅ 已实现 |
 | **应用侧跨进程控制桥** | `pods/ControlBridge.kt` + manifest 里的 `ControlReceiver` | ✅ 已实现；**未真机验证**（低延迟路径见下） |
-| 单元测试 | `app/src/test/.../core/GaiaProtocolTest.kt`、`BatteryCodecTest.kt` | ✅ 已实现（28 个用例：GaiaProtocolTest 13 + BatteryCodecTest 15，逐字节锁定帧与电量回归） |
+| 单元测试 | `app/src/test/.../core/GaiaProtocolTest.kt`、`BatteryCodecTest.kt` | ✅ 已实现（29 个用例：GaiaProtocolTest 14 + BatteryCodecTest 15，逐字节锁定帧与电量回归，含官方 App logcat 原样字节） |
 | Xposed 入口 / 四进程 hook | `hook/*` | ✅ 已实现，**未真机验证** |
 | Compose / Miuix UI | `ui/*`、`MainActivity.kt` | ✅ 已实现，**未真机验证** |
 | 字符串资源 | `res/values/strings.xml`、`res/values-zh-rCN/strings.xml` | ✅ 已实现 |
@@ -240,12 +240,13 @@ LHDC / LDAC / aptX-adaptive / LC3 / AAC 的顺序挑候选，用 `setCodecConfig
 
 > 接线桥依赖反射与系统隐藏 API，属「已实现、未真机验证」；核心协议与帧构造都有单测覆盖。
 
-### 构建状态（非常重要）
+### 构建与验证状态（非常重要）
 
-* **本文档作者未在本机构建过 APK**：本次工作环境**没有 JDK、没有 Android SDK、没有网络**，无法执行 Gradle；
-  仓库中也不含任何 APK 产物；CI（GitHub Actions）的编译状态与产物**不由本文档断言**。
-* **本模块没有任何真机测试结论**（这是最重要的那句话）。
-* 所有「实测」均指**上游项目**（FxxkMoondrop / moondrop-link-desktop / PuddingPods）在真机上取得的结论。
+* 构建 / 装机（CI 通过、APK 产出、已装机到 Xiaomi Pad 8 Pro）见本文开头的
+  **「构建状态（1.0.0）」**小节；本文档作者本机无 JDK / SDK / 网络，未在本机执行 Gradle。
+* **本模块没有任何真机功能验证结论**（这是最重要的那句话）。
+* 所有「实测」均指**上游项目**（FxxkMoondrop / moondrop-link-desktop / PuddingPods）或
+  **官方 App 自身 logcat**（2026-09-14）取得的结论，不是本模块自身的真机运行结果。
 * 构建与验证步骤见 [BUILD.md](BUILD.md)。
 
 ---
@@ -254,18 +255,18 @@ LHDC / LDAC / aptX-adaptive / LC3 / AAC 的顺序挑候选，用 `setCodecConfig
 
 | # | 项目 | 现状 |
 |---|---|---|
-| 1 | **提示音开关 / 音量（feature 0x0E）的命令号** | 官方 App 反编译数据只保留了 feature id，命令号未保留。默认按水月雨自家开关惯例 GET=1 / SET=2，**未实测**；已留逐设备命令号覆盖入口 |
+| 1 | 提示音 `index` 字段与「本模块自身」的实机表现 | ✅ 命令号（GET=cmd 1 / SET=cmd 2）与 payload `[enabled, volume(0..100), index]` 已由**官方 App logcat 实机确认**（写入必须一次给全三字节）。**仍未确认**：`index`（语言/主题）的取值语义；以及本模块自身尚未在真机上跑通提示音读写 |
 | 2 | `GET_SUPPORTED_FEATURES` 响应体的编码 | 上游两派读法互斥（`(featureId, version)` 字节对 vs 32-bit word 位图）；代码现在**两种都试**（`Gaia.parseSupportedFeaturesSmart()` 先按字节对、失败回退位图）。**具体固件用哪种、是否会被误判，仍未真机抓包确认** |
 | 3 | EDGE 的 ANC 读回值域 | 已按上游实测给 EDGE / EDGE2 补上 `getMap = [0,1,2]`（SET 仍是位掩码 `1/2/4`，GET 是 0-based `0..2`）；**该参数本身仍未真机复核** |
 | 4 | GAIA 版本探测 | 连接流程现在会先发 `00 0A 03 00`（`Gaia.getApiVersion()`）再探测能力；**探测结果的解析与用途未真机确认** |
 | 5 | 9ECA 私有协议 | `SrcProtocol.kt` 已实现帧构造与解析，但**未接线、未真机验证**（上游 FxxkMoondrop 亦标注未实机验证） |
-| 6 | LHDC 开关的实际效果 | 帧格式已由单测锁定；出厂默认 LHDC 关闭（上游实测当前活动编码为 AAC），开启后是否稳定协商**未实测** |
+| 6 | LHDC 开关的实际效果 | 帧格式已由单测锁定，且官方 App logcat 实机打印出「关闭 LHDC」= `00 1D 20 06 00`（feature `0x10`/cmd 6/payload `00`）作为旁证；出厂默认 LHDC 关闭（上游实测当前活动编码为 AAC），开启后是否稳定协商**未实测** |
 | 7 | 低延迟模式 | 已实现完整链路（`ControlBridge` → `com.android.bluetooth` 的反射桥 + A2DP codec 兜底 + `LOW_LATENCY_CHANGED` 回包），但**从未在真机验证**，隐藏 API 可能不可用 |
 | 8 | 13 款「推断」机型 | 芯片级推断，协议可自动识别但未逐型跑通 |
 | 9 | 双设备连接的写入与断开单台 | moondrop-link 已读取验证；**写入/断开需双机场景实测**（上游原文） |
 | 10 | 系统集成层（通知 / 超级岛 / 设备卡 / Settings 伪装 / 跨进程控制桥） | 源码已就位并已接线，但**从未在真机上运行过** |
 | 11 | `SettingsHeadsetHook` 的状态注入签名 | `MiuiHeadsetFragment#updateAtUiInfo / updateAncUi / refreshStatus` 的真实签名与字段含义按 OppoPods 在 HyperOS 上的用法调用，需实机核对；`MiuiHeadsetBattery` 电量控件注入未实现 |
-| 12 | EDGE 增益映射、`promptVolumeMax = 15` | 均无实测依据（推断值） |
+| 12 | EDGE 增益映射 | 档案为恒等 `[0,1,2]`，**无实测依据**（推断值）。提示音音量量程已确认为 100（官方 App logcat） |
 
 ---
 

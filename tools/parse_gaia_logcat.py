@@ -70,6 +70,15 @@ def main():
             m = re.search(r"onReceiveGaiaPacket: received = (\[[^\]]*\])", line)
             if m:
                 rows.append((ts, "bud->app", "RECV", bytearr(m.group(1))))
+        # de-duplicate: the app logs each received frame twice (array + hex form)
+        ded, seen = [], set()
+        for r in rows:
+            k = (r[0], r[1], r[3])
+            if k in seen:
+                continue
+            seen.add(k)
+            ded.append(r)
+        rows = ded
         print("\n" + "=" * 108)
         print("=== %s   (%d GAIA frames)" % (path, len(rows)))
         print("  %-12s %-8s %-6s %-12s %-16s %-12s %-4s  %-28s %s"
@@ -81,6 +90,10 @@ def main():
             if not dec:
                 continue
             vend, f, t, c, pay = dec
+            if vend == 0x000A:      # GAIA V2 header layout -> not a V3 feature
+                print("  %-12s %-8s %-6s 0x%04X  GAIA-V2 (vendor 0x000A, V2 layout)      %s"
+                      % (ts, d, kind, vend, fr.hex(" ")))
+                continue
             spp = raw_send.get(ts, b"") if kind == "SEND" else b""
             print("  %-12s %-8s %-6s 0x%04X       %-16s %-12s %-4d  %-28s %s"
                   % (ts, d, kind, vend, "%d/%s" % (f, FEATURES.get(f, "?")),

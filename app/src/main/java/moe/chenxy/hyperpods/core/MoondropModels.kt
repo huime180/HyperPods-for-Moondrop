@@ -268,9 +268,18 @@ object MoondropModels {
                 hasGain = true, gainMap = intArrayOf(0, 1, 2),
                 gainLabels = listOf("低", "中", "高"), hasLed = true,
             ),
-            features = FeatureProfile(lhdc = true, promptTone = false, dualConnection = false),
-            note = "PuddingPods 协议文档 + FxxkMoondrop 实测：5 档 ANC、三路电量（含盒）、" +
-                "增益 0/1/2、指示灯 0/1。兼容 HyperOS Device ID 01010607。",
+            features = FeatureProfile(
+                lhdc = true, promptTone = true, promptVolume = true,
+                dualConnection = true, lowLatency = true,
+            ),
+            note = "✅ 2026-09-14 真机抓包确认（84:D9:27:18:6F:2A, FW 3.5.6）：" +
+                "走 RFCOMM/SPP over BR/EDR（**不是** BLE GATT），GAIA 帧前有 4 字节 SPP 头 " +
+                "`FF 04 00 <n>`；受支持能力 = {0,1,5,13,14,15,16,19,20,22,32}；" +
+                "电量类型仅 {1=左,2=右}（无 type 0，充电盒报 0xFF=离线）；" +
+                "ANC_V2 cmd3 回 00；增益 feature15 回 00；指示灯 feature19 回 01；" +
+                "feature20 双设备连接可用（cmd1 回 00）；feature14 提示音可用；" +
+                "feature16 LHDC 可用（`00 1D 20 06 00` 实测关闭后编码由 LHDCv5 变 AAC）。" +
+                "兼容 HyperOS Device ID 01010607。",
         ),
 
         MoondropModel(

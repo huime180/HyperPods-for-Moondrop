@@ -368,6 +368,35 @@ object Gaia {
 
     val EMPTY: ByteArray = ByteArray(0)
 
+    // ============================================================
+    // RFCOMM / SPP 传输封装
+    //
+    // 实测（布丁 PUDDING，官方 App logcat 2026-09-14）：App→耳机 的 GAIA 帧外面还有一层
+    // 官方 TransportProtocol 的 RFCOMM 传输头：
+    //     FF | Version(0x04) | Flags(0x00) | Length
+    //   Length = PDU 中 **4 字节 GAIA 头之后的 payload 字节数**，即 pdu.size - 4。
+    //   实例：`SendingThread: sendData: bytes = [-1,4,0,3, 0,29,28,2,1,20,1]`
+    //        = FF 04 00 03 | 00 1D 1C 02 01 14 01   （GAIA 帧 7 字节 = 4 + 3）
+    //
+    // 另一方面 FxxkMoondrop 对布丁是**直接发裸 PDU** 且可工作，设备对响应还会"裸 PDU + FF 帧"双发。
+    // 因此这里两种都支持，由 MoondropLink 在连接时探测并记忆（见 probeRfcommFraming）。
+    // ============================================================
+    const val RFCOMM_SOF = 0xFF
+    const val RFCOMM_VERSION = 0x04
+    const val RFCOMM_HEADER_SIZE = 4
+
+    /** 给 GAIA PDU 套上官方 RFCOMM 传输头：`FF 04 00 <len>`。 */
+    fun wrapRfcomm(pdu: ByteArray): ByteArray {
+        val len = (pdu.size - RFCOMM_HEADER_SIZE).coerceAtLeast(0)
+        val out = ByteArray(RFCOMM_HEADER_SIZE + pdu.size)
+        out[0] = RFCOMM_SOF.toByte()
+        out[1] = RFCOMM_VERSION.toByte()
+        out[2] = 0x00
+        out[3] = (len and 0xFF).toByte()
+        System.arraycopy(pdu, 0, out, RFCOMM_HEADER_SIZE, pdu.size)
+        return out
+    }
+
     fun hex(bytes: ByteArray?): String {
         if (bytes == null || bytes.isEmpty()) return ""
         val sb = StringBuilder(bytes.size * 3)

@@ -2,9 +2,9 @@
 
 > 本文说明如何编译、测试、打包与安装本模块。
 >
-> ⚠ **诚实声明**：编写本文档的环境**没有 JDK、没有 Android SDK、也没有网络**，
-> 因此本文的命令**没有被实际执行过**；仓库中不含 APK 产物，CI 的编译状态与产物不由本文档断言，
-> 本模块也**没有任何真机测试结论**。
+> ⚠ **诚实声明**：编写本文档的环境**没有 JDK、没有 Android SDK、也没有网络**，因此本文的命令**没有被本文档作者实际执行过**；
+> 但 CI（GitHub Actions）已通过单测与编译并产出 APK，且 `app-debug.apk` 已装机（见 [README.md](README.md) 的「构建状态（1.0.0）」小节）。
+> 仓库本身不含 APK 产物；本模块**没有任何真机功能验证结论**。
 > 下面的内容全部来自对 `app/build.gradle.kts`、`gradle/libs.versions.toml`、
 > `gradle/wrapper/gradle-wrapper.properties` 与 `.github/workflows/build.yml` 的逐行核对。
 
@@ -80,11 +80,11 @@ Android Studio：直接 `Open` 仓库根目录 → 等待 Gradle Sync → 选择
 
 报告位置（HTML）：`app/build/reports/tests/testDebugUnitTest/index.html`。
 
-测试内容（`app/src/test/java/moe/chenxy/hyperpods/core/`，共 **28** 个用例，纯 JVM、不依赖 Android）：
+测试内容（`app/src/test/java/moe/chenxy/hyperpods/core/`，共 **29** 个用例，纯 JVM、不依赖 Android）：
 
 | 测试类 | 用例数 | 覆盖 |
 |---|---:|---|
-| `GaiaProtocolTest` | 13 | 电量/ANC V2/双设备连接/LHDC/增益/指示灯/提示音/版本探测/注册通知帧的**逐字节**期望值；响应帧解析；能力位图解析与 ANC 路径选择；垃圾帧返回 null；位图截断检测 |
+| `GaiaProtocolTest` | 14 | 电量/ANC V2/双设备连接/LHDC/增益/指示灯/提示音/版本探测/注册通知帧的**逐字节**期望值（提示音断言官方 App logcat 的原样字节 `data=[1,20,1]` / `data=[0,82,1]`）；提示音三字段回包解析；响应帧解析；能力位图解析与 ANC 路径选择；垃圾帧返回 null；位图截断检测 |
 | `BatteryCodecTest` | 15 | 「右耳电量不显示」修复的完整回归：单设备 type 0 左右耳都显示、分体值优先、单包缺项不清零、系统广播兜底左右都给、未知 type 不位移、数量前缀变体、255 丢弃、非法值裁剪 |
 
 ---
@@ -238,5 +238,7 @@ $ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs HyperPods-for-Mo
    （连接/控制命令下发、电量写回系统蓝牙栈、通知、设置页回显、低延迟转发）；仍有若干
    「已实现但未接线」的能力（空间音频/头动追踪、9ECA、LC3/LDAC、充电位解析），构建不会报错，
    但功能不会生效；清单见 [README.md](README.md) 第六节。
-7. 提示音（feature `0x0E`）的命令号**未真机证实**，测试只锁定「默认 GET=1/SET=2」的字节，
-   不代表设备行为（见 [PROTOCOL.md](PROTOCOL.md) 第 6 节）。
+7. 提示音（feature `0x0E`）的命令号与 payload **已由官方 App 自身 logcat 实机确认**
+   （GET=cmd 1 / SET=cmd 2，payload(V2)=`[enabled, volume(0..100), index]`，写入必须一次给全三字节），
+   单测断言的就是日志原样字节；但**本模块自身**尚未在真机上跑通提示音读写，`index` 语义也未确认
+   （见 [PROTOCOL.md](PROTOCOL.md) 第 6 节）。

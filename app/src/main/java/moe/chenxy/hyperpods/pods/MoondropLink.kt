@@ -69,6 +69,12 @@ object MoondropLink {
     @Volatile private var device: BluetoothDevice? = null
     @Volatile private var model: MoondropModel = MoondropModels.FALLBACK
     @Volatile private var useRfcomm = false
+    /**
+     * RFCOMM 上是否给 GAIA 帧套官方传输头（`FF 04 00 <len>`）。
+     * 官方 App 实测是套的，FxxkMoondrop 发裸 PDU 也能工作，故连接时探测并记忆。
+     */
+    @Volatile private var rfcommUsesHeader = true
+    @Volatile private var rfcommFramingProbed = false
 
     // BLE
     private var gatt: BluetoothGatt? = null
@@ -102,6 +108,10 @@ object MoondropLink {
 
     // 每个 feature 只保留一个等待者，避免并发请求互相覆盖（GAIA 无序列号）
     private val responses = HashMap<Int, java.util.concurrent.CompletableFuture<ByteArray>>()
+
+    /** 版本探测响应的伪 feature key（真实 feature 非负，不会冲突） */
+    private const val PROBE_FEATURE_KEY = -1
+    private const val PREF_RFCOMM_FRAMING = "rfcomm_framing"
 
     private val ANC_TIMEOUT_MS = 1500L
     private val CMD_TIMEOUT_MS = 2000L
@@ -336,7 +346,8 @@ object MoondropLink {
             writeLock.withLock {
                 try {
                     if (useRfcomm) {
-                        socket?.outputStream?.apply { write(pkt); flush() }
+                        val onWire = if (rfcommUsesHeader) Gaia.wrapRfcomm(pkt) else pkt
+                        socket?.outputStream?.apply { write(onWire); flush() }
                     } else {
                         val g = gatt ?: return@withLock
                         val c = cmdChar ?: return@withLock
@@ -366,8 +377,11 @@ object MoondropLink {
      * 而不是 `withTimeoutOrNull { fut.get() }` —— 后者无法中断阻塞中的 get()。
      */
     private suspend fun request(pkt: ByteArray, timeoutMs: Long = CMD_TIMEOUT_MS): ByteArray? {
-        val f = Gaia.parse(pkt) ?: return null
-        val key = f.feature
+        // ⚠ 版本探测包走 vendor 0x000A，Gaia.parse 只认 0x001D 会返回 null，
+        //   所以必须先判探测包，再走常规解析，否则探测请求根本发不出去。
+        val isVersionProbe = pkt.size >= 2 &&
+            (pkt[0].toInt() and 0xFF) == 0x00 && (pkt[1].toInt() and 0xFF) == 0x0A
+        val key = if (isVersionProbe) PROBE_FEATURE_KEY else (Gaia.parse(pkt)?.feature ?: return null)
         val fut = java.util.concurrent.CompletableFuture<ByteArray>()
         responses[key] = fut
         write(pkt)
@@ -385,6 +399,16 @@ object MoondropLink {
     }
 
     private fun onPdu(pdu: ByteArray) {
+        // GAIA 版本探测用的是 V1/V2 包（vendor 0x000A），Gaia.parse 只认 0x001D，
+        // 因此这里单独识别，用于 RFCOMM 封装的探测。
+        if (pdu.size >= 4) {
+            val vendor = ((pdu[0].toInt() and 0xFF) shl 8) or (pdu[1].toInt() and 0xFF)
+            if (vendor == Gaia.VENDOR_CSR) {
+                emit(PodEvent.Frame("RX", Gaia.hex(pdu), "GAIA version response (vendor 0x000A)"))
+                responses.remove(PROBE_FEATURE_KEY)?.complete(pdu)
+                return
+            }
+        }
         val f = Gaia.parse(pdu) ?: return
         emit(PodEvent.Frame("RX", Gaia.hex(pdu), "feature=${f.feature} type=${f.type} cmd=${f.command}"))
         // 唤醒等待者
@@ -403,13 +427,54 @@ object MoondropLink {
 
     private suspend fun afterConnected() {
         emitState()
-        // GAIA 版本探测：设备 GAIA 版本为 3 时，功能命令才走 vendor 0x001D。
-        // 真机确认必须先发 `00 0A 03 00`（V1/V2 包，vendor 0x000A）。
-        runCatching { request(Gaia.getApiVersion(), ANC_TIMEOUT_MS) }
+        // 先把 RFCOMM 封装和 GAIA 版本一起探测掉（版本探测帧同时用作封装探针）。
+        runCatching { probeRfcommFraming() }
         probeCapabilities()
         refreshAll()
         startPolling()
         emitState()
+    }
+
+    /**
+     * 探测 RFCOMM 上是否需要官方传输头（`FF 04 00 <len>`）。
+     *
+     * 官方 App 实测是套头的；另有实现对布丁直接发裸 PDU 也能工作。两者都试一遍，
+     * 结果写入 prefs，后续连接直接复用，避免每次连接都多花一次超时。
+     * 探测用的 `00 0A 03 00` 同时就是 GAIA 版本探测帧（设备 GAIA v3 才走 vendor 0x001D）。
+     */
+    private suspend fun probeRfcommFraming() {
+        val ctx = appContext
+        val pref = ctx?.getSharedPreferences("cfg", Context.MODE_PRIVATE)
+        val saved = pref?.getInt(PREF_RFCOMM_FRAMING, -1) ?: -1
+        if (!useRfcomm) {
+            // BLE：无封装问题，仅发版本探测
+            runCatching { request(Gaia.getApiVersion(), ANC_TIMEOUT_MS) }
+            return
+        }
+        if (saved == 0 || saved == 1) {
+            rfcommUsesHeader = saved == 1
+            rfcommFramingProbed = true
+            request(Gaia.getApiVersion(), ANC_TIMEOUT_MS)
+            Log.i(TAG, "RFCOMM framing (cached): header=$rfcommUsesHeader")
+            return
+        }
+        rfcommUsesHeader = true
+        if (request(Gaia.getApiVersion(), 1200) != null) {
+            rfcommFramingProbed = true
+            pref?.edit()?.putInt(PREF_RFCOMM_FRAMING, 1)?.apply()
+            Log.i(TAG, "RFCOMM framing probed: WITH FF 04 00 header")
+            return
+        }
+        rfcommUsesHeader = false
+        if (request(Gaia.getApiVersion(), 1200) != null) {
+            rfcommFramingProbed = true
+            pref?.edit()?.putInt(PREF_RFCOMM_FRAMING, 0)?.apply()
+            Log.i(TAG, "RFCOMM framing probed: BARE PDU")
+        } else {
+            // 都没回应：保持官方形态，后续靠正常请求自愈
+            rfcommUsesHeader = true
+            Log.w(TAG, "RFCOMM framing probe inconclusive; keeping FF header")
+        }
     }
 
     private suspend fun probeCapabilities() {
@@ -418,12 +483,22 @@ object MoondropLink {
         var guard = 0
         while (guard++ < 4) {
             val p = request(Gaia.command(Gaia.F_BASIC, cmd), ANC_TIMEOUT_MS) ?: break
-            // 位图分页：payload[0] bit0 = 还有下一页
-            val more = (p.isNotEmpty() && (p[0].toInt() and 0x01) != 0)
-            val body = if (p.isNotEmpty()) p.copyOfRange(1, p.size) else p
-            feats.addAll(Gaia.parseSupportedFeaturesSmart(body))
-            if (!more) break
-            cmd = Gaia.C_BASIC_GET_SUPPORTED_FEATURES_NEXT
+            // 实测格式（Pudding 真机，官方 App logcat）：
+            //   payload = [moreFlag:1][featureId:1][version:1]...
+            //   例：00 | 00 02 | 01 01 | 05 01 | 0D 01 | 0E 01 | 0F 01 | 10 01 | 13 01 | 14 01 | 16 01 | 20 01
+            //   → features {0,1,5,13,14,15,16,19,20,22,32}
+            // ⚠ 注意 moreFlag 属于**同一份 payload**，不能再在别处剥一次，
+            //   否则 feature/version 会整体错位一格（曾经的能力探测错误）。
+            val (more, entries) = Gaia.parseFeatureEntries(p)
+            if (entries.isNotEmpty()) {
+                feats.addAll(entries.map { it.feature })
+                if (!more) break
+                cmd = Gaia.C_BASIC_GET_SUPPORTED_FEATURES_NEXT
+            } else {
+                // 回退：老固件的 32-bit 位图形式（无分页标志）
+                feats.addAll(Gaia.parseSupportedFeatures(p))
+                break
+            }
         }
 
         // 设备上报的电池类型（修复「右耳不显示」的第一步）
