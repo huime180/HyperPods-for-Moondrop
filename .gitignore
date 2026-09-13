@@ -27,3 +27,6 @@ __pycache__/
 # 本地脚本（可能含凭据），绝不入库
 /_*.sh
 /_*.txt
+
+# CI 产物（可随时从 Actions 重新下载）
+/release/

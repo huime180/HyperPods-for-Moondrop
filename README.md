@@ -9,6 +9,19 @@
 
 ---
 
+## 构建状态（1.0.0）
+
+| 项 | 状态 |
+|---|---|
+| 单元测试 | ✅ CI 通过，28 用例（协议帧构造 13 + 电量解析 15），含「单设备电量左右耳都显示」的回归用例 |
+| 编译 | ✅ CI `:app:assembleDebug` / `assembleRelease` 通过（AGP 8.13 / Kotlin 2.2.20 / JDK 17） |
+| APK | ✅ GitHub Actions 产出 `app-debug.apk`（可直接安装）与 `app-release-unsigned.apk`（需自行签名） |
+| 装机 | ✅ 已用 `pm install` 装到目标平板（Xiaomi Pad 8 Pro / Android 17 / HyperOS 4.0） |
+| 真机功能验证 | ❌ **尚未开始**：模块需在 LSPosed 管理器中勾选启用并重启后才生效，本文档不声称任何功能已在真机上跑通 |
+
+> ⚠️ 首次启用建议先确认可用于救砖（LSPosed 安全模式 / 音量键组合）。所有 hook 均已 `runCatching` 兜底，
+> 单个系统类缺失只会跳过该 hook 并打日志，不会让进程崩溃。
+
 ## 一、这是什么
 
 HyperOS 的「融合设备中心」「超级岛」「蓝牙设置页」原生只认识小米/部分合作品牌耳机。
