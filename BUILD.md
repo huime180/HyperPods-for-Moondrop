@@ -14,10 +14,10 @@
 
 | 项 | 要求 | 依据 |
 |---|---|---|
-| JDK | **17**（GitHub Actions 用 temurin 17） | `compileOptions` 与 `kotlin { jvmToolchain(17) }` |
-| Android SDK | `compileSdk = 36` 的平台 + 对应 build-tools；`ANDROID_HOME` / `local.properties` 指向 SDK | `app/build.gradle.kts` |
-| Gradle | **8.13**（wrapper 会自动下载 `gradle-8.13-bin.zip`） | `gradle/wrapper/gradle-wrapper.properties` |
-| Android Studio | 能打开 AGP 8.13 项目的版本即可（建议较新版本） | — |
+| JDK | **17**（GitHub Actions 用 temurin 17；AGP 9 要求 JDK 17+） | `java { toolchain }` 与 `kotlin { jvmToolchain(17) }` |
+| Android SDK | `compileSdk = 37` 的平台 + build-tools 36.0.0；`ANDROID_HOME` / `local.properties` 指向 SDK。**compileSdk 必须是 37**：Miuix 0.9.3 的 AAR metadata 声明 `minCompileSdk=37` | `app/build.gradle.kts`、`miuix-*-android-0.9.3.aar` 内的 `aar-metadata.properties` |
+| Gradle | **9.4.1**（wrapper 会自动下载 `gradle-9.4.1-bin.zip`；AGP 9.1 要求 Gradle >= 9.3.1） | `gradle/wrapper/gradle-wrapper.properties`、AGP `VersionCheckPlugin` 的 `GRADLE_MIN_VERSION` |
+| Android Studio | 能打开 AGP 9.1 项目的版本即可（建议较新版本） | — |
 | 网络 | 需要访问 `google()`、`mavenCentral()`、`https://api.xposed.info/`、`https://s01.oss.sonatype.org/content/repositories/releases/`、`https://jitpack.io` | `settings.gradle.kts` |
 | NDK | **不需要**。本项目**没有任何 native 代码**：上游 HyperPods 的 native L2CAP patch 被有意移除（它只为放行 Apple 的 L2CAP 模式，对 GAIA over BLE/SPP 无用） | 无 `externalNativeBuild`、无 `jniLibs` |
 
@@ -25,22 +25,26 @@
 
 | 组件 | 版本 |
 |---|---|
-| Android Gradle Plugin | 8.13.0 |
-| Kotlin | 2.2.20 |
-| Gradle | 8.13 |
-| Compose 插件（`org.jetbrains.compose`） | 1.9.0 |
+| Android Gradle Plugin | 9.1.0（自带 Kotlin 编译支持，不再 apply `org.jetbrains.kotlin.android`） |
+| Kotlin（KGP，由根 `build.gradle.kts` 的 buildscript classpath 提升） | 2.3.20 |
+| Gradle | 9.4.1 |
+| Compose | **androidx compose**：`androidx.compose:compose-bom` 2025.05.00 + `ui` / `foundation` / `ui-tooling(-preview)`；不再使用 `org.jetbrains.compose` 插件与 `compose.*` 访问器 |
 | **libxposed API** | **102.0.0（`compileOnly`，运行时由 LSPosed / Vector 注入）** |
-| Miuix（`top.yukonga.miuix.kmp:miuix`） | 0.5.1 |
-| haze | 1.6.10 |
+| Miuix（**拆分产物**） | 0.9.3：`miuix-ui-android`、`miuix-preference-android`、`miuix-icons-android`、`miuix-navigation3-ui-android` |
+| Navigation 3 | `androidx.navigation3:navigation3-runtime` 1.1.0-rc01 |
 | androidx core-ktx | 1.17.0 |
-| androidx activity-compose | 1.11.0 |
+| androidx activity-compose | 1.13.0 |
 | kotlinx-serialization-json | 1.9.0 |
 | JUnit | 4.13.2 |
-| minSdk / targetSdk / compileSdk | 35 / 36 / 36 |
+| minSdk / targetSdk / compileSdk | 35 / 36 / 37 |
 | applicationId / namespace | `moe.chenxy.hyperpods.moondrop` / `moe.chenxy.hyperpods` |
 
-> `libs.versions.toml` 里还声明了 `lsplugin-apksign` / `lsplugin-resopt` / `agp-lib` /
-> `androidx-window` 等别名，但 `app/build.gradle.kts` **没有引用**它们（未 apply、未进依赖）。
+> `libs.versions.toml` 里还声明了 `lsplugin-apksign` / `lsplugin-resopt` / `agp-lib` 等别名，
+> 但 `app/build.gradle.kts` **没有引用**它们（未 apply、未进依赖）。
+>
+> Miuix 0.9.3 只有**拆分产物**里才有 `preference.*` / `icon.*` / `overlay.OverlayDialog` 这些组件；
+> 早期 pin 的聚合产物 `top.yukonga.miuix.kmp:miuix:0.5.1` 解析不到它们（CI 实测），
+> 因此 UI 一度退回普通 Compose。现在依赖与版式都与 `_refs/OppoPods` 对齐。
 > 打包时保留 `META-INF/xposed/*`（`packaging.resources.merges`），因为 `module.prop` /
 > `scope.list` / `java_init.list` 必须进 APK。
 

@@ -3,6 +3,11 @@
 <resources>
     <string name="app_name">HyperPods for Moondrop</string>
     <string name="about">关于</string>
+    <string name="back">返回</string>
+    <string name="cancel">取消</string>
+
+    <!-- 导航 / 页面 -->
+    <string name="settings_title">设置</string>
 
     <!-- 等待页 -->
     <string name="waiting_for_pod">等待水月雨耳机连接…</string>
@@ -42,7 +47,6 @@
     <string name="prompt_tone_title">提示音</string>
     <string name="prompt_tone_summary">连接或切换模式时的语音提示</string>
     <string name="prompt_volume_title">提示音音量</string>
-    <string name="prompt_volume_caption">提示音音量</string>
 
     <!-- 编码 / 连接功能 -->
     <string name="lhdc_title">LHDC 高清音频</string>
@@ -52,9 +56,38 @@
     <string name="low_latency_title">低延迟模式</string>
     <string name="low_latency_summary">由 HyperOS 系统蓝牙提供</string>
 
+    <!-- LHDC / 双设备连接互斥（PUDDING 固件实测不能同时开启） -->
+    <string name="conflict_lhdc_dual_title">LHDC 与双设备连接不能同时开启</string>
+    <string name="conflict_lhdc_dual_message_lhdc">开启 LHDC 会关闭双设备连接。</string>
+    <string name="conflict_lhdc_dual_message_dual">开启双设备连接会关闭 LHDC。</string>
+    <string name="conflict_switch">切换</string>
+
     <!-- 刷新 -->
     <string name="refresh">刷新</string>
     <string name="refresh_summary">重新读取耳机的全部状态</string>
+
+    <!-- 设置页 -->
+    <string name="theme_title">主题</string>
+    <string name="theme_follow_system">跟随系统</string>
+    <string name="theme_light">浅色</string>
+    <string name="theme_dark">深色</string>
+    <string name="settings_section_module">模块</string>
+    <string name="module_enable_title">启用模块</string>
+    <string name="module_enable_summary">关闭后不再接管蓝牙，恢复系统原生行为</string>
+    <string name="settings_section_notification">通知</string>
+    <string name="show_notification_title">连接通知</string>
+    <string name="show_notification_summary">耳机连接时显示通知</string>
+    <string name="show_strong_toast_title">超级岛提示</string>
+    <string name="show_strong_toast_summary">电量与模式变化时显示 HyperOS 强提示</string>
+    <string name="show_focus_island_title">焦点通知</string>
+    <string name="show_focus_island_summary">在 HyperOS 焦点通知里常驻耳机状态</string>
+    <string name="settings_section_model">设备型号</string>
+    <string name="model_auto_title">自动识别型号</string>
+    <string name="model_auto_summary">按蓝牙设备名匹配型号档案</string>
+    <string name="model_manual_title">手动指定型号</string>
+    <string name="settings_section_debug">调试</string>
+    <string name="debug_log_title">调试日志</string>
+    <string name="debug_log_summary">把 GAIA 收发帧写入 logcat 与调试页</string>
 
     <!-- 关于 -->
     <string name="about_version">版本 %1$s</string>

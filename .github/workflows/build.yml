@@ -22,6 +22,12 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Install Android SDK packages
+        # compileSdk 37 由 miuix 0.9.3 的 AAR metadata(minCompileSdk=37) 要求；
+        # 失败也不阻塞（AGP 自身会在需要时自动下载缺失组件）。
+        continue-on-error: true
+        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
+
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 

@@ -5,12 +5,13 @@
  * 架构：协议客户端跑在**本应用进程**，被注入的进程只做三件事：
  *   1) 感知连接（com.android.bluetooth      -> HeadsetStateDispatcher）
  *   2) 把电量写进系统蓝牙栈 / 汇报 MAC
- *   3) 渲染与注入 UI（SystemUI / 小米蓝牙 / 设置）
+ *   3) 渲染与注入 UI（SystemUI / 小米蓝牙 / 设置 / MiLink）
  * 进程之间只通过广播通信，全部 setPackage(...)（Android 14+ 丢弃隐式广播）。
  *
  * 入口类名必须与 app/src/main/resources/META-INF/xposed/java_init.list 中一致：
  *   moe.chenxy.hyperpods.hook.XposedEntry
- * 作用域见 scope.list：com.android.bluetooth / com.xiaomi.bluetooth / com.android.systemui / com.android.settings
+ * 作用域见 scope.list：com.android.bluetooth / com.milink.service / com.xiaomi.bluetooth /
+ *   com.android.systemui / com.android.settings
  *
  * 每个进程只注册自己那一个 HookContext；任何注册失败都只打日志，绝不抛给被注入进程。
  */
@@ -36,6 +37,7 @@ class XposedEntry : XposedModule() {
         /** 本模块应用包名（与 module.prop 的 id 一致）。 */
         val PKG_APP = BuildConfig.APPLICATION_ID
         const val PKG_BLUETOOTH = "com.android.bluetooth"
+        const val PKG_MILINK = "com.milink.service"
         const val PKG_XIAOMI_BLUETOOTH = "com.xiaomi.bluetooth"
         const val PKG_SYSTEMUI = "com.android.systemui"
         const val PKG_SETTINGS = "com.android.settings"
@@ -55,6 +57,7 @@ class XposedEntry : XposedModule() {
         when (packageName) {
             PKG_BLUETOOTH -> load("HeadsetStateDispatcher", HeadsetStateDispatcher, classLoader, param.packageName)
             PKG_SYSTEMUI -> load("SystemUIPluginHook", SystemUIPluginHook, classLoader, param.packageName)
+            PKG_MILINK -> load("MiLinkServiceHook", MiLinkServiceHook, classLoader, param.packageName)
             PKG_XIAOMI_BLUETOOTH -> load("MiBluetoothToastHook", MiBluetoothToastHook, classLoader, param.packageName)
             PKG_SETTINGS -> load("SettingsHeadsetHook", SettingsHeadsetHook, classLoader, param.packageName)
             else -> Log.d(TAG, "no hook registered for $packageName")
@@ -94,6 +97,7 @@ class XposedEntry : XposedModule() {
         when (packageName) {
             PKG_BLUETOOTH -> load("HeadsetStateDispatcher", HeadsetStateDispatcher, classLoader, processName)
             PKG_SYSTEMUI -> load("SystemUIPluginHook", SystemUIPluginHook, classLoader, processName)
+            PKG_MILINK -> load("MiLinkServiceHook", MiLinkServiceHook, classLoader, processName)
             PKG_XIAOMI_BLUETOOTH -> load("MiBluetoothToastHook", MiBluetoothToastHook, classLoader, processName)
             PKG_SETTINGS -> load("SettingsHeadsetHook", SettingsHeadsetHook, classLoader, processName)
             else -> Log.d(TAG, "no hook for $packageName")

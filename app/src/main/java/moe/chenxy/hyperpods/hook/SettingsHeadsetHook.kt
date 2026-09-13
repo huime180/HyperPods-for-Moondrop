@@ -21,12 +21,14 @@
  *      （方法不存在时静默跳过），payload 用 MIUI 约定的
  *      "<ancMode>|0100;0101;0102;0103;0200;0201|<l>,<r>,<case>|00"，
  *      电量 255 = 未知、`value or 128` = 充电中（与 core/PodSnapshot 的 BATTERY_UNKNOWN 语义一致）。
- *   5) 实时同步：注册 ANC_CHANGED / BATTERY_CHANGED / PODS_CONNECTED / PODS_DISCONNECTED 接收器，
- *      并在主线程每 3s 重新拉取 + 重新注入一次（页面存活期间），参考实现同样节奏。
+ *   5) 电量控件：com.android.settings.bluetooth.tws.MiuiHeadsetBattery 的电量环是**独立**于 fragment
+ *      状态注入渲染的（它订阅 MMA 服务回调后调 onBatteryChanged(int,int,int)）。真机没有 MMA 服务，
+ *      该回调永不到达，电量环会永远停在占位值；因此这里用 WeakHashMap 记住控件，主动喂三路电量。
+ *   6) 实时同步：注册 ANC_CHANGED / BATTERY_CHANGED / PODS_CONNECTED / PODS_DISCONNECTED 接收器，
+ *      并在主线程每 3s 重新拉取 + 重新注入 fragment 与电量控件（页面存活期间），参考实现同样节奏。
  *
  * ⚠ 所有分支**必须先确认是水月雨设备**（设备名经 core.MoondropModels.match 命中，
  *   或地址出现在本模块已知的水月雨地址集合里），非水月雨设备一律不碰。
- * ⚠ 未做的部分（见文件尾 TODO）：MiuiHeadsetBattery 电量控件的 onBatteryChanged 注入。
  */
 package moe.chenxy.hyperpods.hook
 
@@ -50,6 +52,9 @@ object SettingsHeadsetHook : HookContext() {
     private const val TAG = "HyperPods-Settings"
     private const val PKG_APP = BuildConfig.APPLICATION_ID
 
+    /** MiLink 进程：它的耳机面板读的是它自己进程内的运行时模型，必须单独喂状态。 */
+    private const val PKG_MILINK = "com.milink.service"
+
     /** PuddingPods 记录的水月雨兼容 HyperOS 内部 Device ID（对应四档 ANC 模板）。 */
     private const val FAKE_DEVICE_ID = "01010607"
     private const val FAKE_SUPPORT = "$FAKE_DEVICE_ID,000000000000000010000000"
@@ -60,6 +65,7 @@ object SettingsHeadsetHook : HookContext() {
     private const val CLS_FRAGMENT = "com.android.settings.bluetooth.MiuiHeadsetFragment"
     private const val CLS_PROXY = "com.android.bluetooth.ble.app.IMiuiHeadsetService\$Stub\$Proxy"
     private const val CLS_HEADSET_SERVICE = "com.android.bluetooth.ble.app.IMiuiHeadsetService"
+    private const val CLS_BATTERY = "com.android.settings.bluetooth.tws.MiuiHeadsetBattery"
 
     private const val EXTRA_DEVICE = "android.bluetooth.device.extra.DEVICE"
     private const val EXTRA_BT_ADDRESS = "bluetoothaddress"
@@ -75,6 +81,9 @@ object SettingsHeadsetHook : HookContext() {
     private val knownMoondropAddresses = LinkedHashSet<String>()
     private val headsetFragments = WeakHashMap<Any, Boolean>()
 
+    /** 已构造的 MiuiHeadsetBattery 电量控件 -> 它负责的设备（弱引用，页面销毁后自动释放）。 */
+    private val batteryViews = WeakHashMap<Any, BluetoothDevice>()
+
     private var context: Context? = null
     private var statusReceiver: BroadcastReceiver? = null
 
@@ -86,8 +95,9 @@ object SettingsHeadsetHook : HookContext() {
 
     /**
      * 当前打开的「水月雨耳机页」对应的设备地址。
-     * 只有非空时才允许放行**无参**代理调用（getDeviceInfo / isSupportAudioSwitch 在 HyperOS 上没有
-     * 设备参数，无法按参数判定），避免在别的蓝牙设备页面误伤。
+     * 用于兜底放行**完全没有设备参数**的代理调用（此时无法按参数判定），
+     * 避免在别的蓝牙设备页面上误伤。本 ROM 上 getDeviceInfo / isSupportAudioSwitch
+     * 实测都带一个 String 参数，走 isOursToken/地址比对分支，不再依赖这里的兜底。
      */
     private var activePageAddress: String? = null
 
@@ -105,6 +115,8 @@ object SettingsHeadsetHook : HookContext() {
             if (headsetFragments.keys.any { isMoondropFragment(it) }) {
                 requestAppStatus("settings-periodic")
                 updateFragments()
+                // 电量环自己要重喂一次：它不跟随 fragment 的状态注入。
+                updateBatteryViews()
                 refreshHandler.postDelayed(this, REFRESH_INTERVAL_MS)
             } else {
                 refreshLoopStarted = false
@@ -117,6 +129,7 @@ object SettingsHeadsetHook : HookContext() {
         hookActivityEntry()
         hookSupportChecks()
         hookServiceProxy()
+        hookBatteryView()
         hookFragmentState()
     }
 
@@ -129,6 +142,7 @@ object SettingsHeadsetHook : HookContext() {
         receiverRegistered = false
         context = null
         headsetFragments.clear()
+        batteryViews.clear()
     }
 
     // ── 1) 冒充身份：改写 intent + 强制 getter ────────────────────────────────
@@ -225,11 +239,12 @@ object SettingsHeadsetHook : HookContext() {
     // ── 3) AIDL 代理拦截 ─────────────────────────────────────────────────────
 
     private fun hookServiceProxy() {
-        // 返回值直通 FAKE_SUPPORT：checkSupport(BluetoothDevice) / getDeviceInfo()
+        // 返回值直通 FAKE_SUPPORT：checkSupport(BluetoothDevice) / getDeviceInfo(String)
         hookProxyStringResult("checkSupport", BluetoothDevice::class.java) { FAKE_SUPPORT }
-        hookProxyStringArgResult("getDeviceInfo") { FAKE_SUPPORT }
-        // 空间音频/音频切换开关：本模块不提供该能力，固定返回 "1"（与参考实现同形，待实机确认）
-        hookProxyStringArgResult("isSupportAudioSwitch") { "1" }
+        // ⚠ 本 ROM 实测签名是 getDeviceInfo(String): String / isSupportAudioSwitch(String): String。
+        //   早先这里没写 String::class.java，findMethod 找不到 0 参重载 -> 这两条 hook 一直是静默失效的。
+        hookProxyStringArgResult("getDeviceInfo", String::class.java) { FAKE_SUPPORT }
+        hookProxyStringArgResult("isSupportAudioSwitch", String::class.java) { "1" }
         hookProxyStringArgResult(
             "setCommonCommand", Int::class.java, String::class.java, BluetoothDevice::class.java
         ) { args ->
@@ -277,6 +292,7 @@ object SettingsHeadsetHook : HookContext() {
                 val device = args.firstOrNull { it is BluetoothDevice } as? BluetoothDevice
                 val addressArg = args.lastOrNull { it is String } as? String
                 val ours = isMoondropDevice(device) || isOursToken(addressArg) ||
+                    (activePageAddress != null && addressArg.equals(activePageAddress, ignoreCase = true)) ||
                     (device == null && addressArg == null && activePageAddress != null)
                 if (!ours) return@hookBefore
                 result = provide(args)
@@ -339,6 +355,43 @@ object SettingsHeadsetHook : HookContext() {
                 Log.i(TAG, "proxy $methodName handled address=${SystemApisUtils.deviceAddress(device)} uiIndex=$index")
             }
         }.onFailure { Log.w(TAG, "hook proxy command $methodName skipped", it) }
+    }
+
+    // ── 3b) 电量控件：MiuiHeadsetBattery（左右耳/充电盒电量环）─────────────────
+    //
+    // 参考实现里这一段是**独立**于 fragment 状态注入的：电量环由 MiuiHeadsetBattery 自己
+    // 订阅 MMA 服务回调后调用 onBatteryChanged(int,int,int) 刷新。真机没有 MMA 服务，
+    // 该回调永远不来，电量环就永远停在占位值，所以必须主动喂。
+    private fun hookBatteryView() {
+        runCatching {
+            val constructor = findConstructorByParamCount(CLS_BATTERY, 4)
+            hookConstructorAfter(constructor) {
+                val device = args.getOrNull(0) as? BluetoothDevice
+                registerStatusReceiver(args.getOrNull(1) as? Context)
+                Log.d(TAG, "$CLS_BATTERY.<init> device=${describe(device)} isMoondrop=${isMoondropDevice(device)}")
+                if (!isMoondropDevice(device)) return@hookConstructorAfter
+                val view = instance ?: return@hookConstructorAfter
+                batteryViews[view] = device ?: return@hookConstructorAfter
+                requestAppStatus("battery-init")
+                updateBatteryView(view)
+                Log.d(TAG, "$CLS_BATTERY registered address=${SystemApisUtils.deviceAddress(device)}")
+            }
+            Log.d(TAG, "hooked $CLS_BATTERY<init>/4")
+        }.onFailure { Log.w(TAG, "hook $CLS_BATTERY constructor skipped", it) }
+
+        // 没有 MMA 服务时系统会推一个空/失败回调把电量环刷回占位值：吞掉并重新注入。
+        runCatching {
+            val method = findMethod(CLS_BATTERY, "onBatteryChanged", String::class.java)
+            hookBefore(method) {
+                val view = instance ?: return@hookBefore
+                val device = batteryViews[view]
+                Log.d(TAG, "$CLS_BATTERY.onBatteryChanged(String) raw=${args.getOrNull(0)} device=${describe(device)}")
+                if (!isMoondropDevice(device)) return@hookBefore
+                result = null
+                updateBatteryView(view)
+            }
+            Log.d(TAG, "hooked $CLS_BATTERY#onBatteryChanged(String)")
+        }.onFailure { Log.w(TAG, "hook $CLS_BATTERY.onBatteryChanged(String) skipped", it) }
     }
 
     // ── 4) 片段状态注入 / 页面内操作回传 ─────────────────────────────────────
@@ -433,7 +486,8 @@ object SettingsHeadsetHook : HookContext() {
             .onFailure { Log.d(TAG, "updateAtUiInfo unavailable on $CLS_FRAGMENT", it) }
         runCatching { callMethod(fragment, "updateAncUi", settingsAncLevel(), false) }
             .onFailure { Log.d(TAG, "updateAncUi unavailable on $CLS_FRAGMENT", it) }
-        val address = currentAddress ?: fragmentAddress(fragment)
+        // 优先用 fragment 自己的 mDevice 地址；fragmentAddress 内部已回落到 currentAddress。
+        val address = fragmentAddress(fragment)
         if (address != null) {
             runCatching { callMethod(fragment, "refreshStatus", address, settingsRefreshPayload()) }
                 .onFailure { Log.d(TAG, "refreshStatus unavailable on $CLS_FRAGMENT", it) }
@@ -444,6 +498,25 @@ object SettingsHeadsetHook : HookContext() {
         headsetFragments.keys.toList().forEach { fragment ->
             if (isMoondropFragment(fragment)) injectFragmentStatus(fragment)
         }
+    }
+
+    private fun updateBatteryViews() {
+        batteryViews.keys.toList().forEach { view ->
+            runCatching { updateBatteryView(view) }
+                .onFailure { Log.w(TAG, "update battery view failed", it) }
+        }
+    }
+
+    /**
+     * 主动调用 MiuiHeadsetBattery#onBatteryChanged(int,int,int)（不传 String —— 那个重载
+     * 是我们用来「拦住系统空回调」的钩子，走它会被自己吞掉）。
+     * 三个 Int 就是我们三路电量的原始 HyperOS 编码：255 未知、`value or 128` 充电中。
+     */
+    private fun updateBatteryView(view: Any?) {
+        val values = batteryRaw
+        runCatching { callMethod(view, "onBatteryChanged", values[0], values[1], values[2]) }
+            .onSuccess { Log.d(TAG, "$CLS_BATTERY.onBatteryChanged(int,int,int) forced=${values.joinToString(",")}") }
+            .onFailure { Log.d(TAG, "$CLS_BATTERY.onBatteryChanged(int,int,int) unavailable", it) }
     }
 
     // ── 5) 与应用进程的广播桥 ────────────────────────────────────────────────
@@ -475,6 +548,7 @@ object SettingsHeadsetHook : HookContext() {
                         saveState(appContext)
                         requestAppStatus("pods-connected")
                         updateFragments()
+                        forwardToMiLink(received, "pods-connected")
                     }
                     HyperPodsAction.PODS_DISCONNECTED -> {
                         val address = received.getStringExtra(HyperPodsAction.EXTRA_MAC)
@@ -486,16 +560,20 @@ object SettingsHeadsetHook : HookContext() {
                         }
                         Log.d(TAG, "pods disconnected address=$address")
                         updateFragments()
+                        forwardToMiLink(received, "pods-disconnected")
                     }
                     HyperPodsAction.ANC_CHANGED -> {
                         currentAncUi = received.getIntExtra(HyperPodsAction.EXTRA_STATUS, currentAncUi)
                         saveState(appContext)
                         updateFragments()
+                        forwardToMiLink(received, "anc-changed")
                     }
                     HyperPodsAction.BATTERY_CHANGED -> {
                         batteryRaw = SystemApisUtils.readBatteryExtras(received)
                         saveState(appContext)
                         updateFragments()
+                        updateBatteryViews()
+                        forwardToMiLink(received, "battery-changed")
                     }
                 }
                 Log.d(TAG, "state $action address=$currentAddress ancUi=$currentAncUi battery=${settingsBatteryString()}")
@@ -528,6 +606,28 @@ object SettingsHeadsetHook : HookContext() {
             }.onFailure { Log.w(TAG, "request $action failed", it) }
         }
         Log.d(TAG, "requested app status reason=$reason")
+    }
+
+    /**
+     * 把刚收到的状态**原样**转发给 com.milink.service。
+     *
+     * 为什么需要：应用进程的 ControlBridge 只把 ANC_CHANGED / BATTERY_CHANGED 发给
+     * com.android.settings 与 com.xiaomi.bluetooth（见 pods/ControlBridge.kt 的 pushAnc/pushBattery），
+     * **没有发给 com.milink.service**，而 MiLinkServiceHook 正是靠这些广播更新它在 milink 进程里的缓存。
+     * 根治办法是在 ControlBridge 那两个 sendTo 的目标里加上 "com.milink.service"；
+     * 在不能改 pods/ 的前提下，这里由设置进程代转一份（动作名不变，MiLinkServiceHook 监听同样四个动作）。
+     */
+    private fun forwardToMiLink(source: Intent, reason: String) {
+        val ctx = context ?: return
+        runCatching {
+            val forward = Intent(source.action).apply {
+                setPackage(PKG_MILINK)
+                addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                source.extras?.let { putExtras(it) }
+            }
+            ctx.sendBroadcast(forward)
+            Log.d(TAG, "forwarded ${source.action} to $PKG_MILINK ($reason)")
+        }.onFailure { Log.w(TAG, "forward to $PKG_MILINK failed ($reason)", it) }
     }
 
     private fun sendAncSelect(uiIndex: Int) {
@@ -726,7 +826,8 @@ object SettingsHeadsetHook : HookContext() {
  *     （当前按 OppoPods 在 HyperOS 上的用法调用）。
  *  2. MIUI 四档模板的 changeAncMode 数值语义（1/2/3/4 与关/降噪/通透/抗风的对应关系）。
  *  3. updateAncUi 的档位串是否需要 "0300"/"0400"（抗风/自适应）。
- *  4. MiuiHeadsetBattery（tws 电量控件）的注入未实现：若系统页面电量环不跟随
- *     蓝牙栈电量显示，再补 hook com.android.settings.bluetooth.tws.MiuiHeadsetBattery
- *     构造函数 + onBatteryChanged(int,int,int)（参考 OppoPods hookBatteryView）。
+ *  4. MiuiHeadsetBattery（tws 电量控件）已按 OppoPods hookBatteryView 实现：
+ *     构造函数（4 参）后登记控件 + onBatteryChanged(String) 拦截 + onBatteryChanged(int,int,int) 主动注入。
+ *     若实机日志里 `hooked ...MiuiHeadsetBattery<init>/4` 缺失，说明该类名/构造参数个数与 ROM 不符，
+ *     需要照实机改名（同组件的另一个候选是 com.android.settings.bluetooth.MiuiHeadsetBattery）。
  */

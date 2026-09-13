@@ -54,7 +54,7 @@ private const val KEY_LAST_ADDRESS = "last_connected_address"
 /**
  * 订阅耳机状态，返回可直接用于组合的 [PodSnapshot]。
  *
- * 弹窗（[PopupActivity]）与详情页（[DetailScreen]）都用它，保证两条入口的状态口径一致：
+ * 弹窗（[PopupActivity]）与详情页（MainUI 的设备页）都用它，保证两条入口的状态口径一致：
  * 同一个 [MoondropLink] 多监听者列表 + 同一个 ControlBridge 转发器。
  */
 @Composable

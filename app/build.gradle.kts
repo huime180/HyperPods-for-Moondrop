@@ -1,15 +1,15 @@
 plugins {
     alias(libs.plugins.agp.app)
-    alias(libs.plugins.kotlin)
+    // AGP 9 自带 Kotlin（KGP 版本由根 build.gradle.kts 提升），因此不再 apply kotlin-android
     alias(libs.plugins.kotlinSerialization)
-    alias(libs.plugins.parcelize)
     alias(libs.plugins.compose.compiler)
-    alias(libs.plugins.jetbrains.compose)
 }
 
 android {
     namespace = "moe.chenxy.hyperpods"
-    compileSdk = 36
+    // Miuix 0.9.3 的 AAR metadata 声明 minCompileSdk=37，低于 37 会在
+    // CheckAarMetadata 阶段直接失败，所以必须跟着提到 37。
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "moe.chenxy.hyperpods.moondrop"
@@ -31,17 +31,9 @@ android {
         }
     }
 
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlin {
-        jvmToolchain(17)
-    }
-
     buildFeatures {
         buildConfig = true
+        compose = true
     }
 
     lint {
@@ -63,22 +55,39 @@ android {
     }
 }
 
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+kotlin {
+    jvmToolchain(17)
+}
+
 dependencies {
     implementation(libs.coreKtx)
     // libxposed API：仅编译期，运行时由 LSPosed / Vector 注入
     compileOnly(libs.libxposedApi)
 
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.yukonga.miuix)
-    implementation(libs.androidx.activity.compose)
-    implementation(libs.haze)
 
-    implementation(compose.runtime)
-    implementation(compose.foundation)
-    implementation(compose.ui)
-    implementation(compose.components.resources)
-    implementation(compose.preview)
-    debugImplementation(compose.uiTooling)
+    // Compose：统一用 androidx compose（BOM 管理版本），与 miuix 0.9.3 的 -android 产物一致
+    implementation(platform(libs.compose.bom))
+    implementation(libs.compose.ui)
+    implementation(libs.compose.foundation)
+    implementation(libs.compose.ui.tooling.preview)
+    debugImplementation(libs.compose.ui.tooling)
+    implementation(libs.androidx.activity.compose)
+
+    // Miuix 0.9.3：拆分产物（miuix-ui / preference / icons，navigation3 集成）
+    implementation(libs.miuix)
+    implementation(libs.miuix.preference)
+    implementation(libs.miuix.icons)
+    implementation(libs.miuix.navigation3.ui)
+
+    // Navigation 3：MainUI 的 NavDisplay + rememberDecoratedNavEntries
+    implementation(libs.navigation3.runtime)
 
     testImplementation(libs.junit)
 }

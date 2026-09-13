@@ -74,6 +74,14 @@
 
         <!-- LSPosed / libxposed 模块声明 -->
         <meta-data android:name="xposedmodule" android:value="true" />
+        <!--
+          LSPosed 共享首选项桥：设置页（ui/ModuleSettings.kt）写
+          getSharedPreferences("hyperpods_moondrop_settings")，hook 侧
+          （hook/XposedEntry.kt:117 的 getRemotePreferences("hyperpods_moondrop_settings")）读同一组。
+          没有这条 meta-data，LSPosed 不会把模块首选项暴露给本应用进程，
+          设置页写下的值就到不了 hook 进程（hook 侧会回落到默认值）。
+        -->
+        <meta-data android:name="xposedsharedprefs" android:value="true" />
         <meta-data
             android:name="xposeddescription"
             android:value="MOONDROP (水月雨) 耳机 HyperOS 系统级控制" />
