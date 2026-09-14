@@ -7,7 +7,7 @@
  *   · 主排最多三格：通透 → 降噪 → 关闭（顺序固定），**没有轨道底色**；
  *   · 每格是「图标在上、文案在下」的竖排按钮（图标 60dp / 紧凑档 40dp），
  *     选中时换成 on 变体图标（参照实现用 Crossfade 做切换动画）+ primary 文案色；
- *   · 「降噪」当前生效时，下方展开子排：自适应 / 抗风 / 普通（参照实现的 ANC_SUB_ORDER
+ *   · 「降噪」当前生效时，下方展开子排：自定义 / 抗风噪 / 基本（参照实现的 ANC_SUB_ORDER
  *     adaptive → anti_wind → anc 与本项目既有的 SUB_MODE_ORDER 完全同序）；
  *   · 横屏弹窗用 [compact] 档（图标 40dp、内边距减半）。
  *
@@ -21,15 +21,16 @@
  * 乐观态（本项目的机制，参照实现没有）：
  *   点下去立刻反馈，设备 1.5s 内没回读就退回设备真实状态 —— 不让乐观态永久骗人。
  *
- * 图标：主排三格各带一枚既有矢量图标（on/off 两态，与参照实现逐项对应）：
- *   通透 → ic_transparent_on / ic_transparent_off
- *   降噪 → ic_openanc_on / ic_openanc_off
- *   关闭 → ic_closeanc_on / ic_closeanc_off
- * 这三对图标是「彩色圆底 + 白色字形」的自带底色徽标，因此不再叠 tint，直接原样绘制。
- * **子排保持纯文案**：参照实现的子排放了 ic_adaptive_on/off（自适应专用），
- * 但本仓库 res 里没有这一对图（只有 ic_openanc / ic_closeanc / ic_transparent），
- * 而「没有的图不要臆造」—— 硬拿 openanc 冒充自适应会让两个子档位图标相同，
- * 所以子排只留文案，选中态用 primary 色 + SemiBold 表达。
+ * 图标：主排三格与降噪子排三档各带一枚矢量图标（on/off 两态，与参照实现逐项对应）：
+ *   通透   → ic_transparent_on / ic_transparent_off
+ *   降噪   → ic_openanc_on      / ic_openanc_off
+ *   关闭   → ic_closeanc_on     / ic_closeanc_off
+ *   自定义 → ic_adaptive_on     / ic_adaptive_off（参照实现的 adaptive 图标，本轮搬入）
+ *   抗风噪 → ic_anti_wind_on    / ic_anti_wind_off（两边仓库都没有现成图，按同一规格自绘）
+ *   基本   → 复用降噪族 ic_openanc_*（参照实现的子排也是这么映射：只有 adaptive 单独配图）
+ * 这些都是「彩色圆底 + 白色字形」的自带底色徽标，因此不再叠 tint，直接原样绘制；
+ * idle 图标另有 drawable-night 变体（深灰圆底 + 白字形，配色随参照）。
+ * 子排与参照实现一样直接复用 [AncButton]（compact 档），因此三档同样有图标，不再只有文案。
  */
 package moe.chenxy.hyperpods.ui.components
 
@@ -52,7 +53,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,7 +61,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
@@ -103,7 +102,6 @@ private val SUB_MODE_ORDER = listOf(AncMode.ADAPTIVE, AncMode.ANTI_WIND, AncMode
 /** 「降噪」组默认下发的子档位（普通降噪）。 */
 private val DEFAULT_SUB_MODE = AncMode.NOISE_CANCELLATION
 
-private val SUB_BUTTON_CORNER = 10.dp
 private const val ANIM_DURATION = 300
 
 /** 乐观显示最长时间：设备 1.5s 内没回读到新档位就退回设备真实状态。 */
@@ -127,12 +125,33 @@ fun ancModeLabel(mode: AncMode): String = when (mode) {
 }
 
 /**
- * 子排文案：降噪组里的 NOISE_CANCELLATION 在子排上叫「普通」，避免与主排组名「降噪」重复。
+ * 子排文案：降噪组里的 NOISE_CANCELLATION 在子排上叫「基本」，避免与主排组名「降噪」重复。
  */
 @Composable
 private fun subModeLabel(mode: AncMode): String = when (mode) {
     AncMode.NOISE_CANCELLATION -> stringResource(R.string.anc_mode_normal)
     else -> ancModeLabel(mode)
+}
+
+/**
+ * 子排每档的 on/off 图标。
+ *
+ * 「自定义」用参照实现的 ic_adaptive_*；「抗风噪」两边仓库都没有现成图，按同一规格自绘
+ * （见文件头）；「基本」复用降噪族的 ic_openanc_* —— 与参照实现的子排映射一致
+ * （参照同样只给 adaptive 单独配图，其余都落在 openanc 上）。
+ */
+@androidx.annotation.DrawableRes
+private fun subModeOnIcon(mode: AncMode): Int = when (mode) {
+    AncMode.ADAPTIVE -> R.drawable.ic_adaptive_on
+    AncMode.ANTI_WIND -> R.drawable.ic_anti_wind_on
+    else -> R.drawable.ic_openanc_on
+}
+
+@androidx.annotation.DrawableRes
+private fun subModeOffIcon(mode: AncMode): Int = when (mode) {
+    AncMode.ADAPTIVE -> R.drawable.ic_adaptive_off
+    AncMode.ANTI_WIND -> R.drawable.ic_anti_wind_off
+    else -> R.drawable.ic_openanc_off
 }
 
 /** 设备档位 → 主排组；null = 未知（-1 下标）或不属于三组（LIVE）。 */
@@ -256,7 +275,7 @@ fun AncSwitch(
             }
         }
 
-        // ── 「降噪」组展开子排：自适应 / 抗风 / 普通 ──
+        // ── 「降噪」组展开子排：自定义 / 抗风噪 / 基本 ──
         // 只有一种降噪时没有可选性，整排不出现（同参照实现 ncVariants.size > 1）
         if (activeGroup == AncGroup.NOISE_CONTROL && subChoices.size > 1) {
             Row(
@@ -267,12 +286,15 @@ fun AncSwitch(
                 horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp),
             ) {
                 subChoices.forEach { choice ->
-                    AncTextButton(
+                    // 与参照实现的子排一致：复用主排同一个 AncButton，取 compact 档
+                    AncButton(
+                        onIconRes = subModeOnIcon(choice.mode),
+                        offIconRes = subModeOffIcon(choice.mode),
                         label = subModeLabel(choice.mode),
-                        selected = activeMode == choice.mode,
+                        isSelected = activeMode == choice.mode,
                         onClick = { send(choice) },
                         modifier = Modifier.weight(1f),
-                        compact = compact,
+                        compact = true,
                     )
                 }
             }
@@ -338,45 +360,6 @@ private fun AncButton(
     }
 }
 
-/**
- * 子排一格：纯文案（见文件头「子排保持纯文案」）。选中态 = primary 色 + SemiBold。
- * 保留按压反馈（SinkFeedback），与主排同一套手感。
- */
-@Composable
-private fun AncTextButton(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    compact: Boolean = false,
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val shape = RoundedCornerShape(SUB_BUTTON_CORNER)
-    val color by animateColorAsState(
-        targetValue = if (selected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onBackground,
-        animationSpec = tween(ANIM_DURATION),
-        label = "anc_sub_text_color",
-    )
-
-    Box(
-        modifier = modifier
-            .height(if (compact) 32.dp else 36.dp)
-            .clip(shape)
-            .pressable(interactionSource = interactionSource, indication = SinkFeedback())
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = label,
-            fontSize = if (compact) 12.sp else 13.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = color,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
 
 /**
  * 按**应用内主题**（而不是系统 uiMode）取图标：本项目的 AppTheme 会在应用内强制浅色/深色时

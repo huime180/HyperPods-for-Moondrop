@@ -26,6 +26,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import moe.chenxy.hyperpods.ui.ConnectionPopupActivity
+import moe.chenxy.hyperpods.ui.MODULE_PREFS_GROUP
+import moe.chenxy.hyperpods.utils.data.HyperPodsPrefsKey
 import moe.chenxy.hyperpods.utils.data.HyperPodsAction
 
 private const val TAG = "ControlBridge"
@@ -134,6 +136,7 @@ object ControlBridge {
      */
     private fun maybeShowConnectionPopup(context: Context, snapshot: PodSnapshot) {
         if (!snapshot.battery.anyKnown) return
+        if (!autoPopupEnabled(context)) return
         val address = snapshot.deviceAddress
         if (address.isEmpty() || address == popupShownForAddress) return
         // 先认领地址：这样后续每一帧电量都不会再排队第二次（「不重复弹」）。
@@ -163,6 +166,20 @@ object ControlBridge {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             )
         }.onFailure { Log.w(TAG, "connection popup launch failed: ${it.message}") }
+    }
+
+    /**
+     * 设置页「连接时自动唤出弹窗」开关（默认开）。
+     *
+     * 与 [PodNotification] 的 SHOW_NOTIFICATION 同一套宽容策略：偏好读不到时按 true 处理 ——
+     * 偏好文件异常不该让用户连弹窗都看不到。实时读，改完开关下一次连接即生效。
+     */
+    private fun autoPopupEnabled(context: Context): Boolean {
+        val prefs = runCatching {
+            context.getSharedPreferences(MODULE_PREFS_GROUP, Context.MODE_PRIVATE)
+        }.getOrNull() ?: return true
+        return runCatching { prefs.getBoolean(HyperPodsPrefsKey.AUTO_POPUP_ON_CONNECT, true) }
+            .getOrDefault(true)
     }
 
     /** 撤销还没启动的弹窗任务（断开时调用）。 */

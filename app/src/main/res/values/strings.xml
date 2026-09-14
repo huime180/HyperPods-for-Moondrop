@@ -36,15 +36,15 @@
     <string name="batt_unknown">Reading battery…</string>
 
     <!-- ANC: top row = transparency / noise control (group) / off;
-         the sub row under "Noise control" = adaptive / anti-wind / normal -->
+         the sub row under "Noise control" = custom(adaptive) / anti-wind / basic -->
     <string name="anc_title">Noise control</string>
     <string name="anc_mode_off">Off</string>
     <string name="anc_mode_nc">Noise Cancelling</string>
     <!-- sub-mode of the noise control group (= AncMode.NOISE_CANCELLATION) -->
-    <string name="anc_mode_normal">Normal</string>
+    <string name="anc_mode_normal">Basic</string>
     <string name="anc_mode_transparency">Transparency</string>
     <string name="anc_mode_anti_wind">Anti-Wind</string>
-    <string name="anc_mode_adaptive">Adaptive</string>
+    <string name="anc_mode_adaptive">Custom</string>
     <string name="anc_mode_live">Live</string>
 
     <!-- gain / LED / prompt tone -->
@@ -79,6 +79,8 @@
     <!-- 通知栏显示：耳机状态在系统通知栏 / 蓝牙设置里的常驻显示（默认开） -->
     <string name="notification_display_title">Notification display</string>
     <string name="notification_display_summary">Show the earbuds state as a normal notification in the status bar (works on any ROM)</string>
+    <string name="connect_popup_title">Show popup on connect</string>
+    <string name="connect_popup_summary">Automatically show the connection popup (battery and noise control) after the earbuds connect; you can still open it from the notification when off</string>
     <!-- 应用进程自己发的那条耳机状态通知（pods/PodNotification.kt） -->
     <string name="notification_channel_status">Earbuds status</string>
     <string name="notification_channel_status_desc">Connection state and battery of the connected Moondrop earbuds</string>

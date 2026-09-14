@@ -41,10 +41,10 @@
     <string name="anc_mode_off">关闭</string>
     <string name="anc_mode_nc">降噪</string>
     <!-- 降噪组的子档位「普通」（= AncMode.NOISE_CANCELLATION） -->
-    <string name="anc_mode_normal">普通</string>
+    <string name="anc_mode_normal">基本</string>
     <string name="anc_mode_transparency">通透</string>
-    <string name="anc_mode_anti_wind">抗风</string>
-    <string name="anc_mode_adaptive">自适应</string>
+    <string name="anc_mode_anti_wind">抗风噪</string>
+    <string name="anc_mode_adaptive">自定义</string>
     <string name="anc_mode_live">直播</string>
 
     <!-- 增益 / 指示灯 / 提示音 -->
@@ -79,6 +79,8 @@
     <!-- 通知栏显示：耳机状态在系统通知栏 / 蓝牙设置里的常驻显示（默认开） -->
     <string name="notification_display_title">通知栏显示</string>
     <string name="notification_display_summary">在状态栏以普通通知显示耳机的连接与电量状态（任何 ROM 都可用）</string>
+    <string name="connect_popup_title">连接时自动唤出弹窗</string>
+    <string name="connect_popup_summary">耳机连上后自动弹出连接弹窗（电量与降噪）；关掉后仍可从通知点开</string>
     <!-- 应用进程自己发的那条耳机状态通知（pods/PodNotification.kt） -->
     <string name="notification_channel_status">耳机状态</string>
     <string name="notification_channel_status_desc">已连接水月雨耳机的连接状态与电量</string>

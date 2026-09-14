@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 键与默认值的唯一来源是 utils/data/HyperPodsPrefsKey.kt。
- * 本应用已不再是 Xposed 模块，因此这里只剩「通知栏显示」这一个应用自己的偏好：
+ * 本应用已不再是 Xposed 模块，因此这里只剩两个应用自己的偏好（通知栏显示 / 连接时自动唤出弹窗）：
  * 原来的总开关 / 焦点显示 / 超级岛 / 型号伪装 / 调试日志都要 hook 侧一起工作，
  * 随 hook 一起删除，对应的键也不在 HyperPodsPrefsKey 里了。
  *
@@ -33,12 +33,22 @@ internal const val MODULE_PREFS_GROUP = "hyperpods_moondrop_settings"
 class ModuleSettingsState internal constructor(private val prefs: SharedPreferences) {
 
     private val notificationState = mutableStateOf(prefs.getBoolean(HyperPodsPrefsKey.SHOW_NOTIFICATION, true))
+    private val autoPopupState =
+        mutableStateOf(prefs.getBoolean(HyperPodsPrefsKey.AUTO_POPUP_ON_CONNECT, true))
 
     val showNotification: Boolean get() = notificationState.value
 
     fun setShowNotification(value: Boolean) {
         notificationState.value = value
         prefs.edit().putBoolean(HyperPodsPrefsKey.SHOW_NOTIFICATION, value).apply()
+    }
+
+    /** 「连接时自动唤出弹窗」：耳机连上后是否自动弹出连接弹窗（pods/ControlBridge.kt 读同一个键）。 */
+    val autoPopupOnConnect: Boolean get() = autoPopupState.value
+
+    fun setAutoPopupOnConnect(value: Boolean) {
+        autoPopupState.value = value
+        prefs.edit().putBoolean(HyperPodsPrefsKey.AUTO_POPUP_ON_CONNECT, value).apply()
     }
 }
 
