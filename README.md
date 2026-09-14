@@ -15,9 +15,6 @@
 并在状态栏通知与连接弹窗里显示。协议栈（GAIA over GATT / RFCOMM）跑在**应用进程内**，
 **不需要 root，也不需要 Xposed / LSPosed**。
 
-> 应用名 `MiuixMoondrop`，`applicationId = moe.huime.miuixmoondrop`，Kotlin 包名 / namespace
-> 仍是 `moe.chenxy.hyperpods`。仓库旧地址 `huime180/HyperPods-for-Moondrop` 会 301 重定向。
-
 ### 耳机功能
 
 - **降噪控制** — 档位表由设备实际能力探测得出（三条 ANC 路径自动选择），不靠型号猜测；
@@ -68,8 +65,6 @@
 
 ### 已知限制
 
-- **低延迟模式本应用不实现** —— 它不是 GAIA 命令，要用就去系统蓝牙的「设备详情页」
-- **空间音频 / 头动追踪未接线**（`Gaia.spatialGet/Set`、`headTracking*` 有实现，客户端没有读写路径）
 - 13 款「推断」机型只有芯片级推断，没有逐型真机跑通
 
 完整清单见 [ADAPTATION.md](ADAPTATION.md) 与 [CHANGELOG.md](CHANGELOG.md)。
@@ -90,15 +85,7 @@
 - [roxyyn0304/MOONDROP-Pods](https://github.com/roxyyn0304/MOONDROP-Pods) — UI 版式与交互
 - [Miuix](https://github.com/YuKongA/miuix) — HyperOS 风格 Compose UI 组件
 
-早期还参考过 [Art-Chen/HyperPods](https://github.com/Art-Chen/HyperPods) 的 HyperOS 系统集成
-**模块**骨架（作用域、hook、跨进程控制桥）—— 那部分代码与 manifest 声明已随去模块化整体删除。
-
 ### 许可证
 
 GPL-3.0
 
----
-
-> 早期那套 **LSPosed 模块形态已整体删除**（整个 `hook/`、`META-INF/xposed/` 下的
-> `module.prop` / `scope.list`、`arrays.xml` 的 `xposedscope` 等），现在没有任何 hook，
-> 也没有任何作用域概念。历史与逐项变更见 [CHANGELOG.md](CHANGELOG.md)。
