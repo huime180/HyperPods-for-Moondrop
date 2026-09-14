@@ -509,7 +509,7 @@ object MoondropModels {
      * 按蓝牙设备名匹配型号。
      * 命中顺序：别名长度降序的 contains 匹配。
      * 未命中但名字里含 MOONDROP / 水月雨 时返回 [FALLBACK]（仍是水月雨设备）；
-     * 否则返回 null（不是水月雨设备，模块不接管）。
+     * 否则返回 null（不是水月雨设备，本应用不接管）。
      */
     fun match(deviceName: String?): MoondropModel? {
         val n = deviceName?.uppercase()?.trim()
@@ -521,6 +521,6 @@ object MoondropModels {
         return null
     }
 
-    /** 是否为本模块接管的设备。 */
+    /** 是否为本应用接管的设备。 */
     fun isMoondrop(deviceName: String?): Boolean = match(deviceName) != null
 }

@@ -4,7 +4,7 @@
  *
  * 形态对齐参考实现 _refs/OppoPods/.../ui/MainUI.kt:1257-1288 的 ConnectingPage()：
  * 居中一个 Miuix primary 色的旋转圆环 + 文案；区别只是文案换成「等待耳机连接」，
- * 因为我们的未连接态就是等待系统蓝牙把耳机接上来（本模块不主动配对）。
+ * 因为我们的未连接态就是等待系统蓝牙把耳机接上来（本应用不主动配对）。
  */
 package moe.chenxy.hyperpods.ui
 

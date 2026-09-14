@@ -3,29 +3,17 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 为什么需要它：
- *   以前这条通知只由 hook 侧发（hook/MiBluetoothToastHook.kt 在 com.xiaomi.bluetooth 进程里
- *   post：tag = BTHeadset + MAC、id = 10003、channel = hyperpods_moondrop_bt_headset）。
- *   模块没在 LSPosed 激活时，那个进程里根本没有本模块的代码，通知就永远不会出现 —— 即使本应用
- *   已经自己连上耳机、也已经拿到三路电量（协议栈在应用进程，见 pods/MoondropLink.kt）。
- *   本文件让**应用进程自己**发一条等价通知：不需要 root，也不需要模块激活。
+ *   协议栈本来就在应用进程（pods/MoondropLink.kt 自己 connectGatt / 建 RFCOMM），
+ *   所以「连上耳机 → 拿到三路电量 → 发一条状态通知」全程不需要 root，也不需要任何 hook。
+ *   本应用已不再是 Xposed 模块：本文件就是它唯一的通知来源。
  *
- * 去重策略（判定写在 [hookWillNotify]，取舍写在下面）：
- *   **只在 hook 不会发的时候由应用发**。
- *   为什么不做「应用一直发、激活时由应用压制自己那条」：hook 那条通知是**另一个应用**
- *   （com.xiaomi.bluetooth）发的，应用进程既查不到也撤不掉它（NotificationManager 只能看/撤
- *   自己应用的通知）；要压制它只能让 hook 侧留一个「我发过了」的回执，而 hook/ 不在本轮改动
- *   范围（激活时它那条必须照旧有用）。所以两边严格互斥：判定 hook 会发时，应用撤销自己那条，
- *   屏幕上只留 hook 那条（它另外还有焦点通知 / 超级岛）。
+ * 通知身份（与其它应用发的通知区分开，撤销时不会互相误伤）：
+ *   channel = hyperpods_moondrop_app_status
+ *   tag     = HyperPodsAppState
+ *   id      = 10004
  *
- * 与 hook 那条完全区分（两边同时活着也不会互相覆盖或误撤）：
- *   channel = hyperpods_moondrop_app_status   （hook：hyperpods_moondrop_bt_headset）
- *   tag     = HyperPodsAppState               （hook：BTHeadset + MAC）
- *   id      = 10004                           （hook：10003）
- *
- * 开关：读设置页写的那份 hyperpods_moondrop_settings（与 hook 侧同一个组名）：
- *   · SHOW_NOTIFICATION（「通知栏显示」，默认 true）—— 这条通知的总开关；
- *   · ENABLE（模块总开关，默认 true）—— 跟随设置页把「通知栏显示」开关的 enabled 绑在总开关上的
- *     口径（ui/pages/SettingsPage.kt：enabled = settings.enabled），总开关关掉时也不发。
+ * 开关：读设置页写的那份 hyperpods_moondrop_settings：
+ *   · SHOW_NOTIFICATION（「通知栏显示」，默认 true）—— 这条通知的总开关。
  * 另外还有一道**系统级**门槛：Android 13+ 的 POST_NOTIFICATIONS 运行时权限。没有它 notify() 会被
  *   系统静默丢弃，本文件只能如实打一条日志（见 [post]），并刻意不做「内容相同就跳过」的去重 ——
  *   用户一授予权限，下一次状态事件立刻就能把它发出来。全新安装后需要打开过一次应用（或手动在
@@ -43,20 +31,15 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.os.SystemClock
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import moe.chenxy.hyperpods.R
 import moe.chenxy.hyperpods.ui.MODULE_PREFS_GROUP
-import moe.chenxy.hyperpods.ui.currentXposedService
-import moe.chenxy.hyperpods.ui.hookNotificationScopeActive
-import moe.chenxy.hyperpods.ui.primeXposedServiceRegistration
 import moe.chenxy.hyperpods.utils.data.HyperPodsAction
 import moe.chenxy.hyperpods.utils.data.HyperPodsPrefsKey
 
@@ -64,35 +47,20 @@ private const val TAG = "HyperPods-PodNotify"
 
 object PodNotification {
 
-    /** 通知通道：IMPORTANCE_LOW，状态栏有图标、不响铃不打扰（与 hook 侧同档）。 */
+    /** 通知通道：IMPORTANCE_LOW，状态栏有图标、不响铃不打扰。 */
     private const val CHANNEL_ID = "hyperpods_moondrop_app_status"
 
-    /** 与 hook 侧的 BTHeadset + MAC 区分开，两边的 cancel 不会互相误伤。 */
     private const val NOTIFICATION_TAG = "HyperPodsAppState"
 
-    /** 与 hook 侧的 10003 区分开（同一应用内 id 唯一，跨应用其实不冲突，区分是为了排查时一眼可辨）。 */
     private const val NOTIFICATION_ID = 10004
 
-    /**
-     * 「框架服务还没绑上来」的宽限窗口：应用刚起来时 XposedService 的绑定是异步的，这段时间里
-     * [currentXposedService] 为 null，不能立刻当成「模块未激活」—— 否则模块真的激活时会多发
-     * 一条重复通知。窗口从 [prime] 那次注册算起，只影响进程刚起来的那一小段。
-     */
-    private const val SERVICE_BIND_GRACE_MS = 2_000L
-
-    /** 宽限窗口内两次判定的间隔。 */
-    private const val SERVICE_BIND_POLL_MS = 200L
-
-    /** 电量各组件之间的分隔符（与 hook 侧 contentText 的左右耳分隔同一形态，紧凑一行）。 */
+    /** 电量各组件之间的分隔符（紧凑一行）。 */
     private const val PART_SEPARATOR = " · "
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** 判定 + 落地整段串行化：并发事件不会交叉出两条状态不一致的通知。 */
     private val lock = Mutex()
-
-    /** 本进程第一次被要求关注模块激活状态的时刻；0 = 还没 prime 过（宽限窗口的起点）。 */
-    @Volatile private var primedAtMs = 0L
 
     /**
      * 上一条已落地的通知内容（标题 + 正文）。完全相同就不再 notify：电量是 30s 一轮的轮询，
@@ -107,16 +75,9 @@ object PodNotification {
 
     /**
      * 应用进程初始化时调用一次（ControlBridge.ensureInit，主线程）：
-     *   ① 提前触发 libxposed 的框架服务绑定 —— 这样「连上耳机后该不该由自己发」是在服务状态
-     *      已经确定之后判的，而不是在进程刚起来那一瞬间（见 [SERVICE_BIND_GRACE_MS]）；
-     *   ② 按当前快照对一次账：进程重启后把自己那条重画（耳机没连就撤掉，不留旧通知）。
-     *
-     * 幂等：重复调用只重跑对账，宽限窗口的起点以第一次为准。
+     * 按当前快照对一次账 —— 进程重启后把自己那条重画（耳机没连就撤掉，不留旧通知）。
      */
     fun prime(context: Context) {
-        if (primedAtMs == 0L) primedAtMs = SystemClock.elapsedRealtime()
-        runCatching { primeXposedServiceRegistration() }
-            .onFailure { Log.w(TAG, "prime XposedService registration failed: ${it.message}") }
         refreshFromSnapshot(context)
     }
 
@@ -134,7 +95,7 @@ object PodNotification {
         }
     }
 
-    /** 断开连接时调用：撤掉自己那条（hook 侧那条由 ControlBridge 的广播路径撤）。 */
+    /** 断开连接时调用：撤掉自己那条。 */
     fun cancel(context: Context) {
         val app = context.applicationContext
         scope.launch {
@@ -144,7 +105,7 @@ object PodNotification {
     }
 
     /**
-     * 设置页改了「通知栏显示」/「模块总开关」后立即生效（不必等下一次电量轮询）：
+     * 设置页改了「通知栏显示」后立即生效（不必等下一次电量轮询）：
      * 打开就按当前快照重画一条，关掉就把已经发出去的那条撤掉。
      */
     fun refreshFromSnapshot(context: Context) = onSnapshot(context, MoondropLink.snapshot())
@@ -156,64 +117,24 @@ object PodNotification {
         when {
             !snapshot.connected -> cancelNow(app, "not connected")
             !notificationsEnabled(app) -> cancelNow(app, "disabled by settings")
-            hookWillNotify() -> cancelNow(app, "hook side will post; app notification suppressed")
             else -> post(app, snapshot)
         }
     }
 
     /**
-     * hook 侧（com.xiaomi.bluetooth 进程里的 MiBluetoothToastHook）这次会不会自己发一条。
-     * 返回 true = 本应用**不发**。
+     * 「通知栏显示」是否允许应用自己发。
      *
-     * 依据全部来自既有信号，没有新造：
-     *   · `currentXposedService() != null` —— libxposed 的框架服务绑上了（就是
-     *     ui/XposedServiceState.kt 那份缓存，模块页那张状态卡读的是同一条）。真机实测：
-     *     在 LSPosed 里把本模块关掉（modules_state.enabled=0）时它一直是 null，模块页显示
-     *     「LSPosed 未激活」；
-     *   · 服务报出来的作用域里有 com.xiaomi.bluetooth —— 那正是 MiBluetoothToastHook 被注入
-     *     该进程的前提（作用域见 META-INF/xposed/scope.list）。
-     * 服务还没绑上来且仍在宽限窗口内 → 等一下再判，避免把「还没绑」误判成「没激活」而多发一条。
-     */
-    private suspend fun hookWillNotify(): Boolean {
-        val deadline = primedAtMs + SERVICE_BIND_GRACE_MS
-        // 有界等待：最多等到宽限窗口用完，每 SERVICE_BIND_POLL_MS 重判一次（不无限循环）
-        val maxTries = (SERVICE_BIND_GRACE_MS / SERVICE_BIND_POLL_MS).toInt() + 1
-        repeat(maxTries) {
-            val service = currentXposedService()
-            if (service != null) {
-                val active = hookNotificationScopeActive(service)
-                Log.i(
-                    TAG,
-                    "XposedService bound; com.xiaomi.bluetooth scope=$active -> " +
-                        "app notification ${if (active) "suppressed" else "used"}",
-                )
-                return active
-            }
-            val left = deadline - SystemClock.elapsedRealtime()
-            if (left <= 0L) return false
-            delay(minOf(SERVICE_BIND_POLL_MS, left))
-        }
-        Log.i(TAG, "no XposedService bound after grace; module not activated -> app notification used")
-        return false
-    }
-
-    /**
-     * 「通知栏显示」+「模块总开关」是否允许应用自己发。
-     *
-     * 读不到 prefs（文件不存在 / 读抛异常）时按 true 处理 —— 与 hook 侧 notificationDisplayEnabled
-     * 同一取舍：宁可多显示一条，也不要因为读设置失败而静默不显示。
+     * 读不到 prefs（文件不存在 / 读抛异常）时按 true 处理：宁可多显示一条，
+     * 也不要因为读设置失败而静默不显示。
      */
     private fun notificationsEnabled(context: Context): Boolean {
         val prefs = runCatching {
             context.getSharedPreferences(MODULE_PREFS_GROUP, Context.MODE_PRIVATE)
         }.getOrNull() ?: return true
-        val enabled = runCatching { prefs.getBoolean(HyperPodsPrefsKey.ENABLE, true) }.getOrDefault(true)
         val show = runCatching { prefs.getBoolean(HyperPodsPrefsKey.SHOW_NOTIFICATION, true) }
             .getOrDefault(true)
-        if (!enabled || !show) {
-            Log.i(TAG, "app notification off (enable=$enabled, show_notification=$show)")
-        }
-        return enabled && show
+        if (!show) Log.i(TAG, "app notification off (show_notification=$show)")
+        return show
     }
 
     // ── 通知本体 ─────────────────────────────────────────────────────────────
@@ -282,7 +203,7 @@ object PodNotification {
      * 建通道。
      *
      * 通道的重要性**创建之后不可修改**，所以发现同名通道的档位不是 IMPORTANCE_LOW 时先删掉再
-     * 按 LOW 建一次（hook 侧 ensureChannel 同一写法）。通道名/描述只在创建那一刻生效。
+     * 按 LOW 建一次。通道名/描述只在创建那一刻生效。
      */
     private fun ensureChannel(context: Context, manager: NotificationManager) {
         runCatching {
@@ -305,8 +226,8 @@ object PodNotification {
     }
 
     /**
-     * 点击进本应用：与 hook 那条通知同一个 action（HyperPodsAction.SHOW_POPUP → ui/PopupActivity，
-     * 见 AndroidManifest.xml 的 intent-filter），所以两种情况下点通知的落点完全一致。
+     * 点击进本应用：走 HyperPodsAction.SHOW_POPUP → ui/PopupActivity
+     * （见 AndroidManifest.xml 的 intent-filter），点通知直接落在快速弹窗上。
      * 必须 setPackage：命中本应用自己的组件，不受 Android 14+ 隐式 intent 限制。
      */
     private fun contentIntent(context: Context): PendingIntent? = runCatching {

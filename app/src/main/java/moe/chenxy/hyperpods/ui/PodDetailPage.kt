@@ -70,7 +70,10 @@ private val VERIFIED_GREEN = Color(0xFF34C759)
 /** 卡片之间的统一间距（与 OppoPods PodDetailPage 的 12dp 一致）。 */
 private val CARD_GAP = 12.dp
 
-/** 系统设置页读取的耳机 extra（与 hook/SettingsHeadsetHook.kt 的两个常量一致）。 */
+/**
+ * 系统蓝牙设备详情页 intent 里携带的耳机 extra
+ * （常量取值与系统设置页自身读的两个一致）。
+ */
 private const val EXTRA_DEVICE = "android.bluetooth.device.extra.DEVICE"
 private const val EXTRA_BT_ADDRESS = "bluetoothaddress"
 
@@ -286,7 +289,8 @@ private fun isLhdcCodec(name: String): Boolean = name.contains("LHDC", ignoreCas
  *
  * 两个数据来源相互独立，而且会短暂打架：
  *   · [PodSnapshot.activeCodec] = **系统 A2DP 实际协商到的编码**，由
- *     pods/MoondropLink.onSystemCodecChanged() 从 CODEC_CHANGED 广播填入（数据侧不在本文件职责内）；
+ *     pods/MoondropLink.onSystemCodecChanged() 填入；⚠ 该数据的来源是蓝牙进程里的 hook，
+ *     随模块一起删除，因此本应用现在读不到它（这一行会落到「未知」）；
  *   · [PodSnapshot.lhdcOn] = **耳机侧 GAIA 的 LHDC 开关**。
  * 在耳机上打开 LHDC 之后，系统侧要重新协商才会从 AAC 切到 LHDC，这段时间里 activeCodec
  * 仍然是 AAC。早先这里直接把 activeCodec 印出来，于是出现「LHDC 开关是开的、当前编码却
@@ -299,8 +303,8 @@ private fun isLhdcCodec(name: String): Boolean = name.contains("LHDC", ignoreCas
  *   ③ 其余：系统编码就是事实，照实显示（AAC 只会在 LHDC 关 / 未知时走到这里）。
  *   ④ 没读到系统编码：显示「未知」，不谎报 AAC。
  *
- * 真正不同步的病因在数据侧（系统编码广播与 GAIA 开关不同步、断开后 activeCodec 也不清空），
- * 本次改动范围只到 ui 目录，因此这里只保证 UI 不再背书一个与开关冲突的值。
+ * 真正不同步的病因在数据侧（系统编码来源随模块删除、断开后 activeCodec 也不清空），
+ * 这里只保证 UI 不再背书一个与开关冲突的值。
  */
 @Composable
 private fun activeCodecLabel(snapshot: PodSnapshot): String {
@@ -315,11 +319,11 @@ private fun activeCodecLabel(snapshot: PodSnapshot): String {
 }
 
 /**
- * 打开系统蓝牙设备详情页（HyperOS 上是 MiuiHeadsetActivity，已被本模块 hook 接管并路由回本模块），
+ * 打开系统蓝牙设备详情页（HyperOS 上是 MiuiHeadsetActivity），
  * 里面有系统级的 LHDC / 低延迟 / 音量同步等开关。失败则退回系统蓝牙列表页。
  *
- * ⚠ 两个字符串常量非公开 API，取自本仓库 hook/SettingsHeadsetHook.kt（它正是从系统设置页的
- * intent 里读这两个 extra 的），因此与实际系统页面一致。
+ * ⚠ 两个字符串常量非公开 API，取值与系统设置页实现一致（系统页正是从 intent 里读它们），
+ * 因此点开的就是系统自己的设备页 —— 本应用已不是模块，不再有「伪装成原生耳机页」那套接管。
  */
 @SuppressLint("MissingPermission")
 @Suppress("DEPRECATION")

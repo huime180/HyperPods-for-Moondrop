@@ -11,7 +11,7 @@
 
     <!-- 等待页 -->
     <string name="waiting_for_pod">等待水月雨耳机连接…</string>
-    <string name="waiting_for_pod_hint">请在系统蓝牙设置中连接水月雨耳机，连接后本模块会自动接管控制通道。</string>
+    <string name="waiting_for_pod_hint">请在系统蓝牙设置中连接水月雨耳机，连接后本应用会自动接管控制通道。</string>
 
     <!-- 机型卡 -->
     <string name="unknown_model">水月雨耳机</string>
@@ -76,33 +76,12 @@
     <string name="theme_follow_system">跟随系统</string>
     <string name="theme_light">浅色</string>
     <string name="theme_dark">深色</string>
-    <string name="module_enable_title">启用模块</string>
-    <string name="module_enable_summary">关闭后不再接管蓝牙，恢复系统原生行为</string>
-    <!-- LSPosed 服务状态卡（模块页顶部）：服务连上 + 5 个作用域齐全 = 已激活 -->
-    <string name="lsposed_status_active">LSPosed 已激活</string>
-    <string name="lsposed_status_inactive">LSPosed 未激活</string>
-    <string name="lsposed_status_scope_incomplete">作用域不齐全</string>
-    <string name="lsposed_status_scopes_ok">作用域齐全（5/5）</string>
-    <string name="lsposed_status_waiting">等待 LSPosed 服务连接…</string>
-    <string name="lsposed_status_scopes_missing">请在 LSPosed 中勾选作用域：%1$s</string>
-    <string name="lsposed_status_service_timeout">模块服务超时</string>
-    <string name="lsposed_status_service_no_response">模块服务未响应</string>
     <!-- 通知栏显示：耳机状态在系统通知栏 / 蓝牙设置里的常驻显示（默认开） -->
     <string name="notification_display_title">通知栏显示</string>
     <string name="notification_display_summary">在状态栏以普通通知显示耳机的连接与电量状态（任何 ROM 都可用）</string>
-    <!-- 应用进程自己发的那条耳机状态通知（pods/PodNotification.kt）：模块未激活时它是唯一的通知来源 -->
+    <!-- 应用进程自己发的那条耳机状态通知（pods/PodNotification.kt） -->
     <string name="notification_channel_status">耳机状态</string>
     <string name="notification_channel_status_desc">已连接水月雨耳机的连接状态与电量</string>
-    <string name="show_strong_toast_title">超级岛提示</string>
-    <string name="show_strong_toast_summary">电量与模式变化时再在 HyperOS 超级岛上显示</string>
-    <string name="show_focus_island_title">焦点显示</string>
-    <string name="show_focus_island_summary">把耳机状态做成 HyperOS 焦点通知</string>
-    <string name="hyperos_only">仅 HyperOS</string>
-    <string name="model_auto_title">自动识别型号</string>
-    <string name="model_auto_summary">按蓝牙设备名匹配型号档案</string>
-    <string name="model_manual_title">手动指定型号</string>
-    <string name="debug_log_title">调试日志</string>
-    <string name="debug_log_summary">把 GAIA 收发帧写入 logcat 与调试页</string>
 
     <!-- 关于 -->
     <string name="about_version">版本 %1$s</string>
@@ -124,20 +103,6 @@
     <!-- 系统蓝牙入口 -->
     <string name="system_bluetooth_settings">系统蓝牙设置</string>
     <string name="system_bluetooth_settings_summary">打开系统设备详情页，可设置系统级 LHDC、低延迟与音量同步</string>
-    <!-- 模块页「蓝牙状态」卡片打不开系统蓝牙设置时的提示 -->
-    <string name="open_bluetooth_settings_failed">无法打开系统蓝牙设置</string>
-    <!-- 重启作用域（等效 LSPosed 的「重启作用域」） -->
-    <string name="restart_scope">重启作用域</string>
-    <string name="restart_scope_summary">只重启你勾选的作用域进程，等效于 LSPosed 的「重启作用域」，无需重启手机。</string>
-    <string name="restart_scope_confirm">重启</string>
-    <string name="restart_scope_done">已通知 %1$d / %2$d 个已勾选的作用域进程退出（若某个进程未响应，可尝试授予 root 或手动重启）</string>
-    <!-- 勾选框的作用域名（顺序与 META-INF/xposed/scope.list 一致） -->
-    <string name="scope_bluetooth">蓝牙</string>
-    <string name="scope_milink">小米互联服务</string>
-    <string name="scope_xiaomi_bluetooth">小米蓝牙</string>
-    <string name="scope_systemui">系统界面</string>
-    <string name="scope_settings">设置</string>
-    <string name="restart_scope_denied">未能通知任何作用域进程，请在 LSPosed 中检查模块作用域，或手动重启手机</string>
 
     <!-- 手势（TOUCHV2，feature 22） -->
     <string name="gesture_title">手势操作</string>
@@ -166,7 +131,6 @@
     <string name="gesture_action_volume_down">音量 -</string>
 
     <!-- 底部导航页签 -->
-    <string name="tab_module">模块</string>
     <string name="tab_earphones">耳机</string>
 
     <!-- 耳机页标题（型号未知时）/ 设备选择页 -->
@@ -176,17 +140,6 @@
     <string name="bt_permission_required">需要蓝牙权限才能列出已配对的耳机</string>
     <string name="grant_permission">授予权限</string>
 
-    <!-- 模块页：系统信息卡 -->
-    <string name="home_stat_bluetooth_status">蓝牙状态</string>
-    <string name="home_stat_bluetooth_on">已开启</string>
-    <string name="home_stat_bluetooth_off">未开启</string>
-    <string name="home_stat_paired_bluetooth">配对蓝牙</string>
-    <string name="info_app_version">应用版本</string>
-    <string name="info_android_version">Android 版本</string>
-    <string name="info_system_version">系统版本</string>
-    <string name="info_device_model">设备型号</string>
-    <string name="info_lsposed_version">LSPosed 版本</string>
-    <string name="info_build_time">构建时间</string>
 
     <!-- 关于页：项目主页 -->
     <string name="about_repo_title">项目主页</string>

@@ -5,11 +5,6 @@ coreKtx = "1.17.0"
 androidx-activity-compose = "1.13.0"
 composeBom = "2025.05.00"
 kotlinxSerializationJson = "1.9.0"
-# libxposed API 102（LSPosed >= 2.1.1 / Vector）。仅编译期，运行时由框架注入。
-libxposedApi = "102.0.0"
-# LSPosed 服务端接口（应用进程侧）：模块页「LSPosed 已激活 / 作用域齐全」状态卡要靠它。
-# 与上面的 api 同版本 102（api 是 compileOnly 的模块侧，service 是应用侧的 runtime 依赖）。
-libxposedService = "102.0.0"
 # Miuix 从 0.5.1 的「聚合产物」改成 0.9.3 的「拆分产物」：只有拆分产物里才有
 # basic.LazyColumn 之外的 preference.* / icon.* / overlay.OverlayDialog 等等。
 miuix = "0.9.3"
@@ -23,13 +18,9 @@ agp-lib = { id = "com.android.library", version.ref = "agp" }
 # 需要非默认 KGP 时由根 build.gradle.kts 的 buildscript classpath 提升版本（见该文件注释）。
 kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
-lsplugin-apksign = { id = "org.lsposed.lsplugin.apksign", version = "1.4" }
-lsplugin-resopt = { id = "org.lsposed.lsplugin.resopt", version = "1.6" }
 
 [libraries]
 coreKtx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
-libxposedApi = { group = "io.github.libxposed", name = "api", version.ref = "libxposedApi" }
-libxposedService = { group = "io.github.libxposed", name = "service", version.ref = "libxposedService" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity-compose" }
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }

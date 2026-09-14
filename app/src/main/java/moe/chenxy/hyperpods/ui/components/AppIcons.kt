@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 图标本体照搬参考实现 moondrop-pods 的 ui/components/AppIcons.kt:12-60（Home / Headphones），
- * 只保留本项目底部导航真正用到的两个：moe 侧用不到 Contacts / RemoveContact。
+ * 只保留本项目底部导航真正用到的那一个：普通 App 收窄后只剩「耳机」页签，
+ * Home 图标随「模块」页签一起删除，Contacts / RemoveContact 本来就未使用。
  * 纯 Compose ImageVector，不新增资源、不新增依赖。
  */
 package moe.chenxy.hyperpods.ui.components
@@ -17,28 +18,6 @@ import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.unit.dp
 
 object AppIcons {
-    val Home: ImageVector = ImageVector.Builder(
-        name = "Home",
-        defaultWidth = 24.dp,
-        defaultHeight = 24.dp,
-        viewportWidth = 24f,
-        viewportHeight = 24f,
-    ).apply {
-        path(fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 2f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round) {
-            moveTo(4f, 11f)
-            lineTo(12f, 4.5f)
-            lineTo(20f, 11f)
-            moveTo(6.5f, 10f)
-            verticalLineTo(19f)
-            horizontalLineTo(10f)
-            verticalLineTo(14.5f)
-            horizontalLineTo(14f)
-            verticalLineTo(19f)
-            horizontalLineTo(17.5f)
-            verticalLineTo(10f)
-        }
-    }.build()
-
     val Headphones: ImageVector = ImageVector.Builder(
         name = "Headphones",
         defaultWidth = 24.dp,

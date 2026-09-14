@@ -13,37 +13,32 @@
  *
  * ── 与参考实现的差异（本项目的进程/数据契约）────────────────────────────
  *   ① 电量载体：参考实现从 Intent 里取它的 Parcelable `BatteryParams`；
- *      本项目没有那个类（也不允许改 pods/ / utils/data/），所以这里改用**和
- *      ControlBridge 跨进程广播完全相同的 Bundle 编码**：
+ *      本项目没有那个类，所以这里改用 **pods/ControlBridge.kt 的 Bundle 编码**
+ *      （BatteryCodecWire）：
  *        "left" / "right" / "case" 三个 Int，低 7 位 = 0..100 电量，bit7 = 充电中，
- *        255 = 未知（见 pods/ControlBridge.kt 的 BatteryCodecWire）。
- *      这个 Bundle 就是 HyperPodsAction.EXTRA_BATTERY（"batteryParams"）的载荷，
- *      因此连接弹窗可以直接复用广播里已有的那份数据。
+ *        255 = 未知。
+ *      这个 Bundle 就是 HyperPodsAction.EXTRA_BATTERY（"batteryParams"）的载荷。
  *   ② 未知电量显示「-」，绝不显示 0%（与本项目 PodStatus 的「离线」口径一致）。
  *   ③ 文案全部走 res/values/strings.xml + values-zh-rCN/strings.xml
  *      （参考实现是写死的中文）。
  *   ④ 不在这里申请运行时权限：这是连接耳机时自动弹出的窗口，弹权限框会打断用户；
  *      权限由 MainActivity / PopupActivity 在用户主动进入时申请。
  *
- * ── 谁负责弹它（本文件之外的一行改动，见交付说明）──────────────────────
- *   参考实现在它自己的 pods/RfcommController.kt:653-664 的「首次有效电量」分支里
- *   用显式 Component 启动本 Activity。本项目的对应位置是 pods/MoondropLink.kt /
- *   pods/ControlBridge.kt 的 PodEvent.Connected 分支（这两处不允许改），
- *   所以本文件只提供可被启动的宿主 + manifest 声明 + 一个 action 过滤器：
+ * ── 谁负责弹它、数据从哪来 ────────────────────────────────────────────────
+ *   pods/ControlBridge.kt 在首次拿到有效电量的那一刻用**显式组件**启动本 Activity，
+ *   并把设备名与电量直接作为 extra 带进来（EXTRA_DEVICE_NAME / EXTRA_STATUS）：
  *
  *     context.startActivity(
- *         Intent(ConnectionPopupActivity.ACTION_SHOW_CONNECTION_POPUP)
- *             .setPackage(context.packageName)
- *             .putExtra(HyperPodsAction.EXTRA_BATTERY, batteryBundle)
+ *         Intent(context, ConnectionPopupActivity::class.java)
+ *             .putExtra(ConnectionPopupActivity.EXTRA_STATUS, batteryBundle)
  *             .putExtra(HyperPodsAction.EXTRA_DEVICE_NAME, name)
  *             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
  *     )
  *
- *   （batteryBundle 就是 ControlBridge 往广播里塞的那份 EXTRA_BATTERY；
- *     action 的字符串值 = ConnectionPopupActivity.ACTION_SHOW_CONNECTION_POPUP
- *     = chen.action.hyperpods.moondrop.show_connection_popup；
- *     也可以直接按类名显式启动 moe.chenxy.hyperpods.ui.ConnectionPopupActivity，
- *     那样不依赖 action 过滤器。）
+ *   因此弹窗首帧就有内容。下面那个广播接收器只是「外部按 action 拉起、后续又收到状态广播时」
+ *   的刷新兜底：本应用已不再是 Xposed 模块，hook 时代那批跨进程广播已不存在。
+ *   也可以按 action 隐式拉起：chen.action.hyperpods.moondrop.show_connection_popup
+ *   （= ConnectionPopupActivity.ACTION_SHOW_CONNECTION_POPUP，manifest 里有同名过滤器）。
  */
 package moe.chenxy.hyperpods.ui
 
@@ -125,7 +120,7 @@ class ConnectionPopupActivity : ComponentActivity() {
     companion object {
         /**
          * 隐式启动本弹窗用的 action（manifest 里有同名过滤器）。
-         * hook / 其它进程不引本类时可以直接照抄这个字符串值：
+         * 外部按 action 拉起本类时可以直接照抄这个字符串值：
          * `chen.action.hyperpods.moondrop.show_connection_popup`
          */
         const val ACTION_SHOW_CONNECTION_POPUP =
@@ -216,7 +211,8 @@ private fun ConnectionPopupContent(
     var deviceName by remember { mutableStateOf(initialDeviceName) }
     var battery by remember { mutableStateOf(initialBattery) }
 
-    // 连接 / 电量 / 断开都从本模块自己的跨进程广播来（与弹窗、详情页同一份状态源）
+    // 首帧内容由启动方（pods/ControlBridge.kt）带进来的 extra 提供；
+    // 这里保留广播监听，作为「后续状态变化 / 外部按 action 拉起」时的刷新兜底。
     DisposableEffect(Unit) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(receiverContext: Context?, intent: Intent?) {

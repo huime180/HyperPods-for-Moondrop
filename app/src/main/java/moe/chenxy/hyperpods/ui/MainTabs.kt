@@ -1,17 +1,16 @@
 /*
- * HyperPods for Moondrop — 模块页骨架（底部三页签 + HorizontalPager）
+ * HyperPods for Moondrop — 主页面骨架（底部两页签 + HorizontalPager）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 结构对齐参考实现 moondrop-pods 的 ui/MainTabs.kt:61-533：
  *   · 外层 Scaffold 只挂 bottomBar（MainBottomNavigation）+ 分页器，
  *     每个页签自己再带一个 Scaffold + TopAppBar（顶部栏随页签一起动）；
- *   · 页签切换走 MainTabsPagerState（点击平滑滚动，滑动时反向同步 selectedTab）；
- *   · 重启作用域确认框挂在同一个 Scaffold 里（OverlayDialog 渲染到根 Scaffold 的弹层宿主）；
- *   · 模块页的 StatusCard 需要的数据（LSPosed 服务 / 蓝牙开关 / 已配对数量 / 蓝牙进程是否在响应）
- *     全部由 MainUI 持有并往下传，页签本身不自己去读（同参考实现 :72-76 的参数表）。
+ *   · 页签切换走 MainTabsPagerState（点击平滑滚动，滑动时反向同步 selectedTab）。
  *
- * 与参考实现的差异（本项目没有对应能力，刻意不搬）：
- *   · 浮动 / 毛玻璃底栏需要 miuix-blur 依赖，本项目未引入，因此底栏只有固定一种形态。
+ * 与参考实现的差异：
+ *   · 浮动 / 毛玻璃底栏不在这里做，底栏只有固定一种形态；
+ *   · 只有「耳机 / 设置」两页 —— 参考实现里的「模块」页签（LSPosed 状态卡、
+ *     模块开关、重启作用域）属于 Xposed 模块，本应用已不再是模块，整组删除。
  */
 package moe.chenxy.hyperpods.ui
 
@@ -30,14 +29,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import io.github.libxposed.service.XposedService
 import moe.chenxy.hyperpods.R
 import moe.chenxy.hyperpods.pods.MoondropLink
 import moe.chenxy.hyperpods.pods.PodSnapshot
-import moe.chenxy.hyperpods.ui.components.RestartScopeDialog
-import moe.chenxy.hyperpods.ui.components.RestartScopeState
 import moe.chenxy.hyperpods.ui.pages.EarphonesTabPage
-import moe.chenxy.hyperpods.ui.pages.HomePage
 import moe.chenxy.hyperpods.ui.pages.SettingsPage
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -46,7 +41,6 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.rememberTopAppBarState
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.icon.extended.Refresh
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
@@ -65,17 +59,8 @@ internal fun MainTabsScaffold(
     onTabSelected: (MainTab) -> Unit,
     snapshot: PodSnapshot,
     settings: ModuleSettingsState,
-    xposedService: XposedService?,
-    bluetoothServiceResponsive: Boolean,
-    bluetoothStatus: BluetoothStatus,
-    onBluetoothStatusClick: () -> Unit,
-    onPairedBluetoothClick: () -> Unit,
-    showDevicePicker: Boolean,
-    onExitDevicePicker: () -> Unit,
     themeMode: MutableState<Int>,
     onThemeModeChange: (Int) -> Unit,
-    restartScope: RestartScopeState,
-    onRequestRestartScope: () -> Unit,
     onOpenAbout: () -> Unit,
     onOpenGestures: () -> Unit,
 ) {
@@ -131,19 +116,8 @@ internal fun MainTabsScaffold(
                 key = { page -> tabs[page] },
             ) { page ->
                 when (tabs[page]) {
-                    MainTab.Module -> ModuleTabPage(
-                        xposedService = xposedService,
-                        bluetoothServiceResponsive = bluetoothServiceResponsive,
-                        bluetoothStatus = bluetoothStatus,
-                        onBluetoothStatusClick = onBluetoothStatusClick,
-                        onPairedBluetoothClick = onPairedBluetoothClick,
-                        onRequestRestartScope = onRequestRestartScope,
-                    )
-
                     MainTab.Earphones -> EarphonesTabShell(
                         snapshot = snapshot,
-                        showPicker = showDevicePicker,
-                        onExitDevicePicker = onExitDevicePicker,
                         onOpenGestures = onOpenGestures,
                     )
 
@@ -158,67 +132,13 @@ internal fun MainTabsScaffold(
                 }
             }
         }
-
-        RestartScopeDialog(state = restartScope)
     }
 }
 
-/**
- * 模块页：纯状态（两张状态卡 + 系统信息），右上角是「重启作用域」
- * （同参考实现的模块页动作位）。模块设置不在这里，在设置页。
- */
-@Composable
-private fun ModuleTabPage(
-    xposedService: XposedService?,
-    bluetoothServiceResponsive: Boolean,
-    bluetoothStatus: BluetoothStatus,
-    onBluetoothStatusClick: () -> Unit,
-    onPairedBluetoothClick: () -> Unit,
-    onRequestRestartScope: () -> Unit,
-) {
-    val scrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = stringResource(R.string.app_name),
-                largeTitle = stringResource(R.string.app_name),
-                scrollBehavior = scrollBehavior,
-                actions = {
-                    IconButton(onClick = onRequestRestartScope) {
-                        Icon(
-                            imageVector = MiuixIcons.Refresh,
-                            contentDescription = stringResource(R.string.restart_scope),
-                        )
-                    }
-                },
-            )
-        },
-    ) { pagePadding ->
-        HomePage(
-            xposedService = xposedService,
-            bluetoothServiceResponsive = bluetoothServiceResponsive,
-            bluetoothEnabled = bluetoothStatus.enabled,
-            bondedDeviceCount = bluetoothStatus.bondedCount,
-            onBluetoothStatusClick = onBluetoothStatusClick,
-            onPairedBluetoothClick = onPairedBluetoothClick,
-            modifier = Modifier
-                .overScrollVertical()
-                .nestedScroll(scrollBehavior.nestedScrollConnection),
-            // 底部不用内层 Scaffold 的 innerPadding：底栏高度已由外层 Scaffold 的
-            // padding 让出来了，再用一次会把系统导航栏内边距重复算一遍
-            // （同参考实现 MainTabs.kt:313-325 传固定 pageBottomContentPadding 的取法）。
-            contentPadding = PaddingValues(top = pagePadding.calculateTopPadding()),
-            bottomContentPadding = PAGE_BOTTOM_PADDING,
-        )
-    }
-}
-
-/** 耳机页：连上时是设备详情，未连上（或被要求看已配对列表）时是设备选择页。 */
+/** 耳机页：连上时是设备详情，未连上时是设备选择页。 */
 @Composable
 private fun EarphonesTabShell(
     snapshot: PodSnapshot,
-    showPicker: Boolean,
-    onExitDevicePicker: () -> Unit,
     onOpenGestures: () -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
@@ -234,18 +154,6 @@ private fun EarphonesTabShell(
                 title = title,
                 largeTitle = title,
                 scrollBehavior = scrollBehavior,
-                navigationIcon = {
-                    // 「配对蓝牙」卡片进来的设备选择页：耳机连着时给一个回详情页的箭头
-                    // （同参考实现 MainTabs.kt:360-368 的 onBackToDevicePicker 位置）
-                    if (showPicker && snapshot.connected) {
-                        IconButton(onClick = onExitDevicePicker) {
-                            Icon(
-                                imageVector = MiuixIcons.Back,
-                                contentDescription = stringResource(R.string.back),
-                            )
-                        }
-                    }
-                },
                 actions = {
                     if (snapshot.connected) {
                         IconButton(onClick = { MoondropLink.refreshAll() }) {
@@ -261,11 +169,8 @@ private fun EarphonesTabShell(
     ) { pagePadding ->
         EarphonesTabPage(
             snapshot = snapshot,
-            showPicker = showPicker,
             onDeviceSelected = { device ->
                 MoondropLink.connect(device)
-                // 选完就退出「强制设备选择页」，连接成功后自动落到设备详情
-                onExitDevicePicker()
             },
             onOpenGestures = onOpenGestures,
             contentPadding = PaddingValues(
@@ -279,7 +184,7 @@ private fun EarphonesTabShell(
     }
 }
 
-/** 设置页：模块级开关 + 应用外观与各入口。 */
+/** 设置页：应用外观（主题）+ 通知开关 + 手势 / 关于入口。 */
 @Composable
 private fun SettingsTabShell(
     settings: ModuleSettingsState,

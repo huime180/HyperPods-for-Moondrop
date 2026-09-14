@@ -17,9 +17,6 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
-        // 模块页「构建时间」一行：与参考实现 moondrop-pods 的 app/build.gradle.kts:30 同一写法
-        // （配置期取一次当前时间，编进 BuildConfig.BUILD_TIMESTAMP）。删掉这一行即可回退。
-        buildConfigField("long", "BUILD_TIMESTAMP", System.currentTimeMillis().toString())
     }
 
     buildTypes {
@@ -28,7 +25,7 @@ android {
             isMinifyEnabled = false
         }
         release {
-            // 模块靠字符串名反射 hook，混淆模块自身不影响反射目标，因此可以放心开启
+            // 普通应用，未开启混淆与资源压缩：保持与 debug 一致的构建产物，暂不引入混淆规则
             isMinifyEnabled = false
             isShrinkResources = false
         }
@@ -46,7 +43,6 @@ android {
 
     packaging {
         resources {
-            merges += "META-INF/xposed/*"
             excludes += setOf(
                 "META-INF/DEPENDENCIES",
                 "META-INF/LICENSE*",
@@ -70,11 +66,6 @@ kotlin {
 
 dependencies {
     implementation(libs.coreKtx)
-    // libxposed API：仅编译期，运行时由 LSPosed / Vector 注入
-    compileOnly(libs.libxposedApi)
-    // LSPosed 服务（应用进程侧）：绑定框架服务后可读框架版本与已勾选作用域，
-    // 供模块页的「LSPosed 已激活 / 作用域齐全」状态卡使用。
-    implementation(libs.libxposedService)
 
     implementation(libs.kotlinx.serialization.json)
 

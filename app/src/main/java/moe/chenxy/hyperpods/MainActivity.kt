@@ -1,8 +1,9 @@
 /*
- * HyperPods for Moondrop — 模块 UI 入口
+ * HyperPods for Moondrop — 应用 UI 入口
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * 由广播 chen.action.hyperpods.moondrop.show_ui 启动（见 AndroidManifest 的 intent-filter）。
+ * 桌面的 LAUNCHER 图标直接拉起本 Activity（见 AndroidManifest 的 intent-filter）；
+ * 快速弹窗（ui/PopupActivity.kt）的「更多设置」也按类名显式打开它。
  * 主题模式的读取/持久化与参考实现 _refs/OppoPods/.../MainActivity.kt:20-48 同一写法。
  * 首帧额外主动申请一次蓝牙/通知运行时权限（见 ui/Permissions.kt）：
  * 冷启动兜底连接需要 BLUETOOTH_CONNECT，不申请的话第一次打开只能等用户在系统里手动给。

@@ -126,9 +126,12 @@ object MoondropLink {
     private val responses = HashMap<Int, java.util.concurrent.CompletableFuture<ByteArray>>()
 
     /**
-     * 系统编码重放钩子：由 `ControlBridge` 注入 —— 它知道怎么给 `com.android.bluetooth`
-     * 发显式广播 `UI_INIT`（那边的 hook 会回一条 `CODEC_CHANGED`）。
-     * 协议层不直接依赖桥：未注入时静默跳过（纯 JVM 单测 / 桥未初始化）。
+     * 系统编码重放钩子：由外部注入，**当前没有任何注入方**。
+     *
+     * 原注入方是 `ControlBridge`（给 `com.android.bluetooth` 里的 hook 发显式广播 `UI_INIT`，
+     * 那边回一条 `CODEC_CHANGED`），那套 hook 已随 Xposed 模块删除。保留这个接口是为了让
+     * 协议层不硬依赖任何系统侧实现：未注入时静默跳过（纯 JVM 单测 / 未初始化），
+     * 将来若能从系统 A2DP 拿到真实编码，再接上即可。
      */
     @Volatile private var systemCodecReprobe: (() -> Unit)? = null
 
@@ -170,7 +173,7 @@ object MoondropLink {
     fun isInitialized(): Boolean = appContext != null
 
     /**
-     * 注册「请系统蓝牙进程重放一次真实编码」的钩子（由 ControlBridge 注入）。
+     * 注册「请系统侧重放一次真实编码」的钩子（可选；当前无人注册）。
      * 传 null 可注销。调用次数由本侧限死，见 [reprobeSystemCodec]。
      */
     fun setSystemCodecReprobe(action: (() -> Unit)?) {
@@ -844,7 +847,7 @@ object MoondropLink {
      *   ④ 只有全部重试都失败才回退到最后一次被设备确认的值（[lhdcConfirmed]，
      *      可能为 null = 未知），并打日志 —— 绝不留一个永远错误的值；
      *   ⑤ 最后请系统侧重放一次真实编码：系统 A2DP 是异步重新协商的，
-     *      见 [reprobeSystemCodec]。
+     *      见 [reprobeSystemCodec]（该钩子当前无人注册，因此这一步会直接跳过）。
      */
     fun setLhdc(on: Boolean) {
         val lastConfirmed = lhdcConfirmed
@@ -896,9 +899,9 @@ object MoondropLink {
      * LHDC 切换后请系统侧重放一次真实 A2DP 编码。
      *
      * 为什么需要：耳机侧开关生效后，系统 A2DP 会话要**异步**重新协商才会从 AAC 切到
-     * LHDC；而 `CODEC_CHANGED` 只在蓝牙栈自己的回调时机才来（这个时机不保证），
-     * 于是「当前编码」可能长期停在切换前的旧值。这里主动问：由 ControlBridge 注入的
-     * 钩子向 `com.android.bluetooth` 发 `UI_INIT`，那边的 hook 回一条 `CODEC_CHANGED`。
+     * LHDC，而系统回调的时机不保证，于是「当前编码」可能长期停在切换前的旧值。
+     * 有钩子时这里主动问一次系统侧；**当前没有注入方**（原注入方是蓝牙进程里的 hook，
+     * 已随模块删除），所以本方法会直接打一条日志后返回。
      *
      * **有界**：固定 [CODEC_REPROBE_ATTEMPTS] 次、间隔 [CODEC_REPROBE_INTERVAL_MS]，
      * 发完即止（不是轮询）；断开时会取消本协程（见 [disconnectInternal]）。
@@ -906,7 +909,7 @@ object MoondropLink {
     private fun reprobeSystemCodec() {
         val probe = systemCodecReprobe
         if (probe == null) {
-            Log.d(TAG, "codec re-probe skipped: no ControlBridge registered")
+            Log.d(TAG, "codec re-probe skipped: no system codec reprobe hook registered")
             return
         }
         codecReprobeJob?.cancel()
@@ -975,9 +978,11 @@ object MoondropLink {
 
     /**
      * 由系统侧（A2DP 编解码协商）回调进来，用于 UI 显示当前实际编码。
+     * **当前无人调用**：原调用方是收蓝牙进程 `CODEC_CHANGED` 广播的 ControlBridge，
+     * 那条链路已随模块删除，因此详情页的「当前编码」会一直落到「未知」。
      *
-     * ⚠ 断线时 [disconnectInternal] 会清空 [activeCodec]；此时**迟到**的
-     * `CODEC_CHANGED`（LHDC 切换后的重放探测、系统回调排队）绝不能把旧编码写回来，
+     * ⚠ 断线时 [disconnectInternal] 会清空 [activeCodec]；此时**迟到**的回调
+     * （LHDC 切换后的重放探测、系统回调排队）绝不能把旧编码写回来，
      * 否则「断开清空」会被立刻撤销。未连接时只记日志。
      */
     fun onSystemCodecChanged(codecName: String) {
@@ -1063,7 +1068,10 @@ object MoondropLink {
 
 }
 
-/** 让 hook 进程读到当前系统电量，避免直接暴露内部对象。 */
+/**
+ * 把系统蓝牙栈读到的电量放在这里，避免直接暴露 [MoondropLink] 的内部对象。
+ * ⚠ 原读取方是蓝牙进程里的 hook（已随模块删除），因此现在是只写不读的兼容出口。
+ */
 object BatteryStateAccess {
     @Volatile var systemLevel: Int = BATTERY_UNKNOWN
 }

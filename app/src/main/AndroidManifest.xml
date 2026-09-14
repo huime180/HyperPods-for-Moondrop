@@ -18,19 +18,18 @@
             android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density|fontScale|uiMode|locale|layoutDirection|smallestScreenSize|colorMode">
             <intent-filter>
-                <action android:name="chen.action.hyperpods.moondrop.show_ui" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-            <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
         <!--
-          快速弹窗（PuddingPods 的主入口形态）：从超级岛 / 设备卡 / 通知进来只显示
-          电量 + 降噪 + 快捷控制。半透明主题 + 卡片式布局，点卡片外或「关闭」退出。
+          快速弹窗：从通知点击 / 桌面图标进来只显示电量 + 降噪 + 快捷控制。
+          半透明主题 + 卡片式布局，点卡片外或「关闭」退出。
           taskAffinity="" + excludeFromRecents="true" 与 OppoPods 的 PopupActivity 一致。
+
+          这个 action 是 pods/PodNotification.kt 点击通知时的落点（它显式 setPackage，
+          命中本应用自己的组件），因此 intent-filter 必须保留。
         -->
         <activity
             android:name=".ui.PopupActivity"
@@ -48,11 +47,10 @@
 
         <!--
           连接弹窗（ConnectionPopupActivity）：连上耳机时弹一次，显示设备名 + 三路电量后自动关闭。
-          由应用进程 / hook 启动，两种方式都行：
-            · 显式组件：moe.chenxy.hyperpods.ui.ConnectionPopupActivity（推荐，不依赖 action）；
-            · 隐式 action：chen.action.hyperpods.moondrop.show_connection_popup
-              （字符串值见该 Activity 的 ACTION_SHOW_CONNECTION_POPUP 常量）。
-          extras：status 或 batteryParams（Bundle，ControlBridge 的电量编码）+ device_name + dismiss_seconds。
+          由 pods/ControlBridge.kt 以显式组件启动（推荐，不依赖 action）；也保留这条隐式 action，
+          方便外部按 action 拉起：
+            chen.action.hyperpods.moondrop.show_connection_popup
+          extras：status 或 batteryParams（Bundle，电量编码）+ device_name + dismiss_seconds。
           复用 Popup 的半透明主题；taskAffinity="" + excludeFromRecents="true" 与 PopupActivity 一致。
         -->
         <activity
@@ -70,43 +68,13 @@
         </activity>
 
         <!--
-          应用侧跨进程控制桥（pods/ControlBridge.kt）。
-          由 manifest 声明，因此系统各进程用显式广播即可唤醒本应用进程处理控制命令，
-          不要求用户先打开本应用。显式广播（setPackage）不受 Android 8+ 隐式广播限制。
-        -->
-        <receiver
-            android:name=".pods.ControlReceiver"
-            android:exported="true"
-            android:enabled="true">
-            <intent-filter>
-                <action android:name="chen.action.hyperpods.moondrop.pods_connected" />
-                <action android:name="chen.action.hyperpods.moondrop.pods_disconnected" />
-                <action android:name="chen.action.hyperpods.moondrop.ui_init" />
-                <action android:name="chen.action.hyperpods.moondrop.request_battery" />
-                <action android:name="chen.action.hyperpods.moondrop.request_capabilities" />
-                <action android:name="chen.action.hyperpods.moondrop.anc_select" />
-                <action android:name="chen.action.hyperpods.moondrop.gain_select" />
-                <action android:name="chen.action.hyperpods.moondrop.led_select" />
-                <action android:name="chen.action.hyperpods.moondrop.prompt_tone_select" />
-                <action android:name="chen.action.hyperpods.moondrop.prompt_volume_select" />
-                <action android:name="chen.action.hyperpods.moondrop.lhdc_select" />
-                <action android:name="chen.action.hyperpods.moondrop.dual_connection_select" />
-                <action android:name="chen.action.hyperpods.moondrop.low_latency_select" />
-                <action android:name="chen.action.hyperpods.moondrop.gesture_select" />
-                <action android:name="chen.action.hyperpods.moondrop.request_gesture" />
-            </intent-filter>
-        </receiver>
-
-        <!--
           应用侧「耳机连上就把本应用进程拉起来」（pods/BluetoothConnectReceiver.kt）。
-          上面那个 ControlReceiver 的 PODS_CONNECTED 来自 com.android.bluetooth 里的 hook，
-          模块没在 LSPosed 激活时它不存在 —— 「没打开过应用 + 在系统蓝牙里连上耳机」时进程就
-          不会被唤醒，通知也无从谈起。这条 action 是系统蓝牙进程在 A2DP 连接状态变化时发出的
-          **系统广播**（android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED，
+          协议栈本来就在应用进程里（pods/MoondropLink.kt 自己 connectGatt / 建 RFCOMM），
+          所以连耳机、读电量、发通知都不需要任何 hook；这条系统广播就是进程被唤醒的唯一入口。
+          它监听系统蓝牙进程在 A2DP 连接状态变化时发出的**系统广播**
+          （android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED，
           代码里的常量是 BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED），
-          在 Android 8+ 的隐式广播豁免清单里，因此 manifest 静态注册也能收到
-          （本机核实：com.android.settings 的 .bluetooth.AudioShareStateChangedReceiver 同样
-          静态注册了这条 action）。
+          在 Android 8+ 的隐式广播豁免清单里，因此 manifest 静态注册也能收到。
           android:exported 按平台要求写 true：发送方是系统 / 蓝牙进程，不是本应用。
         -->
         <receiver
@@ -117,21 +85,5 @@
                 <action android:name="android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
-
-        <!-- LSPosed / libxposed 模块声明 -->
-        <meta-data android:name="xposedmodule" android:value="true" />
-        <!--
-          LSPosed 共享首选项桥：设置页（ui/ModuleSettings.kt）写
-          getSharedPreferences("hyperpods_moondrop_settings")，hook 侧
-          （hook/XposedEntry.kt:117 的 getRemotePreferences("hyperpods_moondrop_settings")）读同一组。
-          没有这条 meta-data，LSPosed 不会把模块首选项暴露给本应用进程，
-          设置页写下的值就到不了 hook 进程（hook 侧会回落到默认值）。
-        -->
-        <meta-data android:name="xposedsharedprefs" android:value="true" />
-        <meta-data
-            android:name="xposeddescription"
-            android:value="MOONDROP (水月雨) 耳机 HyperOS 系统级控制" />
-        <meta-data android:name="xposedminversion" android:value="93" />
-        <meta-data android:name="xposedscope" android:resource="@array/xposedscope" />
     </application>
 </manifest>
