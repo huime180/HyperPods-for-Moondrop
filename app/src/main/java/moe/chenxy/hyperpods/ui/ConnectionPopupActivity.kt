@@ -57,6 +57,7 @@ package moe.chenxy.hyperpods.ui
 import android.graphics.Color as AndroidColor
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
@@ -139,8 +140,30 @@ class ConnectionPopupActivity : ComponentActivity() {
         /** 电量 Bundle extra（与参考实现同名）；同时也接受 HyperPodsAction.EXTRA_BATTERY。 */
         const val EXTRA_STATUS = "status"
 
+        /**
+         * 弹窗是否真的显示过 / 此刻是否可见。
+         *
+         * 为什么需要：耳机连上时本弹窗是从**后台**启动的，而 Android 10 起系统可以**静默**拦掉
+         * 后台启动 Activity（BAL，见 ui/Permissions.kt）—— 不抛异常、也没有任何回调。
+         * pods/ControlBridge.kt 就在启动后回头确认这两个标记，没落地就重试（同进程，静态标记即可）。
+         */
+        @Volatile internal var lastShownAt: Long = 0L
+
+        @Volatile internal var visible: Boolean = false
+
         private val DISMISS_SECOND_OPTIONS = listOf(3, 5, 8, 10, 15, 30)
         private const val DEFAULT_DISMISS_SECONDS = 8
+    }
+
+    override fun onResume() {
+        super.onResume()
+        visible = true
+        lastShownAt = SystemClock.elapsedRealtime()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        visible = false
     }
 
     @Suppress("DEPRECATION")

@@ -5,7 +5,8 @@
  * 为什么还需要它：
  *   协议客户端（MoondropLink）跑在应用进程，但它的状态变化要分发给应用里的两个消费者：
  *     · pods/PodNotification.kt —— 应用自己那条耳机状态通知（连上/电量变化重画，断开撤掉）；
- *     · ui/PopupActivity —— 首次拿到有效电量时唤出「控制弹窗」（控制栏页面 / 快速弹窗）。
+ *     · ui/ConnectionPopupActivity —— 首次拿到有效电量时弹一次「连接弹窗」（三路电量）；
+ *       状态栏通知在同一条事件里一起刷新（见下），所以两者是**同时**出现的。
  *   这两件事都要一个长期存活的 [PodListener]，而 listener 只能在初始化那一刻注册，
  *   所以由本对象在 [ensureInit] 里注册一次，之后一直转发。
  *
@@ -21,14 +22,16 @@ package moe.chenxy.hyperpods.pods
 
 import android.content.Context
 import android.content.Intent
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
-import moe.chenxy.hyperpods.ui.PopupActivity
+import moe.chenxy.hyperpods.ui.ConnectionPopupActivity
 import moe.chenxy.hyperpods.ui.MODULE_PREFS_GROUP
 import moe.chenxy.hyperpods.ui.canStartActivityFromBackground
 import moe.chenxy.hyperpods.utils.data.HyperPodsPrefsKey
+import moe.chenxy.hyperpods.utils.data.HyperPodsAction
 
 private const val TAG = "ControlBridge"
 
@@ -43,7 +46,7 @@ private const val TAG = "ControlBridge"
 private const val POPUP_SETTLE_DELAY_MS = 600L
 
 /**
- * 「控制弹窗」的重试间隔与次数。
+ * 「连接弹窗」的重试间隔与次数。
  *
  * 后台启动 Activity 可能被系统**静默**拦掉（Android 10 起的 BAL 限制，见 ui/Permissions.kt）：
  * 不抛异常、也没有任何回调，所以启动后要回头确认「这次到底起来了没有」——没起来就再试，
@@ -51,6 +54,26 @@ private const val POPUP_SETTLE_DELAY_MS = 600L
  */
 private const val POPUP_RETRY_DELAY_MS = 800L
 private const val POPUP_MAX_ATTEMPTS = 3
+
+/** 电量 Bundle 编码：255 = 未知；置 bit7 表示充电中（与 MIUI 原生耳机页的约定一致）。 */
+private object BatteryCodecWire {
+    const val UNKNOWN = 255
+
+    fun encode(level: Int, charging: Boolean): Int = when {
+        level < 0 -> UNKNOWN
+        charging -> (level.coerceIn(0, 100)) or 128
+        else -> level.coerceIn(0, 100)
+    }
+
+    fun toBundle(b: BatterySnapshot): Bundle = Bundle().apply {
+        putInt("left", encode(b.left, b.leftCharging))
+        putInt("right", encode(b.right, b.rightCharging))
+        putInt("case", encode(b.case, b.caseCharging))
+        putBoolean("left_charging", b.leftCharging)
+        putBoolean("right_charging", b.rightCharging)
+        putBoolean("case_charging", b.caseCharging)
+    }
+}
 
 object ControlBridge {
 
@@ -97,13 +120,13 @@ object ControlBridge {
                     val snap = event.snapshot
                     if (!snap.connected) return
                     PodNotification.onSnapshot(ctx, snap)
-                    maybeShowControlPopup(ctx, snap)
+                    maybeShowConnectionPopup(ctx, snap)
                 }
                 is PodEvent.BatteryChanged -> {
                     val snap = MoondropLink.snapshot()
                     if (!snap.connected) return
                     PodNotification.onSnapshot(ctx, snap)
-                    maybeShowControlPopup(ctx, snap)
+                    maybeShowConnectionPopup(ctx, snap)
                 }
                 is PodEvent.Disconnected -> {
                     // 断开＝这次会话结束：撤销还没启动的弹窗，并允许重连后再弹一次
@@ -117,13 +140,13 @@ object ControlBridge {
     }
 
     /**
-     * 首次拿到有效电量时**排队**唤出「控制弹窗」（ui/PopupActivity，即控制栏页面 / 快速弹窗）。
+     * 首次拿到有效电量时**排队**弹出「连接弹窗」（ui/ConnectionPopupActivity，三路电量），
+     * 延后 [POPUP_SETTLE_DELAY_MS] 让首批电量帧落定。
      *
-     * 只排队、不在这里直接启动的原因见 [POPUP_SETTLE_DELAY_MS] 的说明。
-     * 弹窗本体**不读 extra**：它自己订阅进程内状态（ui/PodState.kt 的 rememberPodSnapshot），
-     * 所以这里只负责把页面唤起来，内容永远是最新的。
+     * 与状态栏通知的关系：同一条事件里先 [PodNotification.onSnapshot] 刷新通知、再排这一次弹窗，
+     * 所以「唤醒通知 + 唤醒连接弹窗」是同时发生的（设置页两个开关各自独立控制）。
      */
-    private fun maybeShowControlPopup(context: Context, snapshot: PodSnapshot) {
+    private fun maybeShowConnectionPopup(context: Context, snapshot: PodSnapshot) {
         if (!snapshot.battery.anyKnown) return
         if (!autoPopupEnabled(context)) return
         val address = snapshot.deviceAddress
@@ -134,22 +157,23 @@ object ControlBridge {
         if (pendingPopup != null) return
         val pending = Runnable {
             pendingPopup = null
-            launchControlPopupWithRetry(context)
+            launchConnectionPopupWithRetry(context)
         }
         pendingPopup = pending
         mainHandler.postDelayed(pending, POPUP_SETTLE_DELAY_MS)
     }
 
     /**
-     * 唤出「控制弹窗」，并在被系统拦掉时**重试**（「重新弹窗」）。
+     * 弹出「连接弹窗」，并在被系统拦掉时**重试**（「重新弹窗」）。
      *
-     * 判定落地的方式：启动前后取 [PopupActivity.lastShownAt] / [PopupActivity.visible] 对比 ——
-     * 弹窗进 onResume 时会写这两个标记。没写说明这一次启动没落地（BAL 静默拦截），再试一次；
-     * 试满 [POPUP_MAX_ATTEMPTS] 次仍未落地就放弃并留下明确日志。
+     * 判定落地的方式：启动前后取 [ConnectionPopupActivity.lastShownAt] /
+     * [ConnectionPopupActivity.visible] 对比 —— 弹窗进 onResume 时会写这两个标记。
+     * 没写说明这一次启动没落地（BAL 静默拦截），再试一次；试满 [POPUP_MAX_ATTEMPTS] 次
+     * 仍未落地就放弃并留下明确日志。
      *
      * 已在显示时用 SINGLE_TOP + CLEAR_TOP 把它带到前台，不叠新实例。
      */
-    private fun launchControlPopupWithRetry(context: Context) {
+    private fun launchConnectionPopupWithRetry(context: Context) {
         var attempt = 0
         fun attemptOnce() {
             attempt++
@@ -157,26 +181,35 @@ object ControlBridge {
             // 缺「显示在其他应用上层」/「后台弹出界面」时系统会静默拦掉，先留一条可诊断日志；
             // 判断结果不影响启动尝试 —— 有的 ROM 即使没这个权限也放行。
             if (!canStartActivityFromBackground(context)) {
-                Log.w(TAG, "控制弹窗可能被 BAL 拦掉：缺「显示在其他应用上层」/「后台弹出界面」权限")
+                Log.w(TAG, "连接弹窗可能被 BAL 拦掉：缺「显示在其他应用上层」/「后台弹出界面」权限")
             }
             val startedAt = SystemClock.elapsedRealtime()
+            val snapshot = MoondropLink.snapshot()
             runCatching {
                 context.startActivity(
-                    Intent(context, PopupActivity::class.java).addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                            Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    )
+                    Intent(context, ConnectionPopupActivity::class.java)
+                        .putExtra(
+                            ConnectionPopupActivity.EXTRA_STATUS,
+                            BatteryCodecWire.toBundle(snapshot.battery),
+                        )
+                        .putExtra(HyperPodsAction.EXTRA_DEVICE_NAME, snapshot.deviceName)
+                        .addFlags(
+                            Intent.FLAG_ACTIVITY_NEW_TASK or
+                                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        )
                 )
-            }.onFailure { Log.w(TAG, "控制弹窗启动失败: ${it.message}") }
+            }.onFailure { Log.w(TAG, "连接弹窗启动失败: ${it.message}") }
 
             if (attempt >= POPUP_MAX_ATTEMPTS) {
-                Log.w(TAG, "控制弹窗试了 $attempt 次仍未确认显示（可能一直受后台启动限制）")
+                Log.w(TAG, "连接弹窗试了 $attempt 次仍未确认显示（可能一直受后台启动限制）")
                 return
             }
             mainHandler.postDelayed({
-                if (PopupActivity.visible || PopupActivity.lastShownAt >= startedAt) {
-                    Log.i(TAG, "控制弹窗已在第 $attempt 次尝试后显示")
+                if (ConnectionPopupActivity.visible ||
+                    ConnectionPopupActivity.lastShownAt >= startedAt
+                ) {
+                    Log.i(TAG, "连接弹窗已在第 $attempt 次尝试后显示")
                 } else {
                     attemptOnce()
                 }

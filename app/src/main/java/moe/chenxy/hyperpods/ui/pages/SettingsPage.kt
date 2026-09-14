@@ -14,9 +14,9 @@
  *   · 「通知栏显示」—— 控制**应用自己**发的那条耳机状态通知（pods/PodNotification.kt）。
  *     本应用已不是 Xposed 模块，这条通知不需要任何 hook，因此这个开关仍然有意义；
  *     键是 HyperPodsPrefsKey.SHOW_NOTIFICATION，读写仍然只走 [ModuleSettingsState]。
- *   · 「连接时自动唤出控制弹窗」—— 控制 pods/ControlBridge.kt 在耳机连上后自动唤出的
- *     ui/PopupActivity（控制栏页面 / 快速弹窗）；键 HyperPodsPrefsKey.AUTO_POPUP_ON_CONNECT，
- *     同样只走 [ModuleSettingsState]。
+ *   · 「连接时自动唤出连接弹窗」—— 控制 pods/ControlBridge.kt 在耳机连上后自动弹出的
+ *     ui/ConnectionPopupActivity（三路电量，与状态栏通知同时刷新）；键
+ *     HyperPodsPrefsKey.AUTO_POPUP_ON_CONNECT，同样只走 [ModuleSettingsState]。
  *   · 应用级入口：手势操作（能力位门控）、关于。
  */
 package moe.chenxy.hyperpods.ui.pages
@@ -51,7 +51,7 @@ private val SECTION_GAP = 12.dp
 /**
  * 设置页。
  *
- * @param settings 应用侧设置（通知栏显示 / 连接时自动唤出控制弹窗）
+ * @param settings 应用侧设置（通知栏显示 / 连接时自动唤出连接弹窗）
  * @param themeMode 0 跟随系统 / 1 浅色 / 2 深色（由 MainActivity 持久化）
  * @param hasGestures 耳机上报了 feature 22（TOUCHV2）时为真 —— 手势入口行只有此时才出现
  *                    （与设备页的「手势操作」行同一套能力门控）
