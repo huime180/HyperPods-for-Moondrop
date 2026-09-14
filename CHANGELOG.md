@@ -1,3 +1,49 @@
+## 当前状态（去模块化之后）
+
+> 本节描述**当前代码**，用来和下面按时间倒序的历史条目对齐：
+> 历史条目写于 LSPosed 模块时期，其中的 `hook/`、作用域、`module.prop`、跨进程广播、
+> 融合设备中心接管、设置页伪装等内容**已全部删除**，只作为变更记录保留。
+
+* **形态**：MiuixMoondrop 现在是**普通 Android 应用**——协议栈（GAIA over GATT / RFCOMM）
+  跑在应用进程内，**不需要 root，也不需要 Xposed / LSPosed**。整个 `hook/` 目录、
+  `app/src/main/resources/META-INF/xposed/`（`module.prop` / `scope.list` / `java_init.list`）、
+  `res/values/arrays.xml`（`xposedscope`）以及 `XposedServiceState` / `BluetoothStatus` /
+  `HomePage` / `RestartScope` 等模块专属页面都已删除。
+* **身份**：应用名 `MiuixMoondrop`，`applicationId = moe.huime.miuixmoondrop`，
+  Gradle `rootProject.name = "MiuixMoondrop"`，CI 产物名 `MiuixMoondrop-apk`；
+  namespace 与 Kotlin 包名仍是 `moe.chenxy.hyperpods`。仓库页
+  <https://github.com/huime180/MiuixMoondrop>（旧地址会 301 重定向）。
+* **进程唤醒**：唯一的外部入口是 `pods/BluetoothConnectReceiver.kt` —— manifest 静态接收器，
+  监听系统 A2DP `CONNECTION_STATE_CHANGED` 广播，耳机连上时唤醒应用进程。
+  `pods/ControlBridge.kt` **不再做任何跨进程转发**，只把进程内状态分发给应用自己的通知与连接弹窗。
+* **通知**：`pods/PodNotification.kt` 是应用进程自己发的唯一通知来源，通道
+  `hyperpods_moondrop_app_status`（`IMPORTANCE_LOW`，不响铃）、tag `HyperPodsAppState`、id `10004`；
+  由设置页「通知栏显示」开关控制。原先那套 `com.xiaomi.bluetooth` 侧的焦点通知 / 超级岛形态
+  随 hook 删除。
+* **连接弹窗**（新行为）：耳机连上后**先刷新状态栏通知，再延后 600 ms 弹连接弹窗**
+  （`ui/ConnectionPopupActivity.kt`，默认 8s 自动关闭）；后台启动 Activity 可能被系统 BAL
+  静默拦掉，因此最多**重试 3 次**（间隔 800 ms，用 `lastShownAt` / `visible` 确认是否真的显示）。
+* **后台弹出权限**：为让应用在后台也能弹连接弹窗，声明了 `SYSTEM_ALERT_WINDOW`
+  （「显示在其他应用上层」），并在设置页提供跳转入口；**HyperOS 上还需手动开启「后台弹出界面」**。
+* **设置页收窄**：只剩「主题」+ 三项（通知栏显示 / 连接时自动唤出连接弹窗 / 后台弹出弹窗权限入口）
+  + 手势入口 + 关于；原来的「模块」页签（LSPosed 状态卡、模块开关、重启作用域）整组删除。
+* **降噪子排图标**：主排「通透 / 降噪 / 关闭」图标在上、文案在下；降噪生效时展开
+  「自定义 / 抗风噪 / 基本」，每档 on/off 两态（自定义 `ic_adaptive_*`、抗风噪 `ic_anti_wind_*`
+  为本项目自绘、基本复用 `ic_openanc_*`），idle 图标另有 `drawable-night` 变体。
+* **手势**（`ui/GesturePage.kt`，TOUCHV2 / feature 22）：5 个字节每字节双耳（高 4 位左、低 4 位右），
+  页面为 5 × 2 = **10 行**；**同侧**长按 1 秒与长按 3 秒互斥（只清同一只耳的另一档），
+  单击/双击/三击之间没有互斥。
+* **已移除**：低延迟开关（不是 GAIA 命令，交由系统蓝牙设备详情页）；详情页的「当前编码」
+  因数据源（蓝牙进程 hook 广播）消失而恒显示「未知」。
+* **测试**：CI 跑 `:app:testDebugUnitTest`，共 **47** 例（`GaiaProtocolTest` 14 +
+  `BatteryCodecTest` 15 + `TouchV2Test` 18）。
+
+---
+
+以下是**历史条目**（按时间倒序；「Unreleased」写于 LSPosed 模块时期）：
+
+---
+
 ## Unreleased
 
 ### 通知三档：原生通知栏 / 焦点显示 / 超级岛提示（`hook/MiBluetoothToastHook.kt`）
@@ -90,7 +136,7 @@
 | 功能 | 实现 | 验证状态 |
 |---|---|---|
 | **提示音开关 + 音量滑条**（`VOICE 0x0E`） | ✅ **命令与 payload 已实机确认**（官方 App logcat）：GET=cmd 1 / SET=cmd 2，payload(V2)=`[enabled, volume, index]`，**音量是 0..100 百分比**、**没有独立音量命令**；`Gaia.voiceGetConf/voiceSetConf/parseVoiceConf/VoiceConf`、`MoondropLink.refreshPromptVoice/setPromptVoice`（写必给全三字节，改开关保音量、改音量保开关）；UI 行由能力位图（feature 14）或档案开关**硬门控**；滑条与设备同单位（恒等映射） | 命令与 payload ✅ 已确认（非本模块实机）；`index` 语义未知，本模块自身仍**未真机跑通** |
-| **LHDC 开关**（`CODEC_TYPE 0x10`） | cmd 5 读 `00 1D 20 05` / cmd 6 写 `00 1D 20 06 01|00`；单测逐字节锁定；同时保留 LC3（1/3）与 LDAC（2/4）构造器 | 帧格式已锁定；**开关实际效果未真机验证**。上游实测耳机出厂默认 LHDC 关（当前活动编码 AAC，主机侧广告 LHDCv5/LHDC_V3/LHDC_V2/LDAC/aptX-adaptive） |
+| **LHDC 开关**（`CODEC_TYPE 0x10`） | cmd 5 读 `00 1D 20 05` / cmd 6 写 `00 1D 20 06 01\|00`；单测逐字节锁定；同时保留 LC3（1/3）与 LDAC（2/4）构造器 | 帧格式已锁定；**开关实际效果未真机验证**。上游实测耳机出厂默认 LHDC 关（当前活动编码 AAC，主机侧广告 LHDCv5/LHDC_V3/LHDC_V2/LDAC/aptX-adaptive） |
 | **双设备连接**（`ONEBRINGTWO 0x14`） | cmd 1/2 状态（`00 1D 28 01` / `00 1D 28 02 01`）、3/4 超时、5/6 设备列表、7 断开单台（payload `[num:1][addr:6][name utf8]`）；`parseLinkedDevice()` 解析条目 | 命令号由 moondrop-link 在 EDGE **真机确认**；上游原文注明「读取与开关已验证，**写入/断开单台需双机场景实测**」 |
 | **低延迟模式** | **明确：这是 HyperOS 系统侧功能，不是 GAIA 命令**，无对应 feature；链路已接通：详情页 → `LOW_LATENCY_SELECT` → `ControlBridge`（乐观状态）→ `com.android.bluetooth`，由 `HeadsetStateDispatcher` 先反射厂商直通方法（`setLowLatencyMode` 等），否则走 A2DP codec 路径（`getCodecStatus` / `setCodecConfigPreference`，按 LHDC/LDAC/aptX-adaptive/LC3/AAC 挑候选，关闭时恢复原配置），最后回 `LOW_LATENCY_CHANGED` | 已实现，❌ **未在真机验证**（隐藏 API 可能不可用，不可用时回「保持原状态」并记日志） |
 

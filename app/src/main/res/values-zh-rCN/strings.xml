@@ -90,7 +90,7 @@
     <!-- 关于 -->
     <string name="about_version">版本 %1$s</string>
     <string name="about_credits_title">致谢</string>
-    <string name="about_credits_summary">基于 Art-Chen/HyperPods 的 HyperOS 集成架构；协议数据来自 bqj6666/FxxkMoondrop 与 MegaSuite/moondrop-link-desktop；参考 lingbai-rong/PuddingPods、Leaf-lsgtky/OppoPods。</string>
+    <string name="about_credits_summary">协议数据来自 bqj6666/FxxkMoondrop、MegaSuite/moondrop-link-desktop、lingbai-rong/PuddingPods；界面与组件版式参考 Leaf-lsgtky/OppoPods、roxyyn0304/MOONDROP-Pods。早期 HyperOS 集成骨架参考 Art-Chen/HyperPods（该模块形态已在本项目中删除）。</string>
     <string name="about_license_title">许可协议</string>
     <string name="about_license_value">GPL-3.0</string>
 

@@ -1,6 +1,6 @@
 # 协议参考（PROTOCOL）
 
-> 本文描述水月雨（MOONDROP）耳机使用的 **Qualcomm GAIA（QTIL）业务协议**，以及本模块额外用到的
+> 本文描述水月雨（MOONDROP）耳机使用的 **Qualcomm GAIA（QTIL）业务协议**，以及本应用额外用到的
 > **中科蓝讯 9ECA 私有协议** 与 **Classic Bluetooth RFCOMM/SPP 传输切帧**。
 >
 > 文中每个十六进制字节都可以在源码里找到出处：
@@ -20,7 +20,7 @@
 | **中科蓝讯 9ECA 私有协议** | 蓝讯主控机型（猫饼、太空漫游2、音乐胶囊 …） | Service `9eca0000-7f3a-4f32-9a38-a91b2c6e0100`（`...0001` 写 / `...0002` 回 / `...0003` 通知 / `...0004` 能力 / `...0005` 固件） | 固定在同一个 GATT 连接内，与 GAIA 并存，见第 8 节 |
 
 * BLE 的 CCCD 是标准 `00002902-0000-1000-8000-00805f9b34fb`，对 `1102` 与 `1103` 写 `0x0001` 打开通知。
-* 上游 moondrop-link 记录 EDGE 的 BLE 命令特征**必须 write-with-response**；本模块发的是
+* 上游 moondrop-link 记录 EDGE 的 BLE 命令特征**必须 write-with-response**；本应用发的是
   `WRITE_TYPE_NO_RESPONSE`（GAIA 帧本身无序列号，靠 feature 关联响应）。
 * 9ECA 服务的 UUID 基址是 `7f3a-4f32-9a38-a91b2c6e0100`（与 `1100-d102-11e1-9b23-00025b00a5a5` 不同）。
 
@@ -50,7 +50,7 @@ commandValue = (feature << 9) | (type << 7) | (command & 0x7F)
 ```
 
 探测确认设备 GAIA 版本为 3 之后，功能命令才走 vendor `0x001D`。
-本模块 `MoondropLink.afterConnected()` **现在会先发这帧**（用 `runCatching` 包住，失败不阻塞后续），再探测能力。
+本应用 `MoondropLink.afterConnected()` **现在会先发这帧**（用 `runCatching` 包住，失败不阻塞后续），再探测能力。
 
 ---
 
@@ -139,7 +139,7 @@ commandValue = (feature << 9) | (type << 7) | (command & 0x7F)
 
 `core/Gaia.kt` 里定义的全部 feature 常量（十进制 / 十六进制）：
 
-| ID | 常量名 | 含义 | 本模块使用 |
+| ID | 常量名 | 含义 | 本应用使用 |
 |---:|---|---|---|
 | 0 | `F_BASIC` | 基础（版本、能力、序列号、通知注册） | ✅ 能力探测 |
 | 1 | `F_EARBUD` | 耳塞信息 | — |
@@ -232,7 +232,7 @@ BAT_RIGHT_DEVICE=2 / BAT_CHARGER_CASE=3 / BAT_LEVEL_UNKNOWN=255`，names 为
 * 官方 App 自己的 logcat（2026-09-14 真机）显示电量变化是以**通知帧**到达的：
   `BatteryPlugin: onNotification: packet = Packet{version=V3, vendor=001D, command=Command{type=NOTIFICATION, feature=000D, command=0001}}`
   —— 即 `feature=0x0D`、`command=0x01`、`type=NOTIFICATION`（`00 1D 1A 81 …` 形态），
-  与本模块 `MoondropLink.dispatch()` 里对电量通知的处理一致（该处理路径因此得到旁证，但本模块自身仍未在真机跑过）。
+  与本应用 `MoondropLink.dispatch()` 里对电量通知的处理一致（该处理路径因此得到旁证，但本应用自身仍未在真机跑过）。
 
 ### 5.4 解析规则（`BatteryCodec.parse`）
 
@@ -285,7 +285,7 @@ BAT_RIGHT_DEVICE=2 / BAT_CHARGER_CASE=3 / BAT_LEVEL_UNKNOWN=255`，names 为
 
 ### AUDIO_CURATION（8）
 
-命令 0..42，`Gaia.kt` 全部列出（`C_AC_*`）。本模块实际只用到 **3 GET_CURRENT_MODE** 与 **4 SET_MODE**；
+命令 0..42，`Gaia.kt` 全部列出（`C_AC_*`）。本应用实际只用到 **3 GET_CURRENT_MODE** 与 **4 SET_MODE**；
 上位机 moondrop-link 额外标注 `GET_TOGGLE_CONFIGURATION=8`、`GET_WIND_NOISE_DETECTION_STATE=23`、
 `GET_CURRENT_ANC_SWITCH_CONF=41`、`SET_ANC_SWITCH_CONF=42`。
 
@@ -356,8 +356,8 @@ ANC V2 模式枚举（官方 `AncV2Handler` / moondrop-link `constants.py` 一�
   `00 1D 1C 02 00 52 01`（关/82/1，日志原样 `data=[0,82,1]`）。以上由单测逐字节锁定。
 * 档案里仍保留 `cmdVoiceGetEnable` / `cmdVoiceSetEnable` / `cmdVoiceGetVolume` / `cmdVoiceSetVolume`
   覆盖字段（默认即上述已确认值），UI 是否展示由能力位图（feature 14）或档案开关决定。
-* **仍未验证的部分**：`index` 的取值含义；以及本模块**自身**尚未在真机上跑通提示音读写
-  （命令与 payload 由官方 App 的日志证实，不是本模块的实机结论）。
+* **仍未验证的部分**：`index` 的取值含义；以及本应用**自身**尚未在真机上跑通提示音读写
+  （命令与 payload 由官方 App 的日志证实，不是本应用的实机结论）。
 
 ### DAC_GAIN（15）/ LED（19）/ SPATIAL_AUDIO（18）/ LR_CHANNEL（30）/ POWER_CONTROL（24）/ DYBASS（27）
 
@@ -398,7 +398,7 @@ Plugin: send: packet = 0x00 0x1D 0x20 0x06 0x00
 | 命令 | 值 | 帧 | 说明 |
 |---|---:|---|---|
 | GET_STATE | 1 | `00 1D 28 01` | 读开关 |
-| SET_STATE | 2 | `00 1D 28 02 01` | 写开关，payload `[0|1]` |
+| SET_STATE | 2 | `00 1D 28 02 01` | 写开关，payload `[0\|1]` |
 | GET_TIMEOUT | 3 | `00 1D 28 03` | 「暂停回连」超时秒数 |
 | SET_TIMEOUT | 4 | `00 1D 28 04 <sec>` | |
 | GET_DEVICES | 5 | `00 1D 28 05` | 首页 |
@@ -457,7 +457,7 @@ FF | Version(1B) | Flags(1B) | Length(1B 或 2B) | PDU(Length+4) | [Checksum(1B)
 | `00001101-0000-1000-8000-00805f9b34fb` | **本项目使用**：PuddingPods 文档记录的 GAIA V4 over SPP |
 | `00001107-d102-11e1-9b23-00025b00a5a5` | moondrop-link `constants.py` 标注的「legacy GAIA/SPP」；其 BLE 客户端不使用 |
 
-本模块在 `createRfcommSocketToServiceRecord` 失败时会退到反射调用 `createRfcommSocket(1)`（channel 1）。
+本应用在 `createRfcommSocketToServiceRecord` 失败时会退到反射调用 `createRfcommSocket(1)`（channel 1）。
 
 ---
 
@@ -548,8 +548,10 @@ FF | Version(1B) | Flags(1B) | Length(1B 或 2B) | PDU(Length+4) | [Checksum(1B)
 
 低延迟是 **HyperOS 系统侧功能**（系统蓝牙设备详情页上的「低延迟」开关），
 由系统 A2DP 会话的低延迟配置能力决定，**没有**对应的 GAIA feature/命令。
-本模块把它当作系统侧状态透出（`PodCapabilities.hasLowLatency` 只看型号档案，
-`PodSnapshot.lowLatencyOn` 由系统侧回调），**不发送任何 GAIA 帧**。
+本应用曾经把它当作系统侧状态透出（`PodCapabilities.hasLowLatency` 只看型号档案，
+`PodSnapshot.lowLatencyOn` 由系统侧回调），**从不发送任何 GAIA 帧**。
+**去模块化之后，本应用连这个开关也不做了**：详情页低延迟开关已移除，
+`FeatureProfile.lowLatency` 字段仍在但不再门控任何 UI；系统设备详情页里的低延迟功能与本应用无关。
 PuddingPods 文档也把它归类为 `BluetoothDeviceDetailsFragment` 提供的系统 Profile/厂商控制能力。
 
 ---
@@ -613,15 +615,20 @@ miui.focus.actions= Bundle
   不是我们自己的 Intent action。
 - 图标用 `key_headset`（不是 `miui.focus.pic_*` 那种资源名）。
 
-### 10.5.3 本模块的实现与已知取舍
+### 10.5.3 当前实现与已知取舍（**本节只作历史/参考**）
 
-- 实现在 `hook/MiBluetoothToastHook.kt` 的 `focusExtras()`：按上面原文复刻，外层 `putString`，
-  内层 `param_v2`；`param_island` 只在「超级岛提示」开关打开时写。
+> ⚠ 下面描述的实现**已随去模块化删除**：当前的 MiuixMoondrop 只发一条普通的
+> `IMPORTANCE_LOW` 状态通知（`pods/PodNotification.kt`，通道 `hyperpods_moondrop_app_status`），
+> **不写任何 `miui.focus.*` extra，也没有焦点通知 / 超级岛形态**。本节字段知识仍保留，
+> 供将来（如果能重新拿到系统侧入口）参考。
+
+- 当时的实现在已删除的 `hook/MiBluetoothToastHook.kt` 的 `focusExtras()`：按上面原文复刻，
+  外层 `putString`，内层 `param_v2`；`param_island` 只在「超级岛提示」开关打开时写。
 - 焦点通知与超级岛都只用真机核对过的字段；**没有**凭空构造官方那套 12 字符按键配置串之类的东西。
 - 另有一条「强提示（strong toast）」通路（extra 键 `param` / `island_param` / `strong_toast_action` /
   `duration` / `strong_toast_category` 等已在 ROM 里核对到），但那条广播的 **Intent action 字符串
   在 `com.xiaomi.bluetooth` / `com.milink.service` / `com.android.settings` 三个 APK 的 dex 串池里
-  都找不到**（推测在框架侧共享库），所以本模块**不猜也不发**这条广播。
+  都找不到**（推测在框架侧共享库），所以当时就**不猜也不发**这条广播。
 - 真机上验证方式：`dumpsys notification --noredact | grep -A3 miui.focus`，以及 logcat 里
   每条通知都会打的 `focus=` / `island=` 两个值。
 
@@ -637,9 +644,9 @@ miui.focus.actions= Bundle
 | ANC V2 cmd 3/4/41/42 与模式枚举 0..5 | `features.py::AncV2Feature`、`constants.py` |
 | GAIA V3/V4、三条 ANC 路径与探测条件、9ECA 服务帧与命令表、GA2 双地址连接经验 | `_refs/FxxkMoondrop/ADAPTATION.md` |
 | GA2 / 太空漫游2 的实测 SET/GET 映射与增益反向 | `_refs/FxxkMoondrop/src/com/fxxkmoondrop/secret/AncProfileLib.kt` |
-| PUDDING：RFCOMM/SPP + GAIA V4、ANC V2 五档枚举、三路电量、增益、指示灯、Device ID `01010607` | `_refs/PuddingPods/PUDDING_ADAPTATION.md`（仓库根 `PuddingPods/`） |
-| HyperOS 设置页伪装原生耳机（`HeadsetIDConstants`、`IMiuiHeadsetService$Stub$Proxy`） | `_refs/OppoPods/app/src/main/java/moe/chenxy/oppopods/hook/SettingsHeadsetHook.kt` |
-| 融合设备中心设备卡点击（`deviceType == "third_headset"`）、`AdapterService.setBatteryLevel` | `_refs/HyperPods/app/src/main/java/moe/chenxy/hyperpods/hook/DeviceCardHook.kt`、`pods/L2CAPController.kt` |
+| PUDDING：RFCOMM/SPP + GAIA V4、ANC V2 五档枚举、三路电量、增益、指示灯、Device ID `01010607` | `PuddingPods/PUDDING_ADAPTATION.md`（仓库根的 PuddingPods 克隆，本地参考目录 `_refs/pudding-docs/`） |
+| 【历史】HyperOS 设置页伪装原生耳机（`HeadsetIDConstants`、`IMiuiHeadsetService$Stub$Proxy`） | `_refs/OppoPods/app/src/main/java/moe/chenxy/oppopods/hook/SettingsHeadsetHook.kt` —— 仅上游参考；本项目相关 hook 已删除 |
+| 【历史】融合设备中心设备卡点击（`deviceType == "third_headset"`）、`AdapterService.setBatteryLevel` | `_refs/HyperPods/app/src/main/java/moe/chenxy/hyperpods/hook/DeviceCardHook.kt`、`_refs/HyperPods/app/src/main/java/moe/chenxy/hyperpods/pods/L2CAPController.kt` —— 仅上游参考；本项目相关 hook 已删除 |
 | **提示音命令号与 payload**（GET=cmd1 / SET=cmd2、`[enabled,volume,index]`、音量 0..100）、**LHDC 关** `00 1D 20 06 00`、**电量以通知帧到达**（feature `0x0D` cmd `0x01` type NOTIFICATION） | 2026-09-14 真机（Xiaomi Pad 8 Pro）抓取的**水月雨官方 App 自身 `gaiaclient` logcat**（`V3VoicePlugin` / `V3CodecPlugin` / `BatteryPlugin`） |
 | 逐字节期望值（回归锁定） | `app/src/test/java/moe/chenxy/hyperpods/core/GaiaProtocolTest.kt`、`BatteryCodecTest.kt` |
 
@@ -652,7 +659,7 @@ miui.focus.actions= Bundle
 ## 12. 仍未确定（写在这里避免被当成已确认）
 
 1. **提示音**：命令号（GET=1 / SET=2）与 payload `[enabled, volume(0..100), index]` 已由官方 App logcat
-   实机确认（见第 6 节 VOICE）；剩下未确认的是 **`index` 字段的取值语义**，以及**本模块自身**
+   实机确认（见第 6 节 VOICE）；剩下未确认的是 **`index` 字段的取值语义**，以及**本应用自身**
    从未在真机上跑通提示音读写。
 2. **能力正文编码**：代码现在**两种都试**（`parseSupportedFeaturesSmart()`：字节对优先、位图兜底），
    但**具体固件用哪种、是否会误判**仍未真机抓包裁决。
@@ -664,14 +671,13 @@ miui.focus.actions= Bundle
 6. 上游 FxxkMoondrop 表中把三条 ANC 路径的探测条件写成「BASIC 特性位图含 bit1 / bit3 / bit5」，
    与 feature ID（2 / 8 / 32）不是同一套编号；本项目按 feature ID 在 32-bit word 位图中取位，
    即 `bit 2`、`bit 8`、`bit 32` 对应的位。**哪套读法正确同样取决于第 2 条。**
-7. **跨进程链路已接通、但未真机验证**：`pods/ControlBridge.kt` + manifest 声明的
-   `pods.ControlReceiver` 现在既是 `PODS_*` / `*_SELECT` / `UI_INIT` / `REQUEST_*` 的接收端，
-   也是 `UPDATE_SYSTEM_BATTERY`（→ 系统蓝牙栈）、`ANC_CHANGED` / `BATTERY_CHANGED`（→ 设置页）、
-   `UPDATE_PODS_NOTIFICATION` / `SEND_STRONG_TOAST` / `CANCEL_PODS_NOTIFICATION`（→ 通知）的发送端。
-   低延迟另有一条闭环：UI → `ControlBridge` → `com.android.bluetooth`（反射厂商方法，否则 A2DP codec
-   `getCodecStatus` / `setCodecConfigPreference` 兜底）→ `LOW_LATENCY_CHANGED`。
-   这些代码路径**从未在真机上运行过**。
-8. **本模块没有任何真机功能验证结论**：本文所有协议结论要么来自本仓库源码 + 单测，
-   要么来自上游项目/官方 App 的真机记录（含 2026-09-14 抓取的官方 App gaiaclient logcat），
-   没有一条来自本模块自身的真机运行；CI 已通过编译与单测并产出 APK（见 [README.md](README.md) 构建状态），
-   但因此**不背书任何「已在设备上生效/可用」的说法**。
+7. **跨进程链路已删除**：`pods/ControlBridge.kt` 现在只在**应用进程内**把状态转发给本应用自己的
+   通知与连接弹窗（详见 `pods/ControlBridge.kt` 的文件头注释）。原先发往 `com.android.bluetooth` /
+   `com.android.settings` / `com.xiaomi.bluetooth` / `com.milink.service` 的广播，以及 manifest 里
+   那个跨进程接收器，全部随 hook 一起删除；低延迟链路（UI → `ControlBridge` → `com.android.bluetooth`
+   的反射 / A2DP codec 兜底）也不再存在。因此**没有「未真机验证的系统集成层」可列**。
+8. **真机结论的边界**：本文所有协议结论要么来自本仓库源码 + 单测，要么来自上游项目/官方 App 的真机记录
+   （含 2026-09-14 抓取的官方 App gaiaclient logcat）；**布丁（PUDDING）**另有 2026-09-14/15 的本应用
+   真机联调结论（记在 `core/MoondropModels.kt` 的 `note` 与 `pods/MoondropLink.kt`、
+   `pods/ControlBridge.kt` 的注释里），其余机型没有本应用自己的真机结论。CI 已通过编译与单测并产出
+   APK（见 [README.md](README.md) 构建状态），但不为未验证的机型背书。

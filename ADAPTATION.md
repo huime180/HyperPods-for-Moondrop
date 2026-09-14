@@ -1,6 +1,6 @@
 # 机型适配指南（ADAPTATION）
 
-> 本文说明如何把一款新的水月雨（MOONDROP）耳机接进本模块。
+> 本文说明如何把一款新的水月雨（MOONDROP）耳机接进本应用。
 > 事实来源：`app/src/main/java/moe/chenxy/hyperpods/core/MoondropModels.kt`（档案库）、
 > `pods/MoondropLink.kt`（能力探测与读写）、`core/Gaia.kt`（feature/命令），
 > 以及 `_refs/` 下的上游实测材料。**凡未真机验证者，本文一律标注。**
@@ -13,7 +13,7 @@
    是否展示新功能、默认传输层。凡是不确定的，交给连接后的能力探测裁决。
 2. **未命中档案也能用**：设备名含 `MOONDROP` / `水月雨` 但没命中任何档案时，回退
    `MoondropModels.FALLBACK`，用「可探测 + 保守」策略工作（不展示增益/指示灯/新功能开关）。
-3. **不是水月雨设备就不接管**：`MoondropModels.match()` 返回 `null` 时模块不处理该设备。
+3. **不是水月雨设备就不处理**：`MoondropModels.isMoondrop()` / `match()` 不命中时本应用不处理该设备。
 4. **新增机型 = 加一条数据**，不需要改任何控制逻辑。
 
 ---
@@ -39,7 +39,7 @@ data class MoondropModel(
 
 | 字段 | 含义 | 约定 / 注意 |
 |---|---|---|
-| `id` | 档案内部 id（`edge`、`pudding`、`golden_ages_2` …） | 也被 `HyperPodsPrefsKey.MODEL_ID` 用于手动指定型号 |
+| `id` | 档案内部 id（`edge`、`pudding`、`golden_ages_2` …） | 可用 `MoondropModels.byId(id)` 查回档案；**当前没有调用方**（原来的「手动指定型号」偏好键随模块一起删除） |
 | `nameZh` / `nameEn` | UI 展示名（中/英） | `MoondropLink.snapshot()` 的 `modelName` 取 `nameZh` |
 | `aliases` | 设备名匹配关键字 | 匹配时**统一转大写并 `contains`**，所以写普通子串即可；`match()` 按**别名长度降序**遍历，保证 `EDGE2` 不被 `EDGE` 抢先、`SPACE TRAVEL 2` 不被 `SPACE TRAVEL` 抢先 |
 | `chipset` | 主控与协议栈的人类可读描述 | 仅用于文档/调试展示 |
@@ -73,7 +73,7 @@ data class MoondropModel(
 | id | ANC 路径 / 档位（SET / GET 映射） | 增益 `gainMap`（UI 低中高 → 设备码） | 指示灯 | 电量（证据） | verified |
 |---|---|---|---|---|---|
 | `edge` | AudioCuration / 3 档：SET `[1,2,4]`，GET `[0,1,2]` | `[0,1,2]` | — | **只回 type 0 单设备**（moondrop-link 真机 60%） | ✅ 实测 |
-| `pudding` | ANC V2 / 5 档：SET `[0,4,2,3,1]`，GET 同 | `[0,1,2]` | ✅ | **三路** 1=左 2=右 3=盒（PuddingPods 文档） | ✅ 实测 |
+| `pudding` | ANC V2 / 5 档：SET `[0,4,2,3,1]`，GET 同 | `[2,1,0]`（设备码 0=高，真机修正） | ✅ | **三路** 1=左 2=右 3=盒（PuddingPods 文档） | ✅ 实测 |
 | `golden_ages_2` | AudioCuration / 4 档：SET `[1,2,4,3]`，GET `[0,1,2,3]` | `[2,1,0]` | — | 仅左右耳，**无充电盒**（FxxkMoondrop 实测） | ✅ 实测 |
 | `space_travel_2` | AudioCuration / 4 档：SET `[1,2,4,3]`，GET `[0,1,2,3]` | `[2,1,0]` | — | 未实测 | ✅ 实测 |
 | `golden_ages` | AudioCuration / 4 档：同 GA2 | `[2,1,0]` | — | 未实测 | 推断 |
@@ -152,7 +152,7 @@ data class AncProfile(
 > ✅ **已修正（初稿之后）**：EDGE / EDGE2 的 `anc3Ac()` 现在带 `getMap = intArrayOf(0,1,2)`。
 > 上游实测 EDGE 的 AudioCuration **SET 是位掩码 `1/2/4`、GET 是 0-based 索引 `0/1/2`**，
 > 早先 `getMap=null` 时 `setMap.indexOf(0)` 会得到 `-1`（状态未知），现已与 GA2 一样双向分离。
-> 该参数仍**未经本模块真机复核**（见第九节第 3 条）。
+> 该参数仍**未经本应用真机复核**（见第九节第 3 条）。
 
 ---
 
@@ -213,7 +213,7 @@ data class FeatureProfile(
     val promptVolumeMax: Int = Gaia.VOICE_VOLUME_MAX,   // = 100；音量是百分比，UI 与设备同单位
     val lhdc: Boolean = false,              // 展示「LHDC 开关」
     val dualConnection: Boolean = false,    // 展示「双设备连接」
-    val lowLatency: Boolean = false,        // 展示「低延迟模式」
+    val lowLatency: Boolean = false,        // 已废弃：本应用没有低延迟开关，该字段不再门控任何 UI
     // 可覆盖的命令号（默认 = 官方 App logcat 实机确认的值）
     val cmdVoiceGetEnable: Int = Gaia.C_VOICE_GET_ENABLE,   // = C_VOICE_GET_CONF = 1
     val cmdVoiceSetEnable: Int = Gaia.C_VOICE_SET_ENABLE,   // = C_VOICE_SET_CONF = 2
@@ -229,7 +229,7 @@ data class FeatureProfile(
 | `cmdVoice*` | 逐设备覆盖提示音命令号；默认即已确认值（GET=1 / SET=2），`cmdVoiceGetVolume/SetVolume` 现在指向同一对命令 | ✅ 默认值已确认；覆盖入口保留备用 |
 | `lhdc` | 是否默认展示 LHDC 开关（feature `0x10`，cmd 5 读 / cmd 6 写） | 帧已由单测锁定；行为未实测 |
 | `dualConnection` | 是否默认展示双设备连接（feature `0x14`） | ✅ 命令号有真机证据（EDGE） |
-| `lowLatency` | 是否默认展示低延迟；**这是 HyperOS 系统侧功能，不是 GAIA 命令** | ❌ 系统侧未验证 |
+| `lowLatency` | **已废弃**：低延迟是 HyperOS 系统侧功能（不是 GAIA 命令），本应用的低延迟开关已移除，该字段不再门控任何 UI | — |
 
 各机型默认值（源码事实）：
 
@@ -237,13 +237,13 @@ data class FeatureProfile(
 |---|---|---|---|---|---|
 | `edge` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `edge2` | — | — | ✅ | ✅ | ✅ |
-| `pudding` | — | — | ✅ | — | — |
+| `pudding` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `golden_ages_2` / `golden_ages` | — | — | ✅ | — | — |
 | `alice` / `sparks` / `voyager` | — | — | ✅ | — | — |
 | `space_travel_2` / `space_travel_2_ultra` / `moca` / `nekocake` / `pill` / `ultrasonic` / `robin` / `block` / `space_travel` | — | — | — | — | — |
 
-> 也就是说：提示音开关目前**只有 EDGE 档案默认展示**（其余机型要等能力位图出现 feature 14）。
-> 表中 ✅ 只表示「档案默认展示该行」，不代表已真机验证；尤其 `lowLatency` 是 HyperOS 系统侧功能，**未真机验证**。
+> 也就是说：提示音开关目前**只有 EDGE 与 PUDDING 档案默认展示**（其余机型要等能力位图出现 feature 14）。
+> 表中 ✅ 只表示「档案默认展示该行」，不代表已真机验证；`lowLatency` 已废弃（不再门控 UI）。
 
 **提示音 payload（官方 App logcat 实机确认）**：`VOICE(0x0E)` 的 GET=cmd 1 / SET=cmd 2，
 payload(V2, size>=3) = `[enabled(0/1)][volume(0..100)][index]`；**没有独立音量命令**；
@@ -310,7 +310,7 @@ payload(V2, size>=3) = `[enabled(0/1)][volume(0..100)][index]`；**没有独立�
 如果代码又给左耳兜底了「系统广播的单值电量」却没给右耳兜底，就会精确表现为
 **左耳有数字、右耳空白**。
 
-### 本模块的处理（四件事，缺一不可）
+### 本应用的处理（四件事，缺一不可）
 
 1. **先问设备支持哪些 type**（`BATTERY cmd 0`），再按该集合去查 —— 不再写死 `[1]` 或 `[1,2]`；
    设备不回 cmd 0 时才退回 `FALLBACK_QUERY_IDS = [0,1,2,3]` 或老固件的 cmd 1 无 payload 查询。
@@ -370,7 +370,7 @@ payload(V2, size>=3) = `[enabled(0/1)][volume(0..100)][index]`；**没有独立�
 
 | # | 未知项 | 现状 / 建议验证方式 |
 |---|---|---|
-| 1 | 提示音 `index` 字段 | 命令号（GET=1/SET=2）与 payload `[enabled, volume(0..100), index]` **已由官方 App logcat 实机确认**；`index`（语言/主题）的取值语义未知，本模块自身也未真机跑通 |
+| 1 | 提示音 `index` 字段 | 命令号（GET=1/SET=2）与 payload `[enabled, volume(0..100), index]` **已由官方 App logcat 实机确认**；`index`（语言/主题）的取值语义未知，本应用自身也未真机跑通 |
 | 2 | `GET_SUPPORTED_FEATURES` 响应体编码 | 代码两种都试（`parseSupportedFeaturesSmart`）；**具体固件用哪种、会不会误判**仍需抓原始回包裁决 |
 | 3 | ANC 读回值域 | EDGE / EDGE2 已按上游实测补 `getMap=[0,1,2]`（参数待真机复核）；`anc4Identity` 系列仍是 `getMap=null` 反查，若这些机型也是 0-based 读回会得到 `-1` |
 | 4 | GAIA 版本探测 | 已在连接流程中发送（`00 0A 03 00`）；**探测结果的解析与用途**（是否需要据此切换包格式）未真机确认 |
@@ -400,39 +400,37 @@ payload(V2, size>=3) = `[enabled(0/1)][volume(0..100)][index]`；**没有独立�
 
 ---
 
-## 十一、系统集成层：适配新机型时会碰到的接线点
+## 十一、应用侧接线点：适配新机型时会碰到的地方
 
-协议能读写耳机，不代表 HyperOS 界面上就能看到。系统集成层在 `hook/` 与 `ui/`：
+协议能读写耳机，不代表界面与通知里就能看到。**本应用已不再是 Xposed 模块**：
+原来那套系统集成层（`hook/` 目录、跨进程控制桥、融合设备中心接管、设置页伪装）已随去模块化
+**整体删除**，因此适配新机型时只需要看**应用自己**的这几处：
 
 | 组件 | 作用 | 与机型适配的关系 |
 |---|---|---|
-| `hook/HeadsetStateDispatcher.kt` | `com.android.bluetooth`：A2DP 连接感知 + 电量写回系统蓝牙栈 + MAC 应答 | 连接判定统一走 `MoondropModels.match()`；**新机型的蓝牙名必须能命中 `aliases`，否则整条链路不会启动** |
-| `hook/SystemUIPluginHook.kt` + `hook/DeviceCardHook.kt` | 融合设备中心耳机卡点击接管 | 只认 `deviceType == "third_headset"` 的卡片；卡片 id 与耳机 MAC 比较，不改机型档案 |
-| `hook/MiBluetoothToastHook.kt` | `com.xiaomi.bluetooth` 电量通知 | 三路电量由 `SystemApisUtils.readBatteryExtras()` 统一读；单设备机型走 `EXTRA_LEVEL` 兜底 |
-| `hook/SettingsHeadsetHook.kt` | 设置页伪装原生耳机（`01010607`）+ 状态注入 | 伪装 ID 对应「小米四档 ANC 模板」，与真实机型 ANC 档位数不同，需要映射；ANC 改动经 `ANC_SELECT` 广播回传 |
-| `pods/ControlBridge.kt` + manifest 的 `ControlReceiver` | **应用侧跨进程控制桥**：接收系统各进程的控制命令、把状态转发回去 | 是「新机型能力能否出现在系统界面」的关键一环；manifest 声明 + 显式广播，App 未运行也能被拉起 |
-| `ui/PodDetailPage.kt` | 模块自己的详情页 | 开关行由 `PodCapabilities` **硬门控**（能力 false 即不进入组合树）；新增功能必须同时接能力字段与 UI 行 |
+| `core/MoondropModels.kt` 的 `MODELS` / `FALLBACK` | 机型档案 | 新增机型 = 加一条数据；`aliases` 必须能命中设备名，否则会回退 `FALLBACK`（能力全靠探测） |
+| `pods/BluetoothConnectReceiver.kt` | manifest 静态接收器：A2DP 连上时唤醒应用进程 | 连接判定统一走 `MoondropModels.isMoondrop()`；**新机型的蓝牙名必须能命中 `aliases`（或名字读不到时命中「上次连接地址」），否则这个入口不会连接** |
+| `pods/MoondropLink.kt` | 协议客户端：自建 GATT / RFCOMM、能力探测、读写 | 档案的 `transports` 首项决定走 BLE 还是 SPP；能力位图决定展示哪些功能 |
+| `pods/ControlBridge.kt` | 应用内状态桥 | 只把进程内状态转发给本应用自己的通知与连接弹窗（**不做任何跨进程转发**） |
+| `pods/PodNotification.kt` | 状态栏通知 | 三路电量直接取自进程内快照（`PodSnapshot.battery`）；单设备机型显示「整机」一行 |
+| `ui/PodDetailPage.kt` | 应用自己的详情页 | 开关行由 `PodCapabilities` **硬门控**（能力 false 即不进入组合树）；新增功能必须同时接能力字段与 UI 行 |
 
-**接线现状（`pods/ControlBridge.kt`，初稿之后已实现）**：
+**状态流（全部在应用进程内）**：
 
 | 方向 | 动作 | 说明 |
 |---|---|---|
-| `com.android.bluetooth` → 应用进程 | `PODS_CONNECTED` / `PODS_DISCONNECTED` | `getRemoteDevice(mac)` → `MoondropLink.connect()` / `disconnect()`；非水月雨设备忽略 |
-| 设置页 → 应用进程 | `ANC_SELECT` / `GAIN_SELECT` / `LED_SELECT` / `PROMPT_TONE_SELECT` / `PROMPT_VOLUME_SELECT` / `LHDC_SELECT` / `DUAL_CONNECTION_SELECT` | 路由到 `MoondropLink.setXxx()`（`ANC_SELECT` 带的是本模块 UI 档位下标） |
-| 系统侧 → 应用进程 | `UI_INIT` / `REQUEST_CAPABILITIES` / `REQUEST_BATTERY` | 状态重放 |
-| 应用进程 → `com.android.bluetooth` | `UPDATE_SYSTEM_BATTERY` | 反射 `AdapterService.setBatteryLevel`，系统 UI 显示电量 |
-| 应用进程 → `com.android.settings` | `ANC_CHANGED` / `BATTERY_CHANGED` | 喂被伪装的耳机页 |
-| 应用进程 → `com.xiaomi.bluetooth` | `UPDATE_PODS_NOTIFICATION` / `SEND_STRONG_TOAST` / `CANCEL_PODS_NOTIFICATION` | 通知 / 电量展示 |
-| 应用进程 → `com.android.bluetooth` → 应用进程 | `LOW_LATENCY_SELECT` → `LOW_LATENCY_CHANGED` | 低延迟（系统侧）：先反射厂商直通方法，否则 A2DP codec 兜底 |
+| 系统蓝牙 → 应用进程 | A2DP `CONNECTION_STATE_CHANGED` 系统广播 | `BluetoothConnectReceiver` 判定是否水月雨设备（名字 → 已存地址 → 否则 fail-closed），命中才 `MoondropLink.connect(device)` |
+| `MoondropLink` → `ControlBridge` | `PodEvent.Connected` / `BatteryChanged` / `Disconnected` | `PodListener` 回调：刷新状态栏通知（`PodNotification`）、首次拿到有效电量后排队弹连接弹窗 |
+| UI → `MoondropLink` | `setAnc` / `setGain` / `setLed` / `setPromptTone` / `setPromptVolumeRaw` / `setLhdc` / `setDualConnection` / `setGesture` | 直接方法调用（同进程），没有任何广播 |
 
-电量以 `Bundle` 传递（`left`/`right`/`case` + `*_charging`；`255 = 未知`、`value or 128 = 充电中`）。
+电量在进程内以 `BatterySnapshot` 流转；弹连接弹窗时用 `BatteryCodecWire` 编码成 `Bundle`
+（`left`/`right`/`case` + `*_charging`；`255 = 未知`、`value or 128 = 充电中`）塞进 Intent extra。
 
 **仍未接线 / 未验证的部分**：
 
 * 空间音频 / 头动追踪（`Gaia.spatialGet/Set`、`headTracking*`）**未接到客户端**；
-* 低延迟的系统侧实现（反射桥 + A2DP codec 兜底）**从未真机验证**，隐藏 API 不可用时只回「保持原状态」；
-* `SettingsHeadsetHook` 的 `updateAtUiInfo / updateAncUi / refreshStatus` 调用签名按 OppoPods 在 HyperOS
-  上的用法书写，**需实机核对**；`MiuiHeadsetBattery` 电量控件注入未实现。
+* 详情页的「当前编码」没有数据源（原来的注入口随 hook 删除），恒显示「未知」；
+* 低延迟模式本应用不实现（不是 GAIA 命令，也没有自己的开关）。
 
 这些是**接线**而不是**协议**问题：新增机型时，只要档案能被匹配、能力位图/回包能被解析，
-协议层就能工作；要让它在系统界面上出现，上面的桥已经就位（但需真机验证）。
+协议层与应用界面就能工作；系统级的那套集成（设置页伪装 / 融合设备中心 / 超级岛）已不在本项目中。

@@ -90,7 +90,7 @@
     <!-- about -->
     <string name="about_version">Version %1$s</string>
     <string name="about_credits_title">Credits</string>
-    <string name="about_credits_summary">HyperOS integration architecture based on Art-Chen/HyperPods; protocol data from bqj6666/FxxkMoondrop and MegaSuite/moondrop-link-desktop; references: lingbai-rong/PuddingPods, Leaf-lsgtky/OppoPods.</string>
+    <string name="about_credits_summary">Protocol data from bqj6666/FxxkMoondrop, MegaSuite/moondrop-link-desktop and lingbai-rong/PuddingPods; UI and component patterns reference Leaf-lsgtky/OppoPods and roxyyn0304/MOONDROP-Pods. The early HyperOS integration skeleton referenced Art-Chen/HyperPods (that module form has been removed from this project).</string>
     <string name="about_license_title">License</string>
     <string name="about_license_value">GPL-3.0</string>
 
