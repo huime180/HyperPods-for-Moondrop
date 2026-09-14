@@ -12,7 +12,9 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "moe.chenxy.hyperpods.moondrop"
+        // 应用身份（包名）：与 namespace 解耦 —— namespace 仍是 moe.chenxy.hyperpods
+        // （R 类与资源包路径由它决定，改它会牵动全仓库 import，收益与风险不成比例）。
+        applicationId = "moe.huime.miuixmoondrop"
         minSdk = 35
         targetSdk = 36
         versionCode = 1

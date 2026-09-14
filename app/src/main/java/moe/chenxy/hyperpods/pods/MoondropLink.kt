@@ -28,6 +28,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -82,6 +83,8 @@ object MoondropLink {
 
     // SPP
     private var socket: BluetoothSocket? = null
+    /** 本次 RFCOMM 建链成功的时刻（elapsedRealtime）；只用于「会话太短」的判定。 */
+    @Volatile private var sessionStartedAt = 0L
     private var readerJob: Job? = null
     private var pollJob: Job? = null
     /** 有界的「请系统侧重放编码」探测协程（LHDC 切换后起，断开时取消） */
@@ -141,6 +144,26 @@ object MoondropLink {
 
     private val ANC_TIMEOUT_MS = 1500L
     private val CMD_TIMEOUT_MS = 2000L
+
+    /**
+     * 会话健康线（ms）：RFCOMM 建链后**活过**这么久就算这次建链是成功的。
+     * 反过来说，短于它就被对端关掉 = 这次建链没成功（耳机侧 SPP 服务还没起来 /
+     * 蓝牙栈刚重启），值得重试。
+     *
+     * 真机依据（布丁，2026-09-15，关开蓝牙触发的重连）：
+     *   00:10:42.785 `GAIA SPP ready` → 00:10:42.798 `SPP reader stopped: bt socket closed`
+     *   —— 只有 13 ms。此后能力探测/电量读取全部超时（features=[]、batteryTypes=[]），
+     *   应用停在「已连接但读不到任何数据」的死状态：状态通知被撤、连接弹窗也永远不会弹，
+     *   直到用户自己再打开一次应用（走冷启动兜底）或再来一条 A2DP 广播。
+     */
+    private const val SESSION_MIN_HEALTHY_MS = 1500L
+
+    /**
+     * 「刚建链就被关掉」的**有界**重连次数与间隔。
+     * 有界是关键：绝不无限重连（对端真不在时就老实退回未连接，等下一次 A2DP 广播或用户打开应用）。
+     */
+    private const val SESSION_RETRY_LIMIT = 3
+    private const val SESSION_RETRY_DELAY_MS = 1500L
 
     /**
      * LHDC 写后确认：首次回读超时后再重试的次数与间隔。
@@ -236,7 +259,17 @@ object MoondropLink {
     // 连接
     // ══════════════════════════════════════════════════════════════════════
 
-    fun connect(btDevice: BluetoothDevice, preferRfcomm: Boolean = false) {
+    fun connect(btDevice: BluetoothDevice, preferRfcomm: Boolean = false) =
+        connectInternal(btDevice, preferRfcomm, retry = 0)
+
+    /**
+     * 连接本体。
+     *
+     * @param retry 会话级重试序号（只有 [startReader] 在「刚建链就被对端关掉」时会递增）。
+     *              作为参数而不是成员变量：重试是这次连接的一个属性，不需要在别处复位，
+     *              也就不会出现「上一次连接留下计数、下一次连接少重试几次」的串味。
+     */
+    private fun connectInternal(btDevice: BluetoothDevice, preferRfcomm: Boolean, retry: Int) {
         if (connected && device?.address == btDevice.address) return
         disconnectInternal(notify = false)
         device = btDevice
@@ -246,7 +279,7 @@ object MoondropLink {
         batteryState.reset()
         capabilities = PodCapabilities()
         scope.launch {
-            if (useRfcomm) connectRfcomm(btDevice) else connectGattInternal(btDevice)
+            if (useRfcomm) connectRfcomm(btDevice, retry) else connectGattInternal(btDevice)
         }
     }
 
@@ -355,7 +388,7 @@ object MoondropLink {
 
     // ── RFCOMM / SPP ───────────────────────────────────────────────────────
 
-    private fun connectRfcomm(btDevice: BluetoothDevice) {
+    private fun connectRfcomm(btDevice: BluetoothDevice, retry: Int = 0) {
         try {
             val uuid = UUID.fromString(Gaia.SPP_UUID)
             val s = try {
@@ -369,8 +402,10 @@ object MoondropLink {
             s.connect()
             socket = s
             connected = true
+            // 记下建链时刻：startReader 用它判断这次会话是不是「刚连上就被对端关掉」
+            sessionStartedAt = SystemClock.elapsedRealtime()
             Log.i(TAG, "GAIA SPP ready: ${btDevice.name} model=${model.nameZh}")
-            startReader(s)
+            startReader(s, retry)
             scope.launch { afterConnected() }
         } catch (t: Throwable) {
             Log.e(TAG, "RFCOMM connect failed", t)
@@ -378,7 +413,7 @@ object MoondropLink {
         }
     }
 
-    private fun startReader(s: BluetoothSocket) {
+    private fun startReader(s: BluetoothSocket, retry: Int = 0) {
         readerJob = scope.launch {
             val buf = ByteArray(1024)
             try {
@@ -394,7 +429,29 @@ object MoondropLink {
             } catch (t: Throwable) {
                 if (connected) Log.w(TAG, "SPP reader stopped: ${t.message}")
             }
-            if (connected) disconnectInternal(notify = true)
+            if (connected) {
+                // 先量这次会话活了多久：够久 = 健康会话（对端正常关机/断开），
+                // 太短 = 建链其实没成功（见 SESSION_MIN_HEALTHY_MS 的真机依据）。
+                val sessionMs = SystemClock.elapsedRealtime() - sessionStartedAt
+                val target = device
+                val healthy = sessionMs >= SESSION_MIN_HEALTHY_MS
+                disconnectInternal(notify = true)
+                // 有界重连：**只**重试「刚建链就被关掉」这一种，且最多 SESSION_RETRY_LIMIT 次。
+                // 用户真正把耳机收进盒子/关掉时，会话早活过健康线，这里不会白白重连。
+                if (!healthy && target != null && retry < SESSION_RETRY_LIMIT) {
+                    Log.i(
+                        TAG,
+                        "session died after ${sessionMs}ms; retry ${retry + 1}/$SESSION_RETRY_LIMIT",
+                    )
+                    scope.launch {
+                        delay(SESSION_RETRY_DELAY_MS)
+                        // 这次会话走的就是 RFCOMM，重试沿用同一条传输（不回头再试 BLE）
+                        connectInternal(target, preferRfcomm = true, retry = retry + 1)
+                    }
+                } else if (!healthy && target != null) {
+                    Log.w(TAG, "session keeps dying early; retries exhausted, staying disconnected")
+                }
+            }
         }
     }
 

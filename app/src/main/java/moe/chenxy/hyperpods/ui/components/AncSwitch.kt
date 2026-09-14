@@ -1,36 +1,35 @@
 /*
- * HyperPods for Moondrop — 降噪分组控件（顶部三选一 + 降噪子排）
+ * HyperPods for Moondrop — 降噪选择器（主排三格 + 降噪子排）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * 交互（用户需求）：
- *   · 顶部一排三选一：通透 / 降噪 / 关闭（顺序固定）；
- *   · 选中「降噪」时，下方 AnimatedVisibility 展开子排：自适应 / 抗风 / 普通；
- *   · 切到「通透」或「关闭」时子排收起；
- *   · 设备回读的档位落在降噪三个子档位（NOISE_CANCELLATION / ADAPTIVE / ANTI_WIND）时，
- *     顶部「降噪」高亮；落在 TRANSPARENCY / OFF 时对应项高亮。
+ * 形态对齐参照实现 _refs/own-HyperPods 的 ui/components/AncSwitch.kt:277-332（AncButton）
+ * 与 :408-496（MoondropAncSwitch）—— 本次「换 HyperPods 风格」的参照物：
+ *   · 主排最多三格：通透 → 降噪 → 关闭（顺序固定），**没有轨道底色**；
+ *   · 每格是「图标在上、文案在下」的竖排按钮（图标 60dp / 紧凑档 40dp），
+ *     选中时换成 on 变体图标（参照实现用 Crossfade 做切换动画）+ primary 文案色；
+ *   · 「降噪」当前生效时，下方展开子排：自适应 / 抗风 / 普通（参照实现的 ANC_SUB_ORDER
+ *     adaptive → anti_wind → anc 与本项目既有的 SUB_MODE_ORDER 完全同序）；
+ *   · 横屏弹窗用 [compact] 档（图标 40dp、内边距减半）。
  *
- * 下标解析：三个顶级组与三个子档位的下标全部由 [PodSnapshot.ancModes] 的 indexOf 动态解析，
- * 设备没上报的档位直接不渲染，绝不写死下标。点「降噪」组时下发「上一次选过的子档位」，
- * 默认「普通」= AncMode.NOISE_CANCELLATION。
+ * 档位来源与「不摆假控件」：
+ *   档位表是 [moe.chenxy.hyperpods.pods.PodSnapshot.ancModes]
+ *   （= pods/MoondropLink.kt 按型号档案给出的 UI 顺序表），
+ *   主排/子排的每一项都用 `indexOf` 在**这张表里**解析真实下标，表里没有的档位直接不渲染 ——
+ *   绝不写死下标、也不摆一个拨不动的假控件。拿不到的档位在本项目里意味着
+ *   该型号档案没有这一档（或能力探测还没回来，ancModes 为空时整个控件不出现）。
  *
- * 视觉：顶部与子排都是「圆角轨道 Surface + 选中项填色胶囊」，
- * 对齐参考实现 _refs/OppoPods/.../ui/components/AncSwitch.kt:100-155
- * （选项 = 圆角容器 + 居中文案 + pressable 按压反馈 + 选中态变色），
- * 并沿用本项目既有 AncSwitch 的 miuix Surface / RoundedCornerShape 词汇；
- * 颜色走 Miuix 语义 token（primary / onPrimary / secondaryContainer / onSecondaryVariant）。
+ * 乐观态（本项目的机制，参照实现没有）：
+ *   点下去立刻反馈，设备 1.5s 内没回读就退回设备真实状态 —— 不让乐观态永久骗人。
  *
- * 图标：顶部三段各带一枚参考实现 moondrop-pods 的同名矢量图标，
- * 归属与 ui/components/AncSwitch.kt（参考实现）:49-84 完全一致：
- *   降噪 → ic_openanc_on / ic_openanc_off
+ * 图标：主排三格各带一枚既有矢量图标（on/off 两态，与参照实现逐项对应）：
  *   通透 → ic_transparent_on / ic_transparent_off
+ *   降噪 → ic_openanc_on / ic_openanc_off
  *   关闭 → ic_closeanc_on / ic_closeanc_off
- * 参考实现的这套图标是「彩色圆底 + 白色字形」的自带底色徽标（on 变体蓝底 #0D84FF、
- * off 变体浅灰底 #E8E8E8，night 变体深灰底 #454545 + 白色字形），因此**不能**再叠 tint，
- * 直接用 painterResource / themedPainterResource 原样绘制。
- * 子排（自适应 / 抗风 / 普通）**不加图标**：参考实现的 AncSwitch 根本没有子排，
- * 其 res 里也没有「抗风」图标（ic_adaptive_* / ic_normal 只出现在 raw/keep.xml 这条死配置里，
- * 没有任何 Kotlin 引用），硬凑会让三个子档位图标不齐、其中 ic_normal 还是纯黑 24dp 字形
- * （深色下不可见），所以子排保持纯文案，视觉更整齐。
+ * 这三对图标是「彩色圆底 + 白色字形」的自带底色徽标，因此不再叠 tint，直接原样绘制。
+ * **子排保持纯文案**：参照实现的子排放了 ic_adaptive_on/off（自适应专用），
+ * 但本仓库 res 里没有这一对图（只有 ic_openanc / ic_closeanc / ic_transparent），
+ * 而「没有的图不要臆造」—— 硬拿 openanc 冒充自适应会让两个子档位图标相同，
+ * 所以子排只留文案，选中态用 primary 色 + SemiBold 表达。
  */
 package moe.chenxy.hyperpods.ui.components
 
@@ -38,13 +37,9 @@ import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -53,12 +48,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -69,7 +62,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
@@ -80,14 +72,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import moe.chenxy.hyperpods.R
 import moe.chenxy.hyperpods.core.AncMode
-import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.SinkFeedback
@@ -99,11 +88,7 @@ private enum class AncGroup { TRANSPARENCY, NOISE_CONTROL, OFF }
 /** 一个可下发档位：带它在 [PodSnapshot.ancModes] 里的真实下标。 */
 private data class AncChoice(val mode: AncMode, val index: Int)
 
-/**
- * 顶部一个选项：组 + 文案 + 点它要下发的档位 + 选中/未选中两枚图标资源 id。
- *
- * iconRes 为 0 表示该选项不画图标（目前只有子排会走这条路，顶部三段恒定有图标）。
- */
+/** 主排一格：组 + 文案 + 点它要下发的档位 + on/off 两枚图标资源 id。 */
 private data class AncTopChoice(
     val group: AncGroup,
     val labelRes: Int,
@@ -112,19 +97,14 @@ private data class AncTopChoice(
     @androidx.annotation.DrawableRes val offIconRes: Int,
 )
 
-/** 降噪组下的三个子档位，顺序固定：自适应 / 抗风 / 普通。 */
+/** 降噪组下的三个子档位，顺序固定：自适应 / 抗风 / 普通（与参照实现同序）。 */
 private val SUB_MODE_ORDER = listOf(AncMode.ADAPTIVE, AncMode.ANTI_WIND, AncMode.NOISE_CANCELLATION)
 
 /** 「降噪」组默认下发的子档位（普通降噪）。 */
 private val DEFAULT_SUB_MODE = AncMode.NOISE_CANCELLATION
 
-private val TRACK_CORNER = 14.dp
-private val PILL_CORNER = 10.dp
-private val PILL_HEIGHT = 44.dp
-private val SUB_PILL_HEIGHT = 34.dp
-private val TOP_ICON_SIZE = 22.dp
-private val SUB_ICON_SIZE = 18.dp
-private const val SELECT_ANIM_MS = 180
+private val SUB_BUTTON_CORNER = 10.dp
+private const val ANIM_DURATION = 300
 
 /** 乐观显示最长时间：设备 1.5s 内没回读到新档位就退回设备真实状态。 */
 private const val OPTIMISTIC_TIMEOUT_MS = 1500L
@@ -147,7 +127,7 @@ fun ancModeLabel(mode: AncMode): String = when (mode) {
 }
 
 /**
- * 子排文案：降噪组里的 NOISE_CANCELLATION 在子排上叫「普通」，避免与顶部组名「降噪」重复。
+ * 子排文案：降噪组里的 NOISE_CANCELLATION 在子排上叫「普通」，避免与主排组名「降噪」重复。
  */
 @Composable
 private fun subModeLabel(mode: AncMode): String = when (mode) {
@@ -155,7 +135,7 @@ private fun subModeLabel(mode: AncMode): String = when (mode) {
     else -> ancModeLabel(mode)
 }
 
-/** 设备档位 → 顶部组；null = 未知（-1 下标）或不属于三组（LIVE）。 */
+/** 设备档位 → 主排组；null = 未知（-1 下标）或不属于三组（LIVE）。 */
 private fun AncMode?.toAncGroup(): AncGroup? = when (this) {
     AncMode.TRANSPARENCY -> AncGroup.TRANSPARENCY
     AncMode.OFF -> AncGroup.OFF
@@ -170,6 +150,7 @@ private fun AncMode?.toAncGroup(): AncGroup? = when (this) {
  * @param selectedIndex 当前档位下标；-1 表示未知
  * @param onSelect      点击回调，参数为设备下标，调用方直接交给
  *                      [moe.chenxy.hyperpods.pods.MoondropLink.setAnc]
+ * @param compact       横屏弹窗的紧凑档
  */
 @Composable
 fun AncSwitch(
@@ -177,6 +158,7 @@ fun AncSwitch(
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     if (modes.isEmpty()) return
 
@@ -254,59 +236,43 @@ fun AncSwitch(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 12.dp)
+            .padding(vertical = if (compact) 8.dp else 16.dp)
     ) {
-        // ── 顶部一排：通透 / 降噪 / 关闭 ──
-        Surface(
+        // ── 主排：通透 / 降噪 / 关闭（图标在上、文案在下）──
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(TRACK_CORNER),
-            color = MiuixTheme.colorScheme.secondaryContainer,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                topChoices.forEach { top ->
-                    AncPill(
-                        label = stringResource(top.labelRes),
-                        selected = activeGroup == top.group,
-                        onClick = { send(top.target) },
-                        modifier = Modifier.weight(1f),
-                        height = PILL_HEIGHT,
-                        fontSize = 13.sp,
-                        iconRes = if (activeGroup == top.group) top.onIconRes else top.offIconRes,
-                        iconSize = TOP_ICON_SIZE,
-                    )
-                }
+            topChoices.forEach { top ->
+                AncButton(
+                    onIconRes = top.onIconRes,
+                    offIconRes = top.offIconRes,
+                    label = stringResource(top.labelRes),
+                    isSelected = activeGroup == top.group,
+                    onClick = { send(top.target) },
+                    modifier = Modifier.weight(1f),
+                    compact = compact,
+                )
             }
         }
 
         // ── 「降噪」组展开子排：自适应 / 抗风 / 普通 ──
-        AnimatedVisibility(
-            visible = activeGroup == AncGroup.NOISE_CONTROL && subChoices.isNotEmpty(),
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut(),
-        ) {
+        // 只有一种降噪时没有可选性，整排不出现（同参照实现 ncVariants.size > 1）
+        if (activeGroup == AncGroup.NOISE_CONTROL && subChoices.size > 1) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    .padding(top = if (compact) 8.dp else 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp),
             ) {
                 subChoices.forEach { choice ->
-                    AncPill(
+                    AncTextButton(
                         label = subModeLabel(choice.mode),
-                        selected = activeGroup == AncGroup.NOISE_CONTROL && activeMode == choice.mode,
+                        selected = activeMode == choice.mode,
                         onClick = { send(choice) },
                         modifier = Modifier.weight(1f),
-                        height = SUB_PILL_HEIGHT,
-                        fontSize = 12.sp,
-                        iconRes = 0,
-                        iconSize = SUB_ICON_SIZE,
+                        compact = compact,
                     )
                 }
             }
@@ -315,79 +281,100 @@ fun AncSwitch(
 }
 
 /**
- * 单个选项：圆角胶囊。选中填 [MiuixTheme.colorScheme.primary]，未选中透明（露出轨道底色），
- * 文案随选中态在 onPrimary / onSecondaryVariant 之间做 180ms 颜色动画；
- * 最多两行居中（英文 "Noise Cancelling" 在窄弹窗里会折行）。
+ * 主排一格：图标（上）+ 文案（下）。选中时换 on 变体图标（Crossfade，同参照实现），
+ * 文案色在 onBackground / primary 之间做 300ms 动画。
  *
- * iconRes 非 0 时在文案左侧画一枚图标（图标自带底色，不再叠 tint；见文件头「图标」段）。
+ * 图标自带底色，因此不再叠 tint，直接用 [themedPainterResource] 原样绘制。
  */
 @Composable
-private fun AncPill(
+private fun AncButton(
+    @androidx.annotation.DrawableRes offIconRes: Int,
+    @androidx.annotation.DrawableRes onIconRes: Int,
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val boxSize = if (compact) 40.dp else 60.dp
+    val idleIconSize = if (compact) 32.dp else 48.dp
+
+    val textColor by animateColorAsState(
+        targetValue = if (isSelected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onBackground,
+        animationSpec = tween(ANIM_DURATION),
+        label = "anc_text_color",
+    )
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .pressable(interactionSource = interactionSource, indication = SinkFeedback())
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
+    ) {
+        Box(modifier = Modifier.size(boxSize), contentAlignment = Alignment.Center) {
+            Crossfade(
+                targetState = isSelected,
+                animationSpec = tween(ANIM_DURATION),
+                label = "anc_icon",
+            ) { selected ->
+                Image(
+                    painter = themedPainterResource(if (selected) onIconRes else offIconRes),
+                    contentDescription = label,
+                    modifier = Modifier.size(if (selected) boxSize else idleIconSize),
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = label,
+            fontSize = if (compact) 12.sp else 14.sp,
+            fontWeight = FontWeight.Medium,
+            color = textColor,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * 子排一格：纯文案（见文件头「子排保持纯文案」）。选中态 = primary 色 + SemiBold。
+ * 保留按压反馈（SinkFeedback），与主排同一套手感。
+ */
+@Composable
+private fun AncTextButton(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    height: Dp = PILL_HEIGHT,
-    fontSize: TextUnit = 14.sp,
-    @androidx.annotation.DrawableRes iconRes: Int = 0,
-    iconSize: Dp = TOP_ICON_SIZE,
+    compact: Boolean = false,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
-    val shape = RoundedCornerShape(PILL_CORNER)
-    val containerColor by animateColorAsState(
-        targetValue = if (selected) MiuixTheme.colorScheme.primary else Color.Transparent,
-        animationSpec = tween(SELECT_ANIM_MS),
-        label = "AncPillContainer",
-    )
-    val contentColor by animateColorAsState(
-        targetValue = if (selected) {
-            MiuixTheme.colorScheme.onPrimary
-        } else {
-            MiuixTheme.colorScheme.onSecondaryVariant
-        },
-        animationSpec = tween(SELECT_ANIM_MS),
-        label = "AncPillContent",
+    val shape = RoundedCornerShape(SUB_BUTTON_CORNER)
+    val color by animateColorAsState(
+        targetValue = if (selected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onBackground,
+        animationSpec = tween(ANIM_DURATION),
+        label = "anc_sub_text_color",
     )
 
-    Surface(
+    Box(
         modifier = modifier
-            .height(height)
+            .height(if (compact) 32.dp else 36.dp)
             .clip(shape)
             .pressable(interactionSource = interactionSource, indication = SinkFeedback())
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick,
-            ),
-        shape = shape,
-        color = containerColor,
-        contentColor = contentColor,
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 6.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (iconRes != 0) {
-                Image(
-                    painter = themedPainterResource(iconRes),
-                    contentDescription = null,
-                    modifier = Modifier.size(iconSize),
-                )
-                Spacer(modifier = Modifier.width(5.dp))
-            }
-            Text(
-                text = label,
-                fontSize = fontSize,
-                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                color = contentColor,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        Text(
+            text = label,
+            fontSize = if (compact) 12.sp else 13.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = color,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -397,8 +384,8 @@ private fun AncPill(
  * 因此应用内主题与系统不一致时会取到另一套 night / day 变体。
  *
  * 与系统 uiMode 一致时直接走 [painterResource]（零额外开销）；不一致时才按应用主题重建
- * Resources 取出 drawable 并转成 [BitmapPainter]。逐字对齐参考实现
- * moondrop-pods ui/components/AncSwitch.kt:117-155 的同名函数。
+ * Resources 取出 drawable 并转成 [BitmapPainter]。逐字对齐参照实现
+ * _refs/own-HyperPods ui/components/AncSwitch.kt:338-372 的同名函数。
  */
 @Composable
 private fun themedPainterResource(@androidx.annotation.DrawableRes id: Int): Painter {

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- HyperPods for Moondrop — default (English) strings -->
 <resources>
-    <string name="app_name">MiuaxMoondrop</string>
+    <string name="app_name">MiuixMoondrop</string>
     <string name="about">About</string>
     <string name="back">Back</string>
     <string name="cancel">Cancel</string>

@@ -234,12 +234,12 @@ private fun PopupBody(
                         .weight(0.6f)
                         .verticalScroll(rememberScrollState()),
                 ) {
-                    BatteryCard(snapshot)
+                    BatteryCard(snapshot, compact = true)
                     if (!snapshot.connected) {
                         WaitingHint()
                     } else if (snapshot.ancModes.isNotEmpty()) {
                         Spacer(Modifier.height(CARD_GAP))
-                        AncCard(snapshot)
+                        AncCard(snapshot, compact = true)
                     }
                 }
                 Column(
@@ -323,25 +323,35 @@ private fun PopupBody(
     }
 }
 
-/** 电量卡（离线 / 单设备 / 三路电量的判定都在 components/PodStatus.kt 内）。 */
+/**
+ * 电量卡（离线 / 单设备 / 三路电量的判定都在 components/PodStatus.kt 内）。
+ *
+ * @param compact 横屏弹窗用紧凑档（同参照实现 LandscapePopupBody 里 `compact = true` 的传法）
+ */
 @Composable
-private fun BatteryCard(snapshot: PodSnapshot) {
+private fun BatteryCard(snapshot: PodSnapshot, compact: Boolean = false) {
     Card(modifier = Modifier.fillMaxWidth()) {
         PodStatus(
             battery = snapshot.battery,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp),
+            // 横屏紧凑档：内边距同步收窄（同参照实现 LandscapePopupBody 的 10dp/10dp）
+            modifier = Modifier.padding(
+                horizontal = if (compact) 10.dp else 12.dp,
+                vertical = if (compact) 10.dp else 16.dp,
+            ),
+            compact = compact,
         )
     }
 }
 
-/** 降噪卡：三选一 + 降噪子排，档位来自设备真实上报的 ancModes。 */
+/** 降噪卡：主排三格 + 降噪子排，档位来自设备真实上报的 ancModes（缺失档位不渲染）。 */
 @Composable
-private fun AncCard(snapshot: PodSnapshot) {
+private fun AncCard(snapshot: PodSnapshot, compact: Boolean = false) {
     Card(modifier = Modifier.fillMaxWidth()) {
         AncSwitch(
             modes = snapshot.ancModes,
             selectedIndex = snapshot.ancIndex,
             onSelect = { index -> MoondropLink.setAnc(index) },
+            compact = compact,
         )
     }
 }

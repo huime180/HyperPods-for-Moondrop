@@ -30,3 +30,5 @@ __pycache__/
 
 # CI 产物（可随时从 Actions 重新下载）
 /release/
+/_shots/
+/_scratch_bt/

@@ -18,7 +18,8 @@
  *        "left" / "right" / "case" 三个 Int，低 7 位 = 0..100 电量，bit7 = 充电中，
  *        255 = 未知。
  *      这个 Bundle 就是 HyperPodsAction.EXTRA_BATTERY（"batteryParams"）的载荷。
- *   ② 未知电量显示「-」，绝不显示 0%（与本项目 PodStatus 的「离线」口径一致）。
+ *   ② 没有读数显示「-」、读到 0 显示「离线」，绝不显示 0%
+ *      （与 ui/components/PodStatus.kt 的「离线」口径一致）。
  *   ③ 文案全部走 res/values/strings.xml + values-zh-rCN/strings.xml
  *      （参考实现是写死的中文）。
  *   ④ 不在这里申请运行时权限：这是连接耳机时自动弹出的窗口，弹权限框会打断用户；
@@ -35,17 +36,24 @@
  *             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
  *     )
  *
- *   因此弹窗首帧就有内容。下面那个广播接收器只是「外部按 action 拉起、后续又收到状态广播时」
- *   的刷新兜底：本应用已不再是 Xposed 模块，hook 时代那批跨进程广播已不存在。
+ *   因此弹窗首帧就有内容。
  *   也可以按 action 隐式拉起：chen.action.hyperpods.moondrop.show_connection_popup
  *   （= ConnectionPopupActivity.ACTION_SHOW_CONNECTION_POPUP，manifest 里有同名过滤器）。
+ *
+ * ── 为什么首帧之后还要再看一遍状态（本轮修的正是这里）──────────────────
+ *   协议栈（pods/MoondropLink.kt）就在**本应用进程**里，弹窗要的实时状态不必绕任何广播。
+ *   上一版把弹窗内容冻在启动那一刻的 extra 上、靠
+ *   `PODS_CONNECTED / BATTERY_CHANGED / PODS_DISCONNECTED` 三条广播刷新 ——
+ *   那三条是 Xposed 时代由被注入的系统进程发出的，本应用已不是模块，**没有任何发送方**，
+ *   于是刷新路径是死的。真机实测（布丁，2026-09-15）：
+ *   `已连接 左耳 2 %`（首批电量帧只带左耳）后 **286 ms** 就是 `左耳 59 % · 右耳 64 %`，
+ *   而弹窗整段存活期都停在 `左耳 2 % / 右耳 - / 充电盒 -` —— 用户看到的是错的数。
+ *   现在改成订阅进程内 [moe.chenxy.hyperpods.pods.PodEvent]（[rememberPodSnapshot]）：
+ *     · extra 仍然带进首帧内容（启动方已经在手，零成本）；
+ *     · 之后一律以进程内快照为准，首批帧一落定就自动纠正，断开即收窗。
  */
 package moe.chenxy.hyperpods.ui
 
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.graphics.Color as AndroidColor
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
@@ -75,7 +83,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -88,7 +95,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -100,6 +106,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import kotlinx.coroutines.delay
 import moe.chenxy.hyperpods.R
+import moe.chenxy.hyperpods.pods.BatterySnapshot
 import moe.chenxy.hyperpods.utils.data.HyperPodsAction
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 
@@ -200,6 +207,19 @@ private fun decodeLine(bundle: Bundle, key: String, chargingKey: String): PopupB
     return PopupBatteryLine(level, charging)
 }
 
+/**
+ * 进程内快照 → 弹窗自己的三路模型（[PopupBattery]）。
+ *
+ * 与 [decodeBattery] 的区别只是数据来源：这里来自 pods/MoondropLink.kt 的实时快照，
+ * 那里来自启动方塞进 intent 的 Bundle（首帧兜底）。判定口径完全一致：
+ * `*Known == false`（[moe.chenxy.hyperpods.core.BATTERY_UNKNOWN]）＝ 没有读数。
+ */
+private fun BatterySnapshot.toPopupBattery(): PopupBattery = PopupBattery(
+    left = PopupBatteryLine(if (leftKnown) left else -1, leftCharging),
+    right = PopupBatteryLine(if (rightKnown) right else -1, rightCharging),
+    case = PopupBatteryLine(if (caseKnown) case else -1, caseCharging),
+)
+
 @Composable
 private fun ConnectionPopupContent(
     initialDeviceName: String,
@@ -207,43 +227,24 @@ private fun ConnectionPopupContent(
     autoDismissSeconds: Int,
     onDismiss: () -> Unit,
 ) {
-    val context = LocalContext.current
-    var deviceName by remember { mutableStateOf(initialDeviceName) }
-    var battery by remember { mutableStateOf(initialBattery) }
+    // 状态源：**进程内**的 [PodEvent]（协议栈与弹窗同一个进程）。
+    // 不使用任何广播：hook 时代那三条跨进程广播在本应用里没有发送方（见文件头）。
+    val snapshot = rememberPodSnapshot()
 
-    // 首帧内容由启动方（pods/ControlBridge.kt）带进来的 extra 提供；
-    // 这里保留广播监听，作为「后续状态变化 / 外部按 action 拉起」时的刷新兜底。
-    DisposableEffect(Unit) {
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(receiverContext: Context?, intent: Intent?) {
-                when (intent?.action) {
-                    HyperPodsAction.PODS_CONNECTED ->
-                        intent.getStringExtra(HyperPodsAction.EXTRA_DEVICE_NAME)
-                            ?.takeIf { it.isNotBlank() }
-                            ?.let { deviceName = it }
+    // 首帧优先用启动方带进来的 extra（进程内快照还没来得及更新时也绝不空白）；
+    // 只要进程内快照已经有读数，就以它为准 —— 它总是比 extra 新。
+    val battery = if (snapshot.battery.anyKnown) snapshot.battery.toPopupBattery() else initialBattery
+    val deviceName = snapshot.deviceName.ifBlank { initialDeviceName }
 
-                    HyperPodsAction.BATTERY_CHANGED ->
-                        intent.getBundleExtra(HyperPodsAction.EXTRA_BATTERY)
-                            ?.let { battery = decodeBattery(it) }
-
-                    // 耳机断开就没有可显示的电量了，直接收窗
-                    HyperPodsAction.PODS_DISCONNECTED -> onDismiss()
-                }
-            }
-        }
-
-        context.registerReceiver(
-            receiver,
-            IntentFilter().apply {
-                addAction(HyperPodsAction.PODS_CONNECTED)
-                addAction(HyperPodsAction.BATTERY_CHANGED)
-                addAction(HyperPodsAction.PODS_DISCONNECTED)
-            },
-            Context.RECEIVER_EXPORTED,
-        )
-
-        onDispose {
-            runCatching { context.unregisterReceiver(receiver) }
+    // 断开就收窗：耳机拔了 / 关了之后卡片上的读数已经没有意义。
+    // 必须区分「从没连上过」与「连上又断开」—— 按 action 隐式拉起时本来就没连接，
+    // 那时不能立刻把自己关掉（用户是主动打开它看状态的）。
+    var everConnected by remember { mutableStateOf(false) }
+    LaunchedEffect(snapshot.connected) {
+        if (snapshot.connected) {
+            everConnected = true
+        } else if (everConnected) {
+            onDismiss()
         }
     }
 
@@ -431,7 +432,15 @@ private fun BatterySummary(battery: PopupBattery, textColor: Color) {
  */
 @Composable
 private fun BatteryLine(label: String, line: PopupBatteryLine, textColor: Color) {
-    val levelText = if (line.known) "${line.level}%" else "-"
+    // 没有读数（-1）显示「-」；读到 0 显示「离线」—— 固件对未连接的一侧回 0x00，
+    // 一个真能上报的耳机不可能是真的 0 %（与 ui/components/PodStatus.kt 同一口径）。
+    val offline = !line.known || line.level <= 0
+    val levelText = when {
+        !line.known -> "-"
+        offline -> stringResource(R.string.battery_offline)
+        else -> "${line.level}%"
+    }
+    val charging = line.charging && !offline
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         BasicText(
@@ -445,7 +454,7 @@ private fun BatteryLine(label: String, line: PopupBatteryLine, textColor: Color)
         )
         Spacer(modifier = Modifier.width(5.dp))
         Image(
-            painter = painterResource(getBatteryIconRes(line.level, line.charging)),
+            painter = painterResource(getBatteryIconRes(if (offline) 0 else line.level, charging)),
             contentDescription = "$label $levelText",
             modifier = Modifier.size(width = 28.dp, height = 17.dp),
         )

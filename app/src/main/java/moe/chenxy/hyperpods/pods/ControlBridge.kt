@@ -22,11 +22,23 @@ package moe.chenxy.hyperpods.pods
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import moe.chenxy.hyperpods.ui.ConnectionPopupActivity
 import moe.chenxy.hyperpods.utils.data.HyperPodsAction
 
 private const val TAG = "ControlBridge"
+
+/**
+ * 弹窗延后这么久再启动：等首批电量帧落定。
+ *
+ * 真机实测（布丁，2026-09-15）：连接后第一批电量帧只带**左耳**（`左耳 2%`，右耳/充电盒未知），
+ * 286 ms 之后才是完整的 `左耳 59% · 右耳 64%`。上一版拿到第一批就启动，弹窗于是整段存活期
+ * 都停在那个残缺读数上；这里多等 600 ms，启动时再取**当时**的快照，首帧就是对的。
+ * 顺带跳过「刚连上又立刻断开」的抖动窗口（下面 [cancelPendingPopup]）。
+ */
+private const val POPUP_SETTLE_DELAY_MS = 600L
 
 /** 电量 Bundle 编码：255 = 未知；置 bit7 表示充电中（与 MIUI 原生耳机页的约定一致）。 */
 private object BatteryCodecWire {
@@ -64,6 +76,12 @@ object ControlBridge {
      */
     @Volatile private var popupShownForAddress: String? = null
 
+    /** 延后启动用的主线程队列（[PodListener] 的回调本来就在主线程，这里只是排一次延后）。 */
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /** 已排队但还没启动的弹窗任务；断开时撤销（见 [cancelPendingPopup]）。 */
+    private var pendingPopup: Runnable? = null
+
     /** 幂等初始化：接上协议客户端并注册状态转发器。 */
     @Synchronized
     fun ensureInit(context: Context) {
@@ -96,6 +114,8 @@ object ControlBridge {
                     maybeShowConnectionPopup(ctx, snap)
                 }
                 is PodEvent.Disconnected -> {
+                    // 断开＝这次会话结束：撤销还没启动的弹窗，并允许重连后再弹一次
+                    cancelPendingPopup()
                     popupShownForAddress = null
                     PodNotification.cancel(ctx)
                 }
@@ -105,15 +125,33 @@ object ControlBridge {
     }
 
     /**
-     * 首次拿到有效电量时弹出「连接弹窗」，并把这一刻的设备名与电量直接作为 extra 带上：
-     * 弹窗首帧就有内容（不再依赖 hook 时代那条 BATTERY_CHANGED 广播来刷新 ——
-     * 那条广播的发送方已随模块一起删除）。
+     * 首次拿到有效电量时**排队**弹出「连接弹窗」（延后 [POPUP_SETTLE_DELAY_MS] 让首批帧落定）。
+     *
+     * 只排队、不在这里直接启动的原因见该常量的说明；启动那一刻会用
+     * [MoondropLink.snapshot] 取**最新**的设备名与电量塞进 extra，因此首帧内容是对的。
+     * 弹窗自己还会订阅进程内状态持续纠正（ui/ConnectionPopupActivity），
+     * 所以即便设备后续再报新值，卡片也不会停在旧数上。
      */
     private fun maybeShowConnectionPopup(context: Context, snapshot: PodSnapshot) {
         if (!snapshot.battery.anyKnown) return
         val address = snapshot.deviceAddress
         if (address.isEmpty() || address == popupShownForAddress) return
+        // 先认领地址：这样后续每一帧电量都不会再排队第二次（「不重复弹」）。
+        // 即使这一次启动被系统判为后台启动而静默丢弃，也不反复尝试刷屏。
         popupShownForAddress = address
+        if (pendingPopup != null) return
+        val pending = Runnable {
+            pendingPopup = null
+            launchConnectionPopup(context)
+        }
+        pendingPopup = pending
+        mainHandler.postDelayed(pending, POPUP_SETTLE_DELAY_MS)
+    }
+
+    /** 真正的启动动作：用启动这一刻的进程内快照做首帧内容；失败只打日志。 */
+    private fun launchConnectionPopup(context: Context) {
+        val snapshot = MoondropLink.snapshot()
+        if (!snapshot.connected || !snapshot.battery.anyKnown) return
         runCatching {
             context.startActivity(
                 Intent(context, ConnectionPopupActivity::class.java)
@@ -125,5 +163,11 @@ object ControlBridge {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             )
         }.onFailure { Log.w(TAG, "connection popup launch failed: ${it.message}") }
+    }
+
+    /** 撤销还没启动的弹窗任务（断开时调用）。 */
+    private fun cancelPendingPopup() {
+        pendingPopup?.let { mainHandler.removeCallbacks(it) }
+        pendingPopup = null
     }
 }

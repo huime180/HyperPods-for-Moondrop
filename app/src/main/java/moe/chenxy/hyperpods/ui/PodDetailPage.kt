@@ -27,6 +27,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.provider.Settings
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,13 +36,16 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -107,6 +111,10 @@ fun PodDetailPage(
         ),
         overscrollEffect = null,
     ) {
+        // 产品图：参照实现把英雄图放在正文最上方（不在任何卡片里，独占一行），
+        // 后面才是各张卡；本页保持同一顺序。
+        item { PodHeroImageRow() }
+
         item { DeviceHeroCard(snapshot) }
 
         item { SmallTitle(text = stringResource(R.string.battery_title)) }
@@ -226,6 +234,38 @@ fun PodDetailPage(
 
     // 互斥确认框（OverlayDialog）与开关拦截器共用同一个 state
     MutualExclusionDialog(state = exclusion)
+}
+
+/**
+ * 耳机页顶部的产品图。
+ *
+ * 取图方式沿用本仓库**既有的唯一一套**：`R.drawable.img_box` + [painterResource]
+ * —— 与连接弹窗（ui/ConnectionPopupActivity.kt 的 ConnectionPodImage）同一张图、同一取法。
+ *
+ * 为什么不做参照实现那套「按机型取图」：参照实现是
+ * `rememberPodImagePainter(path, deviceName)` = 用户导入图 / moondropDeviceImage(机型) / img_box
+ * 三级回落，而本仓库 res 里只有 img_box 一张耳机产品图（参照仓库的 img_left / img_right
+ * 本仓库没有），也没有机型 → 图的档案表，更没有相册导入功能。
+ * 「没有的图不要臆造」，所以这里不新增任何映射或新资源，只把已有这张摆到参照实现的同一位置。
+ *
+ * ⚠ 宽度上界 360dp 不是新数字：`img_box.png` 是 **640×640 方图**，而本机窗口是
+ * `sw777dp w1164dp h777dp`（横屏大窗）。参照实现的**竖屏**分支只写 `fillMaxWidth(0.7f)`，
+ * 在宽窗口上就是 0.7 × 1164dp ≈ 815dp 的方块，比屏幕还高；参照实现的**横屏**分支正是用
+ * `widthIn(max = 360.dp)` 收口的。本页是单列（没有那套横屏双列正文），所以直接沿用这个上界。
+ */
+@Composable
+private fun PodHeroImageRow() {
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Image(
+            painter = painterResource(R.drawable.img_box),
+            contentDescription = stringResource(R.string.app_name),
+            modifier = Modifier
+                .fillMaxWidth(0.7f)
+                .widthIn(max = 360.dp)
+                .padding(vertical = 16.dp),
+            contentScale = ContentScale.FillWidth,
+        )
+    }
 }
 
 /** 机型卡：型号名（中文）、连接状态、可信标记、传输通道、当前编码。 */
