@@ -19,11 +19,7 @@
     <string name="conn_disconnected">未连接</string>
     <string name="model_verified">已验证</string>
     <string name="transport">传输通道</string>
-    <string name="active_codec">当前编码</string>
     <string name="unknown_value">未知</string>
-    <!-- 当前编码：耳机侧 LHDC 开关与系统协商到的编码会短暂不一致，这两个是切换中的中性占位 -->
-    <string name="codec_lhdc_pending">LHDC（系统切换中）</string>
-    <string name="codec_base_pending">基础编码（系统切换中）</string>
 
     <!-- 电量 -->
     <string name="battery_title">电量</string>

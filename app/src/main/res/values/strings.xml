@@ -19,11 +19,7 @@
     <string name="conn_disconnected">Not connected</string>
     <string name="model_verified">Verified</string>
     <string name="transport">Transport</string>
-    <string name="active_codec">Active codec</string>
     <string name="unknown_value">Unknown</string>
-    <!-- 当前编码：耳机侧 LHDC 开关与系统协商到的编码会短暂不一致，这两个是切换中的中性占位 -->
-    <string name="codec_lhdc_pending">LHDC (system switching)</string>
-    <string name="codec_base_pending">Basic codec (system switching)</string>
 
     <!-- battery -->
     <string name="battery_title">Battery</string>

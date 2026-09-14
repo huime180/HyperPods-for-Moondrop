@@ -10,7 +10,7 @@
  *     下拉行用 preference.OverlayDropdownPreference，跳转行用 preference.ArrowPreference，
  *     提示音开关 + 提示音音量合并成一行（components/PromptTone.kt）—— 与 OppoPods 同一套组件词汇。
  *
- * 行顺序（本项目的功能面）：机型 + 传输/编码 → 电量 → 降噪（三选一 + 子排）→ 增益
+ * 行顺序（本项目的功能面）：机型 + 传输通道 → 电量 → 降噪（三选一 + 子排）→ 增益
  *   → 指示灯 / 提示音(含音量) / LHDC / 双设备连接
  *   → 手势操作（单独一张卡的跳转行，hasGestures 门控）
  *   → 刷新 → 系统蓝牙设置 → 关于。
@@ -268,7 +268,7 @@ private fun PodHeroImageRow() {
     }
 }
 
-/** 机型卡：型号名（中文）、连接状态、可信标记、传输通道、当前编码。 */
+/** 机型卡：型号名（中文）、连接状态、可信标记、传输通道。 */
 @Composable
 private fun DeviceHeroCard(snapshot: PodSnapshot) {
     Card {
@@ -314,56 +314,17 @@ private fun DeviceHeroCard(snapshot: PodSnapshot) {
             title = stringResource(R.string.transport),
             summary = snapshot.transport.ifBlank { stringResource(R.string.unknown_value) },
         )
-        BasicComponent(
-            title = stringResource(R.string.active_codec),
-            summary = activeCodecLabel(snapshot),
-        )
-    }
-}
-
-/** 系统报的编码名里带 LHDC 的（本 ROM 实测名：LHDCv5 / LHDC_V2 / LHDC_V3）。 */
-private fun isLhdcCodec(name: String): Boolean = name.contains("LHDC", ignoreCase = true)
-
-/**
- * 「当前编码」行的显示值 —— 显示永远不与 LHDC 开关自相矛盾。
- *
- * 两个数据来源相互独立，而且会短暂打架：
- *   · [PodSnapshot.activeCodec] = **系统 A2DP 实际协商到的编码**，由
- *     pods/MoondropLink.onSystemCodecChanged() 填入；⚠ 该数据的来源是蓝牙进程里的 hook，
- *     随模块一起删除，因此本应用现在读不到它（这一行会落到「未知」）；
- *   · [PodSnapshot.lhdcOn] = **耳机侧 GAIA 的 LHDC 开关**。
- * 在耳机上打开 LHDC 之后，系统侧要重新协商才会从 AAC 切到 LHDC，这段时间里 activeCodec
- * 仍然是 AAC。早先这里直接把 activeCodec 印出来，于是出现「LHDC 开关是开的、当前编码却
- * 写着 AAC」的自相矛盾（用户报的就是这个）。
- *
- * 规则：
- *   ① LHDC 开：系统报的还不是 LHDC（空 / AAC / SBC / LDAC）→ 显示「LHDC（系统切换中）」，
- *      **绝不**在此时把 AAC 当成当前编码；系统已经协商到 LHDC 则照实显示它。
- *   ② LHDC 关但系统还停在 LHDC：同样不能与开关冲突 → 显示「基础编码（系统切换中）」。
- *   ③ 其余：系统编码就是事实，照实显示（AAC 只会在 LHDC 关 / 未知时走到这里）。
- *   ④ 没读到系统编码：显示「未知」，不谎报 AAC。
- *
- * 真正不同步的病因在数据侧（系统编码来源随模块删除、断开后 activeCodec 也不清空），
- * 这里只保证 UI 不再背书一个与开关冲突的值。
- */
-@Composable
-private fun activeCodecLabel(snapshot: PodSnapshot): String {
-    val systemCodec = snapshot.activeCodec.trim()
-    val systemIsLhdc = isLhdcCodec(systemCodec)
-    return when {
-        snapshot.lhdcOn == true && !systemIsLhdc -> stringResource(R.string.codec_lhdc_pending)
-        snapshot.lhdcOn == false && systemIsLhdc -> stringResource(R.string.codec_base_pending)
-        systemCodec.isNotEmpty() -> systemCodec
-        else -> stringResource(R.string.unknown_value)
     }
 }
 
 /**
- * 打开系统蓝牙设备详情页（HyperOS 上是 MiuiHeadsetActivity），
- * 里面有系统级的 LHDC / 低延迟 / 音量同步等开关。失败则退回系统蓝牙列表页。
+ * 打开系统蓝牙的**设备详情页** —— 与「设置 → 蓝牙 → 点设备」落到同一张页面
+ * （HyperOS 上那条路径也走这张页；先前硬编码的 `MiuiHeadsetActivity` 是另一张
+ * 「高级耳机页」，与它并不是同一页，用户实测过差异）。那页里有系统级的
+ * LHDC / 低延迟 / 音量同步等开关。失败则退回系统蓝牙列表页。
  *
- * ⚠ 两个字符串常量非公开 API，取值与系统设置页实现一致（系统页正是从 intent 里读它们），
- * 因此点开的就是系统自己的设备页 —— 本应用已不是模块，不再有「伪装成原生耳机页」那套接管。
+ * 两个字符串常量非公开 API，取值与系统设置页实现一致（系统页正是从 intent 里读它们）；
+ * 本应用已不是模块，不再有「伪装成原生耳机页」那套接管。
  */
 @SuppressLint("MissingPermission")
 @Suppress("DEPRECATION")

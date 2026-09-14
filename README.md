@@ -183,8 +183,6 @@ adb install -r app-debug.apk
   `ConnectionPopupActivity.lastShownAt / visible` 确认是否真的显示了；
 * 提示音 / LHDC / 双设备连接等开关都受**能力位**与**型号档案**双重门控：耳机没上报对应
   feature 就不展示该行；
-* **已知限制**：详情页的「当前编码」会一直显示「未知」——它的数据来源原本是蓝牙进程的 hook
-  广播，随去模块化一起消失了（见 `pods/MoondropLink.kt` 中 `systemCodecReprobe` 的说明）。
 
 ---
 
@@ -247,8 +245,7 @@ app/src/test/java/.../core/        # GaiaProtocolTest / BatteryCodecTest / Touch
 | 8 | 13 款「推断」机型 | 芯片级推断，协议可自动识别但未逐型跑通 |
 | 9 | 双设备连接的写入与断开单台 | moondrop-link 已读取验证；**写入/断开需双机场景实测**（上游原文） |
 | 10 | EDGE 增益映射 | 档案为恒等 `[0,1,2]`，**无实测依据**（推断值）。提示音音量量程已确认为 100（官方 App logcat） |
-| 11 | 「当前编码」显示 | 无数据源（原有 hook 广播已删除），详情页一直显示「未知」 |
-| 12 | 低延迟模式 | 本应用不实现（无 GAIA 命令、无自己的开关）；系统设备页的功能不归本应用控制 |
+| 11 | 低延迟模式 | 本应用不实现（无 GAIA 命令、无自己的开关）；系统设备页的功能不归本应用控制 |
 
 > 所有「实测」均指**上游项目**（FxxkMoondrop / moondrop-link-desktop / PuddingPods）或
 > **官方 App 自身 logcat / 布丁真机联调**取得的结论，不是全部机型在本应用里的运行结果。
@@ -313,6 +310,7 @@ app/src/test/java/.../core/        # GaiaProtocolTest / BatteryCodecTest / Touch
   `com.xiaomi.bluetooth`、`com.milink.service`，那些接收方全是 hook）。
 
 **随之一起失效的功能**（不是 bug，是没有数据源了）：超级岛 / 焦点通知的 HyperOS 专属显示、
-融合设备中心设备卡接管、系统设置页的原生耳机伪装、跨进程控制桥、详情页的「当前编码」。
+融合设备中心设备卡接管、系统设置页的原生耳机伪装、跨进程控制桥、详情页的编码显示
+（数据源消失，该行随后也已删除）。
 其中 `miui.focus.*`（焦点通知 / 超级岛）的字段知识仍保留在 [PROTOCOL.md](PROTOCOL.md)
 第 10.5 节，作为**参考资料**（当前应用只发一条普通的 `IMPORTANCE_LOW` 状态通知）。
