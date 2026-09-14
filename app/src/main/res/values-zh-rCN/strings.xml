@@ -145,11 +145,11 @@
     <string name="gesture_reading_title">尚未读到手势配置</string>
     <string name="gesture_reading_summary">耳机上报了 feature 22（TOUCHV2），但配置还没有读回来。请重连，或点「刷新」后再试。</string>
     <string name="gesture_note_title">说明</string>
-    <string name="gesture_note_body">读回与写回都是 feature 22（TOUCHV2）的 5 个字节：每字节一种手势（单击 / 双击 / 三击 / 长按1秒 / 长按3秒），其中「高 4 位是左耳动作 id、低 4 位是右耳动作 id」—— 依据官方 App 字节码 TouchNewInfo：每种手势各有一对 L/R 字段，单击字节用 shr 4 与 and 15 拆成两半。所以上面是 5 × 2 = 10 行，改一行只改那一个半字节，另一只耳朵与其余手势都不会被动到。动作表里 播放/暂停、上一曲、下一曲、语音助手、降噪切换 是实测确认的；音量 + 与 音量 - 只按官方 App 的选择器顺序推断，标签里已写「（推断）」。长按1秒与长按3秒是协议上两个独立字节（可同时配置）：官方 App 看起来冲突是功能层面的 —— 按满 3 秒必然先满足 1 秒的触发条件，两档绑不同动作时行为含糊 —— 不是协议禁止，因此本模块不做互斥限制。</string>
+    <string name="gesture_note_body">读回与写回都是 feature 22（TOUCHV2）的 5 个字节：每字节一种手势（单击 / 双击 / 三击 / 长按1秒 / 长按3秒），高 4 位是左耳动作、低 4 位是右耳动作，所以上面列 5 × 2 = 10 行，改一行只改那一个半字节，另一只耳朵与其余手势不受影响。长按1秒与长按3秒互斥：把其中一个设为「无」以外的动作时，另一个会自动清空为「无」。</string>
     <string name="gesture_slot_ear">%1$s · %2$s</string>
     <string name="gesture_ear_left">左耳</string>
     <string name="gesture_ear_right">右耳</string>
     <string name="gesture_action_next_track">下一曲</string>
-    <string name="gesture_action_volume_up">音量 +（推断）</string>
-    <string name="gesture_action_volume_down">音量 -（推断）</string>
+    <string name="gesture_action_volume_up">音量 +</string>
+    <string name="gesture_action_volume_down">音量 -</string>
 </resources>

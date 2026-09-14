@@ -946,7 +946,21 @@ object MoondropLink {
                 Log.w(TAG, "setGesture($slot/$ear) skipped: gesture config unknown")
                 return@launch
             }
-            val next = Gaia.GestureConf(current.copyOf()).with(slot, ear, actionId)
+            var next = Gaia.GestureConf(current.copyOf()).with(slot, ear, actionId)
+            // 长按 1 秒 / 3 秒 **互斥**：设备上二者不能同时生效（按住 3 秒必然也满足 1 秒的
+            // 触发条件），所以把其中一个设成非「无」时，另一个整体清空为「无」。
+            // 这是设备/官方 App 的实际行为（用户实测确认），不是本项目的取舍。
+            if (actionId != Gaia.TOUCH_ACTION_NONE) {
+                next = when (slot) {
+                    Gaia.GestureSlot.LONG_PRESS_1S ->
+                        next.with(Gaia.GestureSlot.LONG_PRESS_3S, Gaia.Ear.LEFT, Gaia.TOUCH_ACTION_NONE)
+                            .with(Gaia.GestureSlot.LONG_PRESS_3S, Gaia.Ear.RIGHT, Gaia.TOUCH_ACTION_NONE)
+                    Gaia.GestureSlot.LONG_PRESS_3S ->
+                        next.with(Gaia.GestureSlot.LONG_PRESS_1S, Gaia.Ear.LEFT, Gaia.TOUCH_ACTION_NONE)
+                            .with(Gaia.GestureSlot.LONG_PRESS_1S, Gaia.Ear.RIGHT, Gaia.TOUCH_ACTION_NONE)
+                    else -> next
+                }
+            }
             Log.i(
                 TAG,
                 "setGesture ${slot.index}/${slot.labelZh}/${ear.labelZh} -> " +

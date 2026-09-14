@@ -145,11 +145,11 @@
     <string name="gesture_reading_title">Gesture configuration not read yet</string>
     <string name="gesture_reading_summary">These earbuds report feature 22 (TOUCHV2), but the configuration has not come back yet. Reconnect, or tap Refresh and try again.</string>
     <string name="gesture_note_title">Notes</string>
-    <string name="gesture_note_body">Read and written over feature 22 (TOUCHV2) as five bytes: one byte per gesture (single, double, triple tap, long press 1s, long press 3s), where the HIGH nibble is the LEFT action id and the LOW nibble is the RIGHT one — the layout in the vendor app bytecode (TouchNewInfo keeps an L/R field pair per gesture and splits the single-tap byte with a 4-bit right shift and a 15 mask). The list above is therefore 5 × 2 = 10 rows; changing a row rewrites only that nibble and leaves the other ear and the other gestures untouched. Play/Pause, previous, next, voice assistant and noise control were confirmed against the earbuds; Volume + and Volume - are inferred from the vendor picker order and are marked (inferred). Long press 1s and 3s are two independent bytes in the protocol (both can be set at once): the conflict the vendor app shows is functional — a full 3s hold also satisfies the 1s trigger, so binding them to different actions is ambiguous — not a protocol restriction, so this module does not force exclusivity.</string>
+    <string name="gesture_note_body">Read and written over feature 22 (TOUCHV2) as five bytes: one byte per gesture (single, double, triple tap, long press 1s, long press 3s). The HIGH nibble holds the LEFT action and the LOW nibble the RIGHT one, hence the 5 x 2 = 10 rows; editing a row rewrites only that nibble and leaves the other ear and the other gestures untouched. Long press 1s and 3s are mutually exclusive: setting one to anything other than None clears the other to None.</string>
     <string name="gesture_slot_ear">%1$s · %2$s</string>
     <string name="gesture_ear_left">Left</string>
     <string name="gesture_ear_right">Right</string>
     <string name="gesture_action_next_track">Next track</string>
-    <string name="gesture_action_volume_up">Volume + (inferred)</string>
-    <string name="gesture_action_volume_down">Volume - (inferred)</string>
+    <string name="gesture_action_volume_up">Volume +</string>
+    <string name="gesture_action_volume_down">Volume -</string>
 </resources>
