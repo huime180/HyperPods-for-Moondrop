@@ -226,6 +226,17 @@ object PodNotification {
         }
         runCatching {
             ensureChannel(context, manager)
+            // 系统级开关 / POST_NOTIFICATIONS 没授予时 notify() 会被系统静默丢弃（== 用户什么都看不到）。
+            // 这时**不**记 lastRendered/posted：下一次状态事件再试一次，用户一授予权限立刻就出来
+            // （否则「内容没变」的去重会让它一直不出来）。
+            if (!manager.areNotificationsEnabled()) {
+                Log.w(
+                    TAG,
+                    "notifications disabled for this app (POST_NOTIFICATIONS not granted?); " +
+                        "app notification dropped",
+                )
+                return
+            }
             val builder = Notification.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setWhen(0L)
@@ -295,7 +306,7 @@ object PodNotification {
      * 必须 setPackage：命中本应用自己的组件，不受 Android 14+ 隐式 intent 限制。
      */
     private fun contentIntent(context: Context): PendingIntent? = runCatching {
-        val intent = Intent(CONTENT_INTENT_ACTION).apply {
+        val intent = Intent(HyperPodsAction.SHOW_POPUP).apply {
             setPackage(context.packageName)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
