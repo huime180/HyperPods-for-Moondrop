@@ -36,6 +36,7 @@ package moe.chenxy.hyperpods.ui
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
@@ -108,6 +109,31 @@ private val MIN_POPUP_BODY_HEIGHT = 160.dp
 private val CARD_GAP = 12.dp
 
 class PopupActivity : ComponentActivity() {
+
+    companion object {
+        /**
+         * 弹窗是否真的显示过 / 此刻是否可见。
+         *
+         * 为什么需要：后台启动 Activity 可能被系统**静默**拦掉（Android 10 起的 BAL 限制，
+         * 见 ui/Permissions.kt），调用方拿不到任何反馈。pods/ControlBridge.kt 就在启动后回头
+         * 看这两个标记，没落地就重试一次 —— 本对象与它同进程，静态标记即可。
+         */
+        @Volatile internal var lastShownAt: Long = 0L
+
+        @Volatile internal var visible: Boolean = false
+    }
+
+    override fun onResume() {
+        super.onResume()
+        visible = true
+        lastShownAt = SystemClock.elapsedRealtime()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        visible = false
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 

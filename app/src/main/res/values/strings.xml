@@ -79,8 +79,8 @@
     <!-- 通知栏显示：耳机状态在系统通知栏 / 蓝牙设置里的常驻显示（默认开） -->
     <string name="notification_display_title">Notification display</string>
     <string name="notification_display_summary">Show the earbuds state as a normal notification in the status bar (works on any ROM)</string>
-    <string name="connect_popup_title">Show popup on connect</string>
-    <string name="connect_popup_summary">Automatically show the connection popup (battery and noise control) after the earbuds connect; needs the background pop-up permission below, and you can still open it from the notification when off</string>
+    <string name="connect_popup_title">Show control popup on connect</string>
+    <string name="connect_popup_summary">Automatically show the control popup (battery / noise control / quick controls) after the earbuds connect; needs the background pop-up permission below, and you can still open it from the notification when off</string>
     <string name="bg_popup_permission_title">Background pop-up permission</string>
     <string name="bg_popup_permission_summary">Grant “Display over other apps” / “Start activities in background”; otherwise the system silently blocks the popup while the app is in the background</string>
     <!-- 应用进程自己发的那条耳机状态通知（pods/PodNotification.kt） -->

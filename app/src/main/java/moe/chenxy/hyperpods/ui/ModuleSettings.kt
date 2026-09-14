@@ -43,7 +43,7 @@ class ModuleSettingsState internal constructor(private val prefs: SharedPreferen
         prefs.edit().putBoolean(HyperPodsPrefsKey.SHOW_NOTIFICATION, value).apply()
     }
 
-    /** 「连接时自动唤出弹窗」：耳机连上后是否自动弹出连接弹窗（pods/ControlBridge.kt 读同一个键）。 */
+    /** 「连接时自动唤出控制弹窗」：耳机连上后是否自动唤出 ui/PopupActivity（pods/ControlBridge.kt 读同一个键）。 */
     val autoPopupOnConnect: Boolean get() = autoPopupState.value
 
     fun setAutoPopupOnConnect(value: Boolean) {
