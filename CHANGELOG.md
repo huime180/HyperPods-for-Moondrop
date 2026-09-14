@@ -1,3 +1,43 @@
+## Unreleased
+
+### 通知三档：原生通知栏 / 焦点显示 / 超级岛提示（`hook/MiBluetoothToastHook.kt`）
+
+用户反馈「设置-通知 始终是焦点显示通知」。根因是设置页那三个开关里，
+`SHOW_STRONG_TOAST` / `SHOW_FOCUS_ISLAND` **在 hook 侧从来没被读过**（只有
+`ui/ModuleSettings.kt` 在写），等于两个死开关；通知本身又只有一条固定形态。现在：
+
+* **通知栏显示** —— 任何 ROM 都生效的原生状态栏通知。通道由 `IMPORTANCE_MIN` 改为
+  `IMPORTANCE_LOW`；通道重要性创建后不可修改，所以发现重要性不对时先 `deleteNotificationChannel`
+  再按 LOW 重建。这是「通知栏里看得到」的基础形态。
+* **焦点显示**（仅 HyperOS）—— 追加 `miui.focus.param`（内含 `param_v2` JSON）与
+  `miui.focus.pics`。
+* **超级岛提示**（仅 HyperOS）—— 焦点 JSON 里再加 island 那一半字段
+  （`islandProperty` / `islandTimeout` / `param_island` / `bigIslandArea` / `smallIslandArea` / `textInfo`）。
+* 后两档由新增的 `hook/RomProfile.kt#isXiaomiRom` 门控：**严格**判定，只看 HyperOS 自报的
+  `ro.mi.os.version.*`（SDK 启发式不算），所以 AOSP / 其它厂商 ROM 上不会写任何 `miui.*` extra。
+  设置页那侧同时把两个开关置灰（`enabled = settings.enabled && isHyperOS`）。
+* `SEND_STRONG_TOAST` 广播按「超级岛提示」开关门控，关掉时直接不落地。
+* 焦点 JSON 的键名与常量**不是推测**：用新增的 `tools/dex_find_method.py` 反汇编本机
+  HyperOS 4 的 `com.xiaomi.bluetooth.apk`（`MiuiBluetoothNotification` 里构造水月雨通知的
+  那两个方法）逐条读出，键表与证据记在 [PROTOCOL.md](PROTOCOL.md) 第 10.5 节。
+  少数由寄存器传入、反汇编看不到的值取 ROM 调用点那一档，并在 KDoc 里写明。
+* 顺带把 `invokeStatusBar` 的诊断从「只打键名」加强为「键 + 值」，下一轮可按 ROM 自己
+  构造的焦点 Bundle 校正 JSON。
+
+### UI 收口（用户四项反馈）
+
+1. 设置页「重启作用域」移除，只保留模块页（首页）顶栏那个动作。
+2. 文案瘦身：`restart_scope_summary`、`gesture_note_body` 由整段说明改为一行。
+3. 「关于」只在设置页：设备页（`ui/PodDetailPage.kt`）那张「关于」卡删除。
+4. 设置页把「焦点显示 / 超级岛提示」两个 HyperOS 专属开关按 ROM 置灰，摘要里统一带「仅 HyperOS」。
+   英文侧 `show_strong_toast_title` 由 `Strong toast` 改为 `Super Island`，与中文侧的「超级岛提示」对齐。
+
+### 新增工具
+
+* `tools/dex_find_method.py` —— 仅用标准库的 DEX 检索 / 反汇编小工具：按字符串定位引用它的方法、
+  按代码顺序列出该方法用到的全部 `const-string`、可反汇编单个方法（含 `const` 数值、字段、方法引用）。
+  本轮的 HyperOS 通知结论全部出自它。
+
 ## 1.0.0
 
 首个版本。本版本包含**协议核心层**（纯 Kotlin，可单测）、**协议客户端**、
