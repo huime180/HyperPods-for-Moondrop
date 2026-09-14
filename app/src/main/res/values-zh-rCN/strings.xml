@@ -89,11 +89,12 @@
     <string name="lsposed_status_service_no_response">模块服务未响应</string>
     <!-- 通知栏显示：耳机状态在系统通知栏 / 蓝牙设置里的常驻显示（默认开） -->
     <string name="notification_display_title">通知栏显示</string>
-    <string name="notification_display_summary">在通知栏显示耳机的连接与电量状态</string>
+    <string name="notification_display_summary">在状态栏以普通通知显示耳机的连接与电量状态（任何 ROM 都可用）</string>
     <string name="show_strong_toast_title">超级岛提示</string>
-    <string name="show_strong_toast_summary">电量与模式变化时显示 HyperOS 强提示</string>
-    <string name="show_focus_island_title">焦点通知</string>
-    <string name="show_focus_island_summary">在 HyperOS 焦点通知里常驻耳机状态</string>
+    <string name="show_strong_toast_summary">电量与模式变化时再在 HyperOS 超级岛上显示</string>
+    <string name="show_focus_island_title">焦点显示</string>
+    <string name="show_focus_island_summary">把耳机状态做成 HyperOS 焦点通知</string>
+    <string name="hyperos_only">仅 HyperOS</string>
     <string name="model_auto_title">自动识别型号</string>
     <string name="model_auto_summary">按蓝牙设备名匹配型号档案</string>
     <string name="model_manual_title">手动指定型号</string>
@@ -124,7 +125,7 @@
     <string name="open_bluetooth_settings_failed">无法打开系统蓝牙设置</string>
     <!-- 重启作用域（等效 LSPosed 的「重启作用域」） -->
     <string name="restart_scope">重启作用域</string>
-    <string name="restart_scope_summary">只重启你在下面勾选的作用域进程（蓝牙 / 小米互联服务 / 小米蓝牙 / 系统界面 / 设置），界面可能短暂闪一下；等效于 LSPosed 的「重启作用域」，不需要重启手机。</string>
+    <string name="restart_scope_summary">只重启你勾选的作用域进程，等效于 LSPosed 的「重启作用域」，无需重启手机。</string>
     <string name="restart_scope_confirm">重启</string>
     <string name="restart_scope_done">已通知 %1$d / %2$d 个已勾选的作用域进程退出（若某个进程未响应，可尝试授予 root 或手动重启）</string>
     <!-- 勾选框的作用域名（顺序与 META-INF/xposed/scope.list 一致） -->
@@ -153,7 +154,7 @@
     <string name="gesture_reading_title">尚未读到手势配置</string>
     <string name="gesture_reading_summary">耳机上报了 feature 22（TOUCHV2），但配置还没有读回来。请重连，或点「刷新」后再试。</string>
     <string name="gesture_note_title">说明</string>
-    <string name="gesture_note_body">读回与写回都是 feature 22（TOUCHV2）的 5 个字节：每字节一种手势（单击 / 双击 / 三击 / 长按1秒 / 长按3秒），高 4 位是左耳动作、低 4 位是右耳动作，所以上面列 5 × 2 = 10 行，改一行只改那一个半字节，另一只耳朵与其余手势不受影响。长按1秒与长按3秒互斥：把其中一个设为「无」以外的动作时，另一个会自动清空为「无」。</string>
+    <string name="gesture_note_body">左右耳动作各自设置；长按1秒与长按3秒互斥。</string>
     <string name="gesture_slot_ear">%1$s · %2$s</string>
     <string name="gesture_ear_left">左耳</string>
     <string name="gesture_ear_right">右耳</string>

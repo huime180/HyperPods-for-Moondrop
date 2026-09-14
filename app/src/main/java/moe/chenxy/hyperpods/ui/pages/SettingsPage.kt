@@ -9,11 +9,19 @@
  *     跳转行用 preference.ArrowPreference；
  *   · 第一张卡是外观（主题），中间是模块级开关，最后一张卡是应用级入口。
  *
- * 模块级开关（启用 / 通知栏显示 / 强提示 / 超级岛 / 型号 / 调试）本轮从模块页搬到这里，
+ * 模块级开关（启用 / 通知栏显示 / 焦点显示 / 超级岛提示 / 型号 / 调试）都在这里，
  * 与参考实现一致：模块页只显示状态，模块的设置都在设置页。
  * 读写仍然只走 [ModuleSettingsState]（键来自 utils/data/HyperPodsPrefsKey.kt），没有新造状态存储。
  *
- * 这里同时保留本项目的应用级入口：手势操作（能力位门控）、重启作用域、关于。
+ * 通知这一组是三档（本文件是唯一说明处）：
+ *   · 通知栏显示 —— 任何 ROM 都生效的**原生**状态栏通知（IMPORTANCE_LOW 通道）；
+ *   · 焦点显示   —— 小米 HyperOS 专有：把这条通知做成焦点通知（miui.focus.param）；
+ *   · 超级岛提示 —— 小米 HyperOS 专有：再带上超级岛的 island 字段。
+ * 后两个开关在非 HyperOS 上直接禁用（判定见 hook/RomProfile.kt 的 isXiaomiRom；
+ * hook 侧也有一道同源守卫，不是只靠 UI 拦）。
+ *
+ * 应用级入口只剩：手势操作（能力位门控）、关于。
+ * 「重启作用域」是模块页（首页）顶栏那个刷新动作，不在这里重复一份。
  */
 package moe.chenxy.hyperpods.ui.pages
 
@@ -30,6 +38,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import moe.chenxy.hyperpods.R
 import moe.chenxy.hyperpods.core.MoondropModels
+import moe.chenxy.hyperpods.hook.RomProfile
 import moe.chenxy.hyperpods.ui.ModuleSettingsState
 import moe.chenxy.hyperpods.ui.rememberModuleSettings
 import top.yukonga.miuix.kmp.basic.Card
@@ -49,7 +58,6 @@ private val SECTION_GAP = 12.dp
  * @param hasGestures 耳机上报了 feature 22（TOUCHV2）时为真 —— 手势入口行只有此时才出现
  *                    （与设备页的「手势操作」行同一套能力门控）
  * @param onOpenGestures 「手势操作」行 → 导航到手势页（由 MainUI 的返回栈负责）
- * @param onRequestRestartScope 「重启作用域」行 → 打开作用域勾选确认框（状态由 MainUI 持有）
  */
 @Composable
 fun SettingsPage(
@@ -60,9 +68,11 @@ fun SettingsPage(
     onThemeModeChange: (Int) -> Unit = {},
     hasGestures: Boolean = false,
     onOpenGestures: () -> Unit = {},
-    onRequestRestartScope: () -> Unit = {},
     onOpenAbout: () -> Unit = {},
 ) {
+    // 严格判定（只看 HyperOS 自报版本属性）：非 HyperOS 上没有焦点通知 / 超级岛这两套实现，
+    // 两个开关直接禁用，而不是让用户打开一个什么都不做的开关。
+    val isHyperOs = remember { RomProfile.isXiaomiRom }
     val themeOptions = listOf(
         stringResource(R.string.theme_follow_system),
         stringResource(R.string.theme_light),
@@ -114,19 +124,20 @@ fun SettingsPage(
                     onCheckedChange = { settings.setShowNotification(it) },
                     enabled = settings.enabled,
                 )
-                SwitchPreference(
-                    title = stringResource(R.string.show_strong_toast_title),
-                    summary = stringResource(R.string.show_strong_toast_summary),
-                    checked = settings.showStrongToast,
-                    onCheckedChange = { settings.setShowStrongToast(it) },
-                    enabled = settings.enabled,
-                )
+                // 焦点显示 / 超级岛提示：HyperOS 专有（见文件头与 RomProfile.isXiaomiRom）。
                 SwitchPreference(
                     title = stringResource(R.string.show_focus_island_title),
-                    summary = stringResource(R.string.show_focus_island_summary),
+                    summary = hyperOsSummary(R.string.show_focus_island_summary),
                     checked = settings.showFocusIsland,
                     onCheckedChange = { settings.setShowFocusIsland(it) },
-                    enabled = settings.enabled,
+                    enabled = settings.enabled && isHyperOs,
+                )
+                SwitchPreference(
+                    title = stringResource(R.string.show_strong_toast_title),
+                    summary = hyperOsSummary(R.string.show_strong_toast_summary),
+                    checked = settings.showStrongToast,
+                    onCheckedChange = { settings.setShowStrongToast(it) },
+                    enabled = settings.enabled && isHyperOs,
                 )
             }
         }
@@ -162,7 +173,7 @@ fun SettingsPage(
             }
         }
 
-        // 应用级入口：手势（能力位门控）/ 重启作用域 / 关于
+        // 应用级入口：手势（能力位门控）/ 关于
         item {
             Card(modifier = Modifier.padding(top = SECTION_GAP)) {
                 if (hasGestures) {
@@ -173,11 +184,6 @@ fun SettingsPage(
                     )
                 }
                 ArrowPreference(
-                    title = stringResource(R.string.restart_scope),
-                    summary = stringResource(R.string.restart_scope_summary),
-                    onClick = onRequestRestartScope,
-                )
-                ArrowPreference(
                     title = stringResource(R.string.about),
                     onClick = onOpenAbout,
                 )
@@ -185,3 +191,13 @@ fun SettingsPage(
         }
     }
 }
+
+/**
+ * 摘要文案 + 「仅 HyperOS」标注。
+ *
+ * 非 HyperOS 上开关是灰的，光看摘要看不出为什么，所以两种情况都把限定条件写在摘要里
+ * （这些开关**永远**是 HyperOS 专有，不是只在禁用时才提）。
+ */
+@Composable
+private fun hyperOsSummary(summaryRes: Int): String =
+    stringResource(summaryRes) + " · " + stringResource(R.string.hyperos_only)

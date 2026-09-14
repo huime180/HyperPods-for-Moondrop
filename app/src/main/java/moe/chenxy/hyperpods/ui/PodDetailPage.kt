@@ -76,13 +76,11 @@ private const val EXTRA_BT_ADDRESS = "bluetoothaddress"
 
 /**
  * @param contentPadding 外层 Scaffold 的 innerPadding（顶部要避开折叠式 TopAppBar）
- * @param onOpenAbout    「关于」行 → 导航到关于页（由 MainUI 的返回栈负责）
  */
 @Composable
 fun PodDetailPage(
     contentPadding: PaddingValues,
     snapshot: PodSnapshot,
-    onOpenAbout: () -> Unit,
     onOpenGestures: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -219,15 +217,6 @@ fun PodDetailPage(
                         onClick = { openSystemBluetoothSettings(context, snapshot.deviceAddress) },
                     )
                 }
-            }
-        }
-
-        item {
-            Card(modifier = Modifier.padding(top = CARD_GAP)) {
-                ArrowPreference(
-                    title = stringResource(R.string.about),
-                    onClick = onOpenAbout,
-                )
             }
         }
     }

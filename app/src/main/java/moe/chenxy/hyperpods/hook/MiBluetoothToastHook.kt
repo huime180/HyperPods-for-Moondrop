@@ -14,8 +14,20 @@
  *     Disconnect），取不到就退化为中文默认值。
  *
  * ⚠ 与原 HyperPods 的差异：**完全丢弃 AirPods 的 mp4/强提示视频**（原实现内嵌 base64 mp4 并用
- *   FileProvider 交给 SystemUI 播放）。本模块不携带任何 .mp4 / base64 资产，
- *   SEND_STRONG_TOAST 降级为同一套普通耳机电量通知。
+ *   FileProvider 交给 SystemUI 播放）。本模块不携带任何 .mp4 / base64 资产。
+ *
+ * ── 通知的三档（设置页「通知」那一组，见 ui/pages/SettingsPage.kt）────────────────
+ *   ① 通知栏显示（HyperPodsPrefsKey.SHOW_NOTIFICATION，默认开）
+ *        **原生**状态栏通知：IMPORTANCE_LOW 通道 + Notification.Builder，
+ *      任何 ROM（AOSP / 其它厂商 / HyperOS）都生效。这是本文件的基础形态。
+ *   ② 焦点显示（SHOW_FOCUS_ISLAND，默认开）—— **仅 HyperOS**：
+ *      在上面那条通知上再挂 `miui.focus.param` / `miui.focus.pics`，让它变成焦点通知。
+ *   ③ 超级岛提示（SHOW_STRONG_TOAST，默认开）—— **仅 HyperOS**：
+ *      焦点通知的 JSON 里再加 island 那一半字段（islandProperty / islandTimeout /
+ *      param_island / bigIslandArea / smallIslandArea / textInfo）。
+ * ②③ 都受 hook/RomProfile.kt 的 isXiaomiRom（严格判定：只看 HyperOS 自报版本属性）门控，
+ * 非 HyperOS 上即使 prefs 是 true 也不会写任何 miui.\* extra —— UI 那边只是把开关置灰，
+ * 真正兜底的是这里。
  *
  * 另外，本进程还是**小米耳机 AIDL 服务的服务端**：
  *   com.android.bluetooth.ble.app.headset.BluetoothHeadsetService$HeadsetBinder
@@ -46,6 +58,7 @@ import moe.chenxy.hyperpods.BuildConfig
 import moe.chenxy.hyperpods.core.MoondropModels
 import moe.chenxy.hyperpods.utils.data.HyperPodsAction
 import moe.chenxy.hyperpods.utils.data.HyperPodsPrefsKey
+import org.json.JSONObject
 
 @SuppressLint("MissingPermission")
 object MiBluetoothToastHook : HookContext() {
@@ -79,6 +92,15 @@ object MiBluetoothToastHook : HookContext() {
     private const val FALLBACK_RIGHT = "右耳"
     private const val FALLBACK_DISCONNECT = "断开连接"
 
+    // ── 小米焦点通知 / 超级岛的 extra 键（键名与常量出处见 focusExtras 的 KDoc）──
+    private const val EXTRA_FOCUS_PARAM = "miui.focus.param"
+    private const val EXTRA_FOCUS_PICS = "miui.focus.pics"
+    private const val EXTRA_MIUI_SHOW_ACTION = "miui.showAction"
+    private const val EXTRA_MIUI_APP_ICON = "miui.appIcon"
+    private const val FOCUS_BUSINESS = "btheadsetnotification"
+    private const val FOCUS_PIC = "miui.focus.pic_earphone"
+    private const val FOCUS_TICKER_PIC = "miui.focus.pic_connect_button"
+
     private val hookedConstructors = LinkedHashSet<String>()
 
     /** 诊断用：invokeStatusBar 的 action 只记一次，避免刷屏。 */
@@ -99,6 +121,14 @@ object MiBluetoothToastHook : HookContext() {
      */
     @Volatile
     private var lastNotificationEnabled: Boolean? = null
+
+    /** 「焦点显示」开关（SHOW_FOCUS_ISLAND，默认 true）**且**本机是 HyperOS 时的最终取值。 */
+    @Volatile
+    private var lastFocusIslandEnabled: Boolean? = null
+
+    /** 「超级岛提示」开关（SHOW_STRONG_TOAST，默认 true）**且**本机是 HyperOS 时的最终取值。 */
+    @Volatile
+    private var lastStrongToastEnabled: Boolean? = null
 
     /** 本进程最近一次解析到的水月雨设备 —— EXTRA_DEVICE 缺失时的兜底（见 resolveNotificationDevice）。 */
     @Volatile
@@ -142,6 +172,8 @@ object MiBluetoothToastHook : HookContext() {
         processContext = null
         lastMoondropDevice = null
         lastNotificationEnabled = null
+        lastFocusIslandEnabled = null
+        lastStrongToastEnabled = null
         hookedConstructors.clear()
         synchronized(loggedStatusBarActions) { loggedStatusBarActions.clear() }
         synchronized(loggedUpdateParamClasses) { loggedUpdateParamClasses.clear() }
@@ -169,6 +201,14 @@ object MiBluetoothToastHook : HookContext() {
                     val first = synchronized(loggedStatusBarActions) { loggedStatusBarActions.add(action ?: "null") }
                     if (first) {
                         Log.i(TAG, "invokeStatusBar action=$action extras=${extras?.keySet()?.joinToString()}")
+                        // 诊断加强：把每个键的值也打出来。ROM 自己构造焦点通知时，焦点 JSON
+                        // 就在这个 Bundle 里，下一轮按它校正 focusExtras()。
+                        if (extras != null) {
+                            extras.keySet().forEach { key ->
+                                val value = extras.get(key)
+                                Log.i(TAG, "  invokeStatusBar extra[$key]=${describeBundleValue(value)}")
+                            }
+                        }
                     }
                 }
                 Log.d(TAG, "hooked $clsNotification#invokeStatusBar (diagnostic only)")
@@ -188,6 +228,17 @@ object MiBluetoothToastHook : HookContext() {
                 Log.d(TAG, "hooked $clsNotification#updateParameters (diagnostic only)")
             }
         }.onFailure { Log.w(TAG, "hook $clsNotification.updateParameters skipped", it) }
+    }
+
+    /** Bundle 里一个值的人类可读形式（只读；深一层 Bundle 递归一层就够）。 */
+    private fun describeBundleValue(value: Any?): String = when (value) {
+        null -> "null"
+        is Bundle -> value.keySet().joinToString(prefix = "{", postfix = "}") { k ->
+            "$k=${describeBundleValue(value.get(k))}"
+        }
+        is IntArray -> value.joinToString(prefix = "[", postfix = "]")
+        is ByteArray -> value.size.toString() + "B"
+        else -> value.toString()
     }
 
     /** 把混淆载荷对象的字段名与可读值列出来（只读，失败即忽略）。 */
@@ -267,31 +318,25 @@ object MiBluetoothToastHook : HookContext() {
 
     private fun handle(context: Context, action: String, intent: Intent) {
         when (action) {
-            HyperPodsAction.SEND_STRONG_TOAST,
+            // 「超级岛提示」关掉时，强提示这条广播直接不落地（普通通知仍照发）。
+            HyperPodsAction.SEND_STRONG_TOAST -> {
+                if (!notificationDisplayEnabled()) {
+                    cancelNotification(context, "")
+                    return
+                }
+                if (!strongToastEnabled()) {
+                    Log.d(TAG, "SEND_STRONG_TOAST suppressed by pref ${HyperPodsPrefsKey.SHOW_STRONG_TOAST}=false")
+                    return
+                }
+                postFromIntent(context, action, intent)
+            }
             HyperPodsAction.UPDATE_PODS_NOTIFICATION -> {
                 // 应用侧「通知栏显示」开关：关掉时连已经发出去的那条也撤掉，不只是不再发新的。
                 if (!notificationDisplayEnabled()) {
                     cancelNotification(context, "")
                     return
                 }
-                val resolved = resolveNotificationDevice(context, intent)
-                if (resolved == null) {
-                    Log.w(
-                        TAG,
-                        "$action without ${HyperPodsAction.EXTRA_DEVICE}/${HyperPodsAction.EXTRA_MAC} " +
-                            "and no connected Moondrop device; notification skipped"
-                    )
-                    return
-                }
-                val device = resolved.first
-                val via = resolved.second
-                val battery = SystemApisUtils.readBatteryExtras(intent)
-                val message = intent.getStringExtra(HyperPodsAction.EXTRA_MESSAGE)
-                Log.d(
-                    TAG,
-                    "$action device resolved via=$via address=${SystemApisUtils.deviceAddress(device)}"
-                )
-                postNotification(context, device, battery, message)
+                postFromIntent(context, action, intent)
             }
             HyperPodsAction.CANCEL_PODS_NOTIFICATION -> {
                 val device = SystemApisUtils.parcelableDevice(intent, HyperPodsAction.EXTRA_DEVICE)
@@ -300,6 +345,27 @@ object MiBluetoothToastHook : HookContext() {
                 cancelNotification(context, address)
             }
         }
+    }
+
+    /** 解析设备后统一落地（两个入口共用：解析失败只记一条日志，不抛）。 */
+    private fun postFromIntent(context: Context, action: String, intent: Intent) {
+        val resolved = resolveNotificationDevice(context, intent)
+        if (resolved == null) {
+            Log.w(
+                TAG,
+                "$action without ${HyperPodsAction.EXTRA_DEVICE}/${HyperPodsAction.EXTRA_MAC} " +
+                    "and no connected Moondrop device; notification skipped"
+            )
+            return
+        }
+        val battery = SystemApisUtils.readBatteryExtras(intent)
+        val message = intent.getStringExtra(HyperPodsAction.EXTRA_MESSAGE)
+        Log.d(
+            TAG,
+            "$action device resolved via=${resolved.second} " +
+                "address=${SystemApisUtils.deviceAddress(resolved.first)}"
+        )
+        postNotification(context, resolved.first, battery, message)
     }
 
     // ── 通知开关 / 设备解析 ────────────────────────────────────────────────────
@@ -331,6 +397,44 @@ object MiBluetoothToastHook : HookContext() {
                         "(${HyperPodsPrefsKey.SHOW_NOTIFICATION}=false); earbud notification suppressed"
                 )
             }
+        }
+        return enabled
+    }
+
+    /**
+     * 「焦点显示」是否生效 = 本机是 HyperOS **且** 开关打开。
+     *
+     * RomProfile.isXiaomiRom 是**严格**判定（只看 HyperOS 自报的 ro.mi.os.version.* 属性，
+     * SDK 启发式不算），所以 AOSP / 其它厂商 ROM 上这里恒为 false —— 不会往通知里塞
+     * 无意义的 miui.focus.* extra。UI 那侧只是把开关置灰，兜底在这里。
+     */
+    private fun focusIslandEnabled(): Boolean {
+        val xiaomi = RomProfile.isXiaomiRom
+        val pref = prefBoolean(HyperPodsPrefsKey.SHOW_FOCUS_ISLAND, true)
+        val enabled = xiaomi && pref
+        if (lastFocusIslandEnabled != enabled) {
+            lastFocusIslandEnabled = enabled
+            Log.i(
+                TAG,
+                "focus display ${if (enabled) "enabled" else "disabled"} " +
+                    "(xiaomiRom=$xiaomi, ${HyperPodsPrefsKey.SHOW_FOCUS_ISLAND}=$pref)"
+            )
+        }
+        return enabled
+    }
+
+    /** 「超级岛提示」是否生效 = 本机是 HyperOS **且** 开关打开（判定同 [focusIslandEnabled]）。 */
+    private fun strongToastEnabled(): Boolean {
+        val xiaomi = RomProfile.isXiaomiRom
+        val pref = prefBoolean(HyperPodsPrefsKey.SHOW_STRONG_TOAST, true)
+        val enabled = xiaomi && pref
+        if (lastStrongToastEnabled != enabled) {
+            lastStrongToastEnabled = enabled
+            Log.i(
+                TAG,
+                "super island ${if (enabled) "enabled" else "disabled"} " +
+                    "(xiaomiRom=$xiaomi, ${HyperPodsPrefsKey.SHOW_STRONG_TOAST}=$pref)"
+            )
         }
         return enabled
     }
@@ -409,6 +513,8 @@ object MiBluetoothToastHook : HookContext() {
             return
         }
         val tag = "$NOTIFICATION_TAG_PREFIX$address"
+        // 正文只算一次：焦点通知的 JSON 与通知正文必须是同一份文案。
+        val content = contentText(context, battery, message)
         runCatching {
             ensureChannel(manager, title)
             val contentIntent = PendingIntent.getActivity(
@@ -425,18 +531,26 @@ object MiBluetoothToastHook : HookContext() {
                 .setWhen(0L)
                 .setTicker(title)
                 .setContentTitle(title)
-                .setContentText(contentText(context, battery, message))
+                .setContentText(content)
                 .setContentIntent(contentIntent)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setAutoCancel(false)
             deleteIntent(context, device)?.let { builder.setDeleteIntent(it) }
             disconnectAction(context, device)?.let { builder.addAction(it) }
-            runCatching { builder.setExtras(miuiExtras(context)) }
-                .onFailure { Log.d(TAG, "miui extras unsupported", it) }
+            // miui.* / miui.focus.* 只在**真的**跑在小米 ROM 上时才写：
+            // 非 HyperOS 上这些键没有任何消费者，写进去只是脏数据。
+            if (RomProfile.isXiaomiRom) {
+                runCatching { builder.setExtras(miuiExtras(context, device, title, content)) }
+                    .onFailure { Log.d(TAG, "miui extras unsupported", it) }
+            }
             accentColor(context)?.let { builder.setColor(it) }
 
             SystemApisUtils.notifyAsUser(manager, tag, NOTIFICATION_ID, builder.build(), SystemApisUtils.getUserAllUserHandle())
-            Log.i(TAG, "notification posted tag=$tag level=${battery.joinToString(",")}")
+            Log.i(
+                TAG,
+                "notification posted tag=$tag level=${battery.joinToString(",")} " +
+                    "focus=${focusIslandEnabled()} island=${strongToastEnabled()}"
+            )
         }.onFailure { Log.e(TAG, "postNotification failed", it) }
     }
 
@@ -457,9 +571,22 @@ object MiBluetoothToastHook : HookContext() {
         }.onFailure { Log.w(TAG, "cancel all pods notifications failed", it) }
     }
 
+    /**
+     * 建通知通道。
+     *
+     * 早期版本用的是 IMPORTANCE_MIN（只在通知栏列表里，状态栏不出图标、也没有提示），
+     * 表现就是用户报的「通知栏里看不到」。通道的重要性**创建之后不可修改**，所以
+     * 发现已有通道的重要性不是 IMPORTANCE_LOW 时，先删掉再按 LOW 建一次。
+     */
     private fun ensureChannel(manager: NotificationManager, name: String) {
         runCatching {
-            val channel = NotificationChannel(CHANNEL_ID, name, NotificationManager.IMPORTANCE_MIN)
+            val existing = runCatching { manager.getNotificationChannel(CHANNEL_ID) }.getOrNull()
+            if (existing != null && existing.importance != NotificationManager.IMPORTANCE_LOW) {
+                Log.i(TAG, "recreate channel $CHANNEL_ID: importance ${existing.importance} -> IMPORTANCE_LOW")
+                manager.deleteNotificationChannel(CHANNEL_ID)
+            }
+            if (runCatching { manager.getNotificationChannel(CHANNEL_ID) }.getOrNull() != null) return
+            val channel = NotificationChannel(CHANNEL_ID, name, NotificationManager.IMPORTANCE_LOW)
             channel.setShowBadge(false)
             manager.createNotificationChannel(channel)
         }.onFailure { Log.w(TAG, "createNotificationChannel($CHANNEL_ID) failed", it) }
@@ -496,11 +623,99 @@ object MiBluetoothToastHook : HookContext() {
         }.getOrNull()
     }
 
-    private fun miuiExtras(context: Context): Bundle = Bundle().apply {
-        putBoolean("miui.showAction", true)
-        val icon = vendorDrawable(context, RES_ICON)
-        if (icon != 0) putParcelable("miui.appIcon", Icon.createWithResource(context, icon))
-    }
+    /**
+     * 整条通知的 extra：小米蓝牙自己的两个键 + （HyperOS 且开关打开时的）焦点通知/超级岛。
+     *
+     * 一次性返回**一个** Bundle：Notification.Builder.setExtras() 是整体替换而不是合并，
+     * 分两次调用会把前一次的键丢掉。
+     */
+    private fun miuiExtras(context: Context, device: BluetoothDevice, title: String, content: String): Bundle =
+        Bundle().apply {
+            putBoolean(EXTRA_MIUI_SHOW_ACTION, true)
+            val icon = vendorDrawable(context, RES_ICON)
+            if (icon != 0) putParcelable(EXTRA_MIUI_APP_ICON, Icon.createWithResource(context, icon))
+            if (focusIslandEnabled()) {
+                focusExtras(device, title, content, strongToastEnabled())?.let { putAll(it) }
+            }
+        }
+
+    /**
+     * HyperOS 焦点通知（`miui.focus.param`）+ 图标（`miui.focus.pics`）的 extra。
+     *
+     * ── 这些键名和常量是哪来的（**不是猜的**）────────────────────────────────────
+     * 本机 HyperOS 4 的 com.xiaomi.bluetooth.apk 里，水月雨（被本模块伪装成小米耳机）的
+     * 连接通知由 `com.android.bluetooth.ble.app.MiuiBluetoothNotification` 自己构造。
+     * 用 tools/dex_find_method.py 反汇编它引用 `miui.focus.param` / `param_v2` 的那两个方法，
+     * 逐条读出它写下的键与常量：
+     *   · Bundle 键：`miui.focus.param`（内含 `param_v2`，值是 JSON 字符串）、
+     *     `miui.focus.pics`（内含 `title` / `pic` / `type`）；
+     *   · JSON 键：protocol / business / updatable / enableFloat / timeout / ticker /
+     *     tickerPic / islandProperty / islandTimeout / imageTextInfoLeft / textInfo /
+     *     bigIslandArea / smallIslandArea / param_island / content / animIconInfo /
+     *     iconTextInfo / actionTitle / actionTitleColor / actionTitleColorDark /
+     *     actionBgColorDark / actionIntentType / actionIntent / actions；
+     *   · 读到的常量：protocol=1、business="btheadsetnotification"、islandProperty=1、
+     *     islandTimeout=10、actionTitleColor="#FF000000"、actionTitleColorDark="#FFFFFF"、
+     *     actionBgColorDark="#0D84FF"、pic/tickerPic 用 miui.focus.pic_earphone /
+     *     miui.focus.pic_connect_button。
+     * 少数值由调用方用寄存器传进去（反汇编只能看到寄存器，看不到值），这里取 ROM 调用点
+     * 那一档：updatable=true、enableFloat=true、ticker=false、timeout=5000、
+     * actionIntentType=1。这些键写得不对最多是「焦点通知不显示」，不会影响下面那条
+     * 原生通知，所以真机上看一眼 logcat（本文件每条通知都打 focus=/island=）就能定位。
+     *
+     * @param withIsland 「超级岛提示」开关：打开时才写 island 那一半字段。
+     */
+    private fun focusExtras(
+        device: BluetoothDevice,
+        title: String,
+        content: String,
+        withIsland: Boolean
+    ): Bundle? = runCatching {
+        val json = JSONObject().apply {
+            put("protocol", 1)
+            put("business", FOCUS_BUSINESS)
+            put("updatable", true)
+            put("enableFloat", true)
+            put("timeout", 5000)
+            put("ticker", false)
+            put("tickerPic", FOCUS_TICKER_PIC)
+            put("title", title)
+            put("content", content)
+            if (withIsland) {
+                put("islandProperty", 1)
+                put("islandTimeout", 10)
+                put("param_island", JSONObject().put("title", title))
+                put("bigIslandArea", JSONObject().put("title", title))
+                put("smallIslandArea", JSONObject().put("title", title))
+                put("textInfo", JSONObject().put("title", title))
+            }
+            put("actionTitleColor", "#FF000000")
+            put("actionTitleColorDark", "#FFFFFF")
+            put("actionBgColorDark", "#0D84FF")
+            put("actionIntentType", 1)
+            // 点焦点通知的按钮 → 回到本模块的设备页（与 contentIntent 同一个入口）。
+            put(
+                "actionIntent",
+                Intent(HyperPodsAction.SHOW_POPUP).apply { setPackage(PKG_APP) }
+                    .toUri(Intent.URI_INTENT_SCHEME)
+            )
+        }
+        val param = Bundle().apply { putString("param_v2", json.toString()) }
+        val pics = Bundle().apply {
+            putString("title", FOCUS_PIC)
+            putString("pic", FOCUS_PIC)
+            putInt("type", 1)
+        }
+        Log.d(
+            TAG,
+            "focus extras built address=${SystemApisUtils.deviceAddress(device)} island=$withIsland " +
+                "json=${json.toString().length}B"
+        )
+        Bundle().apply {
+            putBundle(EXTRA_FOCUS_PARAM, param)
+            putBundle(EXTRA_FOCUS_PICS, pics)
+        }
+    }.onFailure { Log.w(TAG, "focus extras build failed", it) }.getOrNull()
 
     private fun accentColor(context: Context): Int? {
         val id = vendorResourceId(context, "color", RES_ACCENT_COLOR)

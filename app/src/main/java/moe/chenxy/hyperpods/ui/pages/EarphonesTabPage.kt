@@ -31,7 +31,6 @@ import moe.chenxy.hyperpods.ui.PodDetailPage
 @Composable
 internal fun EarphonesTabPage(
     snapshot: PodSnapshot,
-    onOpenAbout: () -> Unit,
     onOpenGestures: () -> Unit,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
@@ -55,7 +54,6 @@ internal fun EarphonesTabPage(
             PodDetailPage(
                 contentPadding = contentPadding,
                 snapshot = snapshot,
-                onOpenAbout = onOpenAbout,
                 onOpenGestures = onOpenGestures,
                 modifier = Modifier.fillMaxSize(),
             )

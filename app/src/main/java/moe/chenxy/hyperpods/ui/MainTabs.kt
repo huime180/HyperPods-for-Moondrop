@@ -144,7 +144,6 @@ internal fun MainTabsScaffold(
                         snapshot = snapshot,
                         showPicker = showDevicePicker,
                         onExitDevicePicker = onExitDevicePicker,
-                        onOpenAbout = onOpenAbout,
                         onOpenGestures = onOpenGestures,
                     )
 
@@ -155,7 +154,6 @@ internal fun MainTabsScaffold(
                         hasGestures = snapshot.capabilities.hasGestures,
                         onOpenAbout = onOpenAbout,
                         onOpenGestures = onOpenGestures,
-                        onRequestRestartScope = onRequestRestartScope,
                     )
                 }
             }
@@ -221,7 +219,6 @@ private fun EarphonesTabShell(
     snapshot: PodSnapshot,
     showPicker: Boolean,
     onExitDevicePicker: () -> Unit,
-    onOpenAbout: () -> Unit,
     onOpenGestures: () -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
@@ -270,7 +267,6 @@ private fun EarphonesTabShell(
                 // 选完就退出「强制设备选择页」，连接成功后自动落到设备详情
                 onExitDevicePicker()
             },
-            onOpenAbout = onOpenAbout,
             onOpenGestures = onOpenGestures,
             contentPadding = PaddingValues(
                 top = pagePadding.calculateTopPadding(),
@@ -292,7 +288,6 @@ private fun SettingsTabShell(
     hasGestures: Boolean,
     onOpenAbout: () -> Unit,
     onOpenGestures: () -> Unit,
-    onRequestRestartScope: () -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
     Scaffold(
@@ -317,7 +312,6 @@ private fun SettingsTabShell(
             onThemeModeChange = onThemeModeChange,
             hasGestures = hasGestures,
             onOpenGestures = onOpenGestures,
-            onRequestRestartScope = onRequestRestartScope,
             onOpenAbout = onOpenAbout,
         )
     }

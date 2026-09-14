@@ -89,11 +89,12 @@
     <string name="lsposed_status_service_no_response">Module service not responding</string>
     <!-- 通知栏显示：耳机状态在系统通知栏 / 蓝牙设置里的常驻显示（默认开） -->
     <string name="notification_display_title">Notification display</string>
-    <string name="notification_display_summary">Show the earbuds state in the notification bar</string>
-    <string name="show_strong_toast_title">Strong toast</string>
-    <string name="show_strong_toast_summary">Show the HyperOS strong toast for battery and mode changes</string>
-    <string name="show_focus_island_title">Focus notifications</string>
-    <string name="show_focus_island_summary">Keep the earbuds state on the HyperOS focus island</string>
+    <string name="notification_display_summary">Show the earbuds state as a normal notification in the status bar (works on any ROM)</string>
+    <string name="show_strong_toast_title">Super Island</string>
+    <string name="show_strong_toast_summary">Also show battery and mode changes on the HyperOS Super Island</string>
+    <string name="show_focus_island_title">Focus display</string>
+    <string name="show_focus_island_summary">Show the earbuds state as a HyperOS focus notification</string>
+    <string name="hyperos_only">HyperOS only</string>
     <string name="model_auto_title">Auto-detect model</string>
     <string name="model_auto_summary">Match the model by the Bluetooth device name</string>
     <string name="model_manual_title">Manual model</string>
@@ -124,7 +125,7 @@
     <string name="open_bluetooth_settings_failed">Could not open Bluetooth settings</string>
     <!-- restart scope (same as LSPosed manager's "Restart scope") -->
     <string name="restart_scope">Restart scope</string>
-    <string name="restart_scope_summary">Restart the hooked processes you tick below: Bluetooth, Mi Link, Xiaomi Bluetooth, System UI and Settings. The screen may flicker for a moment. This is the same as the Restart scope in LSPosed — no phone reboot needed.</string>
+    <string name="restart_scope_summary">Reload the module in the selected processes. Same as Restart scope in LSPosed; no reboot needed.</string>
     <string name="restart_scope_confirm">Restart</string>
     <string name="restart_scope_done">Notified %1$d of the %2$d selected scope processes to exit. If one does not respond, grant root or restart the phone manually.</string>
     <!-- 勾选框的作用域名（顺序与 META-INF/xposed/scope.list 一致） -->
@@ -153,7 +154,7 @@
     <string name="gesture_reading_title">Gesture configuration not read yet</string>
     <string name="gesture_reading_summary">These earbuds report feature 22 (TOUCHV2), but the configuration has not come back yet. Reconnect, or tap Refresh and try again.</string>
     <string name="gesture_note_title">Notes</string>
-    <string name="gesture_note_body">Read and written over feature 22 (TOUCHV2) as five bytes: one byte per gesture (single, double, triple tap, long press 1s, long press 3s). The HIGH nibble holds the LEFT action and the LOW nibble the RIGHT one, hence the 5 x 2 = 10 rows; editing a row rewrites only that nibble and leaves the other ear and the other gestures untouched. Long press 1s and 3s are mutually exclusive: setting one to anything other than None clears the other to None.</string>
+    <string name="gesture_note_body">Each earbud is set separately. Long press 1s and long press 3s are mutually exclusive.</string>
     <string name="gesture_slot_ear">%1$s · %2$s</string>
     <string name="gesture_ear_left">Left</string>
     <string name="gesture_ear_right">Right</string>

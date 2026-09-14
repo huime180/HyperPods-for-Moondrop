@@ -192,6 +192,19 @@ object RomProfile {
         get() = kind != RomKind.UNKNOWN
 
     /**
+     * **严格**判定「这是本模块支持的小米 ROM」：只有 HyperOS 自报版本属性（证据以 `prop:` 开头）
+     * 才算，SDK 启发式**不算**。
+     *
+     * 为什么在 [isHyperOS] 之外再给一个：`isHyperOS` 为了让候选表尽量宽松，把 SDK 34/35/36+
+     * 也当成本代（日志里标 heur:），那个宽松结论可以用于「挂哪个类」，但**不能**用于
+     * 「要不要往通知里塞 miui.focus.\* / 超级岛 extra」——AOSP 或其它厂商 ROM 上
+     * Android 14/15 会同样命中 SDK 启发式，塞进去只会变成无意义的脏 extra。
+     * 设置页的「焦点显示 / 超级岛提示」两个开关也只按这个严格结论放开。
+     */
+    val isXiaomiRom: Boolean
+        get() = detection().evidence.startsWith("prop:")
+
+    /**
      * 每个进程打一次：`HyperPods-Rom: kind=… sdk=… mi.os.version.code=… name=…`
      * XposedEntry.onModuleLoaded（每进程一次）调用。
      */
