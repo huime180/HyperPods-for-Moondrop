@@ -27,6 +27,10 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import moe.chenxy.hyperpods.ui.ConnectionPopupActivity
 import moe.chenxy.hyperpods.ui.MODULE_PREFS_GROUP
 import moe.chenxy.hyperpods.ui.canStartActivityFromBackground
@@ -94,6 +98,12 @@ object ControlBridge {
     /** 延后启动用的主线程队列（[PodListener] 的回调本来就在主线程，这里只是排一次延后）。 */
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    /** 拉官方机型图用的 IO 作用域（网络 + 写文件，绝不能落在主线程）。 */
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** 这次连接已经为哪个地址试过拉图（断开时清空，重连可再试）。 */
+    @Volatile private var imageFetchAttemptedFor: String? = null
+
     /** 已排队但还没启动的弹窗任务；断开时撤销（见 [cancelPendingPopup]）。 */
     private var pendingPopup: Runnable? = null
 
@@ -121,6 +131,7 @@ object ControlBridge {
                     if (!snap.connected) return
                     PodNotification.onSnapshot(ctx, snap)
                     maybeShowConnectionPopup(ctx, snap)
+                    maybeFetchOfficialImage(ctx, snap)
                 }
                 is PodEvent.BatteryChanged -> {
                     val snap = MoondropLink.snapshot()
@@ -132,6 +143,7 @@ object ControlBridge {
                     // 断开＝这次会话结束：撤销还没启动的弹窗，并允许重连后再弹一次
                     cancelPendingPopup()
                     popupShownForAddress = null
+                    imageFetchAttemptedFor = null
                     PodNotification.cancel(ctx)
                 }
                 else -> Unit
@@ -230,6 +242,24 @@ object ControlBridge {
         }.getOrNull() ?: return true
         return runCatching { prefs.getBoolean(HyperPodsPrefsKey.AUTO_POPUP_ON_CONNECT, true) }
             .getOrDefault(true)
+    }
+
+    /**
+     * 连接后自动取一次官方机型图（没有就拉一张落盘）。
+     *
+     * 只在**这次连接里没试过**、且该设备还没有图时试一次：官方目录不在时不要反复重试
+     * （用户可以在详情页「机型图片」里手动选）。整个拉取在 IO 线程做，失败只留日志。
+     */
+    private fun maybeFetchOfficialImage(context: Context, snapshot: PodSnapshot) {
+        val address = snapshot.deviceAddress
+        if (address.isBlank() || address == imageFetchAttemptedFor) return
+        if (PodImageStore.hasImage(context, address)) return
+        imageFetchAttemptedFor = address
+        val deviceName = snapshot.deviceName.ifBlank { snapshot.modelName }
+        ioScope.launch {
+            val ok = PodImageStore.fetchOfficialImage(context, address, deviceName)
+            Log.i(TAG, "official pod image for $address ($deviceName) -> $ok")
+        }
     }
 
     /** 撤销还没启动的弹窗任务（断开时调用）。 */

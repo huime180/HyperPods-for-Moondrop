@@ -65,6 +65,16 @@
 
     <!-- refresh -->
     <string name="refresh">Refresh</string>
+    <string name="pod_image_title">Model image</string>
+    <string name="pod_image_official">Official image</string>
+    <string name="pod_image_default">Default image</string>
+    <string name="official_image_dialog_summary">Images come from the MOONDROP official product catalogue</string>
+    <string name="official_image_hint">Pick a model to apply its official transparent product render to this device.</string>
+    <string name="official_image_loading">Loading the official product catalogue…</string>
+    <string name="official_image_error">Failed to load the official product catalogue. Check your network and retry.</string>
+    <string name="official_image_retry">Retry</string>
+    <string name="official_image_apply">Use this image</string>
+    <string name="official_image_reset">Reset to default</string>
     <string name="refresh_summary">Re-read the full state from the earbuds</string>
 
     <!-- settings page -->

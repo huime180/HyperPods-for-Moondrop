@@ -5,6 +5,12 @@
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!--
+        「机型图片」要访问 MOONDROP 的公开产品目录与图床
+        （cdn-service.moondroplab.tech / cdn.moondroplab.tech）。仅此一处用网，
+        不涉及任何账号或私有接口。
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!--
         连接弹窗要在应用**没有可见界面**时弹出（耳机连上时由 pods/BluetoothConnectReceiver.kt
         唤醒进程），而 Android 10 起禁止后台启动 Activity（BAL）。不依赖厂商 ROM 的豁免只有
         「显示在其他应用上层」（SYSTEM_ALERT_WINDOW）这一个，因此必须声明；

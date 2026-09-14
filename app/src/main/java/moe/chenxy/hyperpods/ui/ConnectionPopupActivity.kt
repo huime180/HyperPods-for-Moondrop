@@ -89,6 +89,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -106,6 +108,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import kotlinx.coroutines.delay
+import moe.chenxy.hyperpods.pods.PodImageStore
 import moe.chenxy.hyperpods.R
 import moe.chenxy.hyperpods.pods.BatterySnapshot
 import moe.chenxy.hyperpods.utils.data.HyperPodsAction
@@ -278,6 +281,7 @@ private fun ConnectionPopupContent(
 
     ConnectionPopupCard(
         deviceName = deviceName.ifEmpty { stringResource(R.string.app_name) },
+        deviceAddress = snapshot.deviceAddress,
         battery = battery,
         onDismiss = onDismiss,
     )
@@ -286,6 +290,7 @@ private fun ConnectionPopupContent(
 @Composable
 private fun ConnectionPopupCard(
     deviceName: String,
+    deviceAddress: String,
     battery: PopupBattery,
     onDismiss: () -> Unit,
 ) {
@@ -342,6 +347,7 @@ private fun ConnectionPopupCard(
 
                 Spacer(modifier = Modifier.height(38.dp))
                 ConnectionPodImage(
+                    address = deviceAddress,
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(960f / 312f),
@@ -392,19 +398,34 @@ private fun CloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ConnectionPodImage(modifier: Modifier = Modifier) {
+private fun ConnectionPodImage(address: String, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    // 与详情页英雄图同一份机型图（按设备地址落盘）；没有就回落静态图
+    val officialImage = remember(address, PodImageStore.revision) {
+        PodImageStore.loadBitmap(context, address)
+    }
     Box(
         modifier = modifier.background(Color(0xFFFBFBFB)),
         contentAlignment = Alignment.Center,
     ) {
-        Image(
-            painter = painterResource(R.drawable.img_box),
-            contentDescription = stringResource(R.string.app_name),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 48.dp, vertical = 8.dp),
-            contentScale = ContentScale.Fit,
-        )
+        val imageModifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 48.dp, vertical = 8.dp)
+        if (officialImage != null) {
+            Image(
+                bitmap = officialImage.asImageBitmap(),
+                contentDescription = stringResource(R.string.app_name),
+                modifier = imageModifier,
+                contentScale = ContentScale.Fit,
+            )
+        } else {
+            Image(
+                painter = painterResource(R.drawable.img_box),
+                contentDescription = stringResource(R.string.app_name),
+                modifier = imageModifier,
+                contentScale = ContentScale.Fit,
+            )
+        }
     }
 }
 

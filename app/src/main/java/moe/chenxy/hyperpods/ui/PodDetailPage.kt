@@ -45,6 +45,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -59,6 +64,8 @@ import moe.chenxy.hyperpods.ui.components.MutualExclusionTarget
 import moe.chenxy.hyperpods.ui.components.PodStatus
 import moe.chenxy.hyperpods.ui.components.PromptToneSection
 import moe.chenxy.hyperpods.ui.components.rememberMutualExclusionState
+import moe.chenxy.hyperpods.pods.PodImageStore
+import moe.chenxy.hyperpods.ui.components.OfficialImagePickerDialog
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
@@ -94,6 +101,8 @@ fun PodDetailPage(
     val context = LocalContext.current
     val capabilities = snapshot.capabilities
     val exclusion = rememberMutualExclusionState()
+    // 机型图片选择框（水月雨官方产品目录）：与互斥确认框一样挂在 Miuix Scaffold 的弹层宿主上
+    var showImagePicker by remember { mutableStateOf(false) }
     // 开关行卡片：任一能力位为 true 就出现（提示音与音量已合并为同一行）
     val hasSwitchCard = capabilities.hasLed ||
         capabilities.hasPromptTone ||
@@ -113,9 +122,9 @@ fun PodDetailPage(
     ) {
         // 产品图：参照实现把英雄图放在正文最上方（不在任何卡片里，独占一行），
         // 后面才是各张卡；本页保持同一顺序。
-        item { PodHeroImageRow() }
+        item { PodHeroImageRow(snapshot) }
 
-        item { DeviceHeroCard(snapshot) }
+        item { DeviceHeroCard(snapshot) { showImagePicker = true } }
 
         item { SmallTitle(text = stringResource(R.string.battery_title)) }
 
@@ -234,19 +243,25 @@ fun PodDetailPage(
 
     // 互斥确认框（OverlayDialog）与开关拦截器共用同一个 state
     MutualExclusionDialog(state = exclusion)
+
+    OfficialImagePickerDialog(
+        show = showImagePicker,
+        currentAddress = snapshot.deviceAddress,
+        deviceName = snapshot.deviceName.ifBlank { snapshot.modelName },
+        onDismissRequest = { showImagePicker = false },
+    )
 }
 
 /**
  * 耳机页顶部的产品图。
  *
- * 取图方式沿用本仓库**既有的唯一一套**：`R.drawable.img_box` + [painterResource]
- * —— 与连接弹窗（ui/ConnectionPopupActivity.kt 的 ConnectionPodImage）同一张图、同一取法。
+ * 取图两级：**按设备地址存下来的官方机型图**（pods/PodImageStore —— 连接后自动按型号从
+ * MOONDROP 官方产品目录拉一张，也可以在详情页「机型图片」里手动选）→ 没有就回落仓库里
+ * `R.drawable.img_box` 这张静态产品图（与连接弹窗同一张）。
  *
- * 为什么不做参照实现那套「按机型取图」：参照实现是
- * `rememberPodImagePainter(path, deviceName)` = 用户导入图 / moondropDeviceImage(机型) / img_box
- * 三级回落，而本仓库 res 里只有 img_box 一张耳机产品图（参照仓库的 img_left / img_right
- * 本仓库没有），也没有机型 → 图的档案表，更没有相册导入功能。
- * 「没有的图不要臆造」，所以这里不新增任何映射或新资源，只把已有这张摆到参照实现的同一位置。
+ * 官方图是在 IO 线程拉的，所以 [PodImageStore.revision] 要参与 remember 的 key —— 拉完这一帧
+ * 才会重读位图。两者尺寸不同（官方图 1125×597 横图、静态图 640×640 方图），因此分别用
+ * ContentScale.Fit 与 FillWidth，宽度上界都沿用下面那个 360dp。
  *
  * ⚠ 宽度上界 360dp 不是新数字：`img_box.png` 是 **640×640 方图**，而本机窗口是
  * `sw777dp w1164dp h777dp`（横屏大窗）。参照实现的**竖屏**分支只写 `fillMaxWidth(0.7f)`，
@@ -254,23 +269,42 @@ fun PodDetailPage(
  * `widthIn(max = 360.dp)` 收口的。本页是单列（没有那套横屏双列正文），所以直接沿用这个上界。
  */
 @Composable
-private fun PodHeroImageRow() {
+private fun PodHeroImageRow(snapshot: PodSnapshot) {
+    val context = LocalContext.current
+    val officialImage = remember(snapshot.deviceAddress, PodImageStore.revision) {
+        PodImageStore.loadBitmap(context, snapshot.deviceAddress)
+    }
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Image(
-            painter = painterResource(R.drawable.img_box),
-            contentDescription = stringResource(R.string.app_name),
-            modifier = Modifier
-                .fillMaxWidth(0.7f)
-                .widthIn(max = 360.dp)
-                .padding(vertical = 16.dp),
-            contentScale = ContentScale.FillWidth,
-        )
+        val modifier = Modifier
+            .fillMaxWidth(0.7f)
+            .widthIn(max = 360.dp)
+            .padding(vertical = 16.dp)
+        if (officialImage != null) {
+            Image(
+                bitmap = officialImage.asImageBitmap(),
+                contentDescription = snapshot.modelName.ifBlank { stringResource(R.string.app_name) },
+                modifier = modifier,
+                contentScale = ContentScale.Fit,
+            )
+        } else {
+            Image(
+                painter = painterResource(R.drawable.img_box),
+                contentDescription = stringResource(R.string.app_name),
+                modifier = modifier,
+                contentScale = ContentScale.FillWidth,
+            )
+        }
     }
 }
 
 /** 机型卡：型号名（中文）、连接状态、可信标记、传输通道。 */
 @Composable
-private fun DeviceHeroCard(snapshot: PodSnapshot) {
+private fun DeviceHeroCard(snapshot: PodSnapshot, onOpenImagePicker: () -> Unit) {
+    val context = LocalContext.current
+    // revision 参与 key：官方图拉回来 / 被恢复默认之后，这一行的摘要要跟着变
+    val hasOfficialImage = remember(snapshot.deviceAddress, PodImageStore.revision) {
+        PodImageStore.hasImage(context, snapshot.deviceAddress)
+    }
     Card {
         Column(
             modifier = Modifier
@@ -313,6 +347,14 @@ private fun DeviceHeroCard(snapshot: PodSnapshot) {
         BasicComponent(
             title = stringResource(R.string.transport),
             summary = snapshot.transport.ifBlank { stringResource(R.string.unknown_value) },
+        )
+        // 机型图片：现在是哪张、点它去官方目录里换一张（或恢复默认）
+        BasicComponent(
+            title = stringResource(R.string.pod_image_title),
+            summary = stringResource(
+                if (hasOfficialImage) R.string.pod_image_official else R.string.pod_image_default
+            ),
+            onClick = onOpenImagePicker,
         )
     }
 }

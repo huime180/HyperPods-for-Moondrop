@@ -65,6 +65,16 @@
 
     <!-- 刷新 -->
     <string name="refresh">刷新</string>
+    <string name="pod_image_title">机型图片</string>
+    <string name="pod_image_official">官方机型图</string>
+    <string name="pod_image_default">默认图片</string>
+    <string name="official_image_dialog_summary">图片来自 MOONDROP 官方产品目录</string>
+    <string name="official_image_hint">选择机型后套用到当前耳机（官方透明产品渲染）。</string>
+    <string name="official_image_loading">正在拉取官方产品目录…</string>
+    <string name="official_image_error">拉取官方产品目录失败，请检查网络后重试。</string>
+    <string name="official_image_retry">重试</string>
+    <string name="official_image_apply">使用此图</string>
+    <string name="official_image_reset">恢复默认</string>
     <string name="refresh_summary">重新读取耳机的全部状态</string>
 
     <!-- 设置页 -->
