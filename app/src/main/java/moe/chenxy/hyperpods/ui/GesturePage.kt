@@ -13,14 +13,14 @@
  *   basic.Card + preference.OverlayDropdownPreference(title / items / selectedIndex /
  *   onSelectedIndexChange) + basic.BasicComponent(title / summary)。
  *
- * ⚠ 诚实标注（页面上也写给用户看）：
- *   1) 动作表里 **播放/暂停、上一曲、下一曲、语音助手、降噪切换** 是实测确认的；
- *      **音量+ / 音量-** 只按官方 App 选择器顺序推断，标签里直接写「（推断）」。
+ * 事实标注：
+ *   1) 动作表（播放/暂停、上一曲、下一曲、语音助手、降噪切换、音量±）来自官方 App 的
+ *      字节码校验与真机实测，8 个动作在两份 strings.xml 里都有本地化字符串。
  *   2) `8..15` 未观测到：这种值不会被静默吞掉或回落成「无」，而是单列一条 `未知(0xN)` 选项
  *      （Gaia.TouchActions.matchOrUnknown）。
  *   3) 长按1秒 / 长按3秒是协议上**两个独立字节**（字节码里 onesL/onesR 与 threesL/threesR
- *      两组独立字段），所以照实做成 4 行、不做互斥；用户说的「冲突」是功能层面的
- *      （按满 3 秒必然先满足 1 秒），已在说明文案里讲清楚。
+ *      两组独立字段），设备行为上互斥：把其中一个设为「无」以外的动作时，另一个会被清空为
+ *      「无」。该规则已在 pods/MoondropLink.kt 的 setGesture 里实现。
  *   4) **没有「重置」按钮**：没有已知的重置命令，就不发明一个（宁缺毋滥）。
  */
 package moe.chenxy.hyperpods.ui
@@ -138,7 +138,7 @@ fun GesturePage(
             }
         }
 
-        // 如实说明（双耳打包 / 音量±是推断 / 长按两档是功能层面冲突）
+        // 协议说明（双耳打包 / 长按两档互斥的规则）
         item {
             Card(modifier = Modifier.padding(top = GESTURE_CARD_GAP)) {
                 BasicComponent(
@@ -195,7 +195,12 @@ private fun GestureRow(
     )
 }
 
-/** 动作 → 本地化文案；无本地化条目时回落表里的中文标签（含「（推断）」标注）。 */
+/**
+ * 动作 → 本地化文案。
+ *
+ * 表里 8 个已知动作都有本地化条目（见 ACTION_LABEL_RES），所以正常路径永远取 strings.xml；
+ * 未命中时才回落到 Gaia.TouchActions 自带的中文标签，未知取值走 matchOrUnknown。
+ */
 @Composable
 private fun actionLabel(action: Gaia.TouchAction): String =
     ACTION_LABEL_RES[action.id]?.let { stringResource(it) } ?: action.labelZh

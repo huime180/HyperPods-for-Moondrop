@@ -152,4 +152,26 @@
     <string name="gesture_action_next_track">Next track</string>
     <string name="gesture_action_volume_up">Volume +</string>
     <string name="gesture_action_volume_down">Volume -</string>
+
+    <!-- 底部导航页签 -->
+    <string name="tab_module">Module</string>
+    <string name="tab_earphones">Earphones</string>
+
+    <!-- 耳机页标题（型号未知时）/ 设备选择页 -->
+    <string name="pod_info">Pod info</string>
+    <string name="select_device">Select device</string>
+    <string name="bluetooth_disabled">Bluetooth is off</string>
+    <string name="bt_permission_required">Bluetooth permission is required to list paired earbuds</string>
+    <string name="grant_permission">Grant permission</string>
+
+    <!-- 模块页：系统信息卡 -->
+    <string name="settings_section_system">System info</string>
+    <string name="info_app_version">App version</string>
+    <string name="info_android_version">Android version</string>
+    <string name="info_system_version">System version</string>
+    <string name="info_device_model">Device model</string>
+
+    <!-- 关于页：项目主页 -->
+    <string name="about_repo_title">Project home</string>
+    <string name="about_repo_url">https://github.com/huime180/HyperPods-for-Moondrop</string>
 </resources>

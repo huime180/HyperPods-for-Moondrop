@@ -748,11 +748,11 @@ object Gaia {
             ),
             TouchAction(NEXT_TRACK, "下一曲", "Next track", "gesture_action_next_track"),
             TouchAction(
-                VOLUME_UP, "音量 +（推断）", "Volume + (inferred)", "gesture_action_volume_up",
+                VOLUME_UP, "音量 +", "Volume + ", "gesture_action_volume_up",
                 inferred = true,
             ),
             TouchAction(
-                VOLUME_DOWN, "音量 -（推断）", "Volume - (inferred)", "gesture_action_volume_down",
+                VOLUME_DOWN, "音量 -", "Volume - ", "gesture_action_volume_down",
                 inferred = true,
             ),
             TouchAction(

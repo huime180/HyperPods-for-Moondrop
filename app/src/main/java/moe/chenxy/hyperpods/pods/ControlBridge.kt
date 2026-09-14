@@ -350,7 +350,7 @@ object ControlBridge {
 
     /**
      * 把手势配置推给系统设置页（hook 侧用它渲染「手势控制」卡片）。
-     * 没有配置就**不发** —— 原生页会显示「未同步」，而不是回落成厂商默认值。
+     * 没有配置就**不发** —— 原生页在收到配置前不显示手势值，而不是回落成厂商默认值。
      */
     private fun pushGesture(context: Context, payload: ByteArray? = null) {
         val bytes = payload ?: MoondropLink.snapshot().gestureConf?.toPayload() ?: return

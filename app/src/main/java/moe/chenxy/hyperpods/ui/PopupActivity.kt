@@ -2,29 +2,30 @@
  * HyperPods for Moondrop — 快速弹窗（PuddingPods 形态的主入口）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * 版式与组件逐条对齐参考实现 _refs/OppoPods/app/src/main/java/moe/chenxy/oppopods/PopupActivity.kt：
- *   · 透明 Scaffold 里挂 miuix overlay.OverlayDialog（:213-251）——圆角、窗口变暗、
+ * 版式与组件逐条对齐参考实现 moondrop-pods 的 PopupActivity.kt：
+ *   · 透明 Scaffold 里挂 miuix overlay.OverlayDialog（该文件 :270-304）——圆角、窗口变暗、
  *     点框外关闭都由 OverlayDialog 负责（enableWindowDim 默认 true）；
- *   · 内容是一叠 Card：电量（PodStatus）→ 降噪（AncSwitch：三选一 + 降噪子排，常驻可见）
- *     → 快捷控制（默认折叠；展开后是 提示音含音量 / LHDC / 双设备连接）（:266-287）；
- *   · 底部一排等宽 TextButton：「更多设置」+「关闭」（:288-303）。
+ *   · 正文按屏幕方向分成 PortraitPopupBody 与 LandscapePopupBody 两套（该文件 :282-302 的分派，
+ *     横屏正文是两列：左列电量 + 降噪，右列增益 + 其余）；取向同样用 LocalConfiguration 判断；
+ *   · 内容是一叠 Card，块间 12dp：电量（PodStatus）→ 降噪（AncSwitch）→ 增益
+ *     → 快捷控制（默认折叠；展开后是 提示音含音量 / LHDC / 双设备连接）；
+ *   · 底部一排等宽 TextButton：「更多设置」+「关闭」。
  *
- * ── 版式修复：内容被裁、「双设备连接」与底部按钮消失 ──────────────────────
- * 症状：行数增加后，弹窗里排在最后的「双设备连接」行与两个底部按钮不显示了。
- * 根因：Miuix 0.9.3 的 DialogContentLayout 只在「大屏」档位给弹窗内容加高度上界
- *       `heightIn(max = 窗口高 * 2/3)`，手机档位是 `Dp.Unspecified`
- *       （miuix-ui 0.9.3 源码 layout/DialogContentLayout.kt:311）。正文又是一个
- *       **不可滚动的 Column**：Column 自上而下逐个子项测量，空间耗尽后排在末尾的子项
- *       （双设备连接行 / Spacer / 两个 TextButton）只拿到 0 高度而被压没 —— 与用户报的现象一致。
- * 修法（见下方 PopupBody）：
- *   1) 正文拆成「可滚动中段 + 固定底部按钮行」：中段 `verticalScroll(...)`，
- *      外层 Column 给 `heightIn(max = 屏高 * POPUP_BODY_MAX_HEIGHT_FRACTION)`；
- *   2) 底部两个按钮与 Spacer 是**非权重**子项，Column 先测它们、再给中段分配剩余空间
- *      （中段 `weight(1f, fill = false)`），所以按钮既不会被压没、也滚不走；
- *      中段内容短时按内容高度收（fill = false 不多占高度），长时滚动。
- * 取屏幕高度的来源：参考实现 _refs/OppoPods/.../PopupActivity.kt:211 就是用
- *      LocalConfiguration 取窗口尺寸来决定弹窗版式（竖屏 / 横屏两套 body）；
- *      本项目 ui/Theme.kt:34 也已用 LocalConfiguration。这里沿用同一取法，只取屏幕高度做上界。
+ * 保留本项目原有的两处硬性修复（参考实现没有，因为它们的弹窗没有这个裁切问题）：
+ *   · 弹窗正文总高上界 + 可滚动中段；
+ *   · 底部按钮行在滚动区之外，先于中段被测量，**绝不被压没**。
+ *
+ * 版式修复：内容被裁、「双设备连接」与底部按钮消失
+ *   症状：行数增加后，弹窗里排在最后的行与两个底部按钮不显示了。
+ *   根因：Miuix 0.9.3 的 DialogContentLayout 只在「大屏」档位给弹窗内容加高度上界
+ *         `heightIn(max = 窗口高 * 2/3)`，手机档位是 `Dp.Unspecified`
+ *         （miuix-ui 0.9.3 源码 layout/DialogContentLayout.kt:311）；正文又是一个
+ *         **不可滚动的 Column**：Column 自上而下逐个子项测量，空间耗尽后排在末尾的子项
+ *         只拿到 0 高度而被压没 —— 与用户报的现象一致。
+ *   修法：正文 = 「可滚动中段（weight(1f, fill = false)）」+「固定底部按钮行」，
+ *         外层 Column 给 heightIn(max = 屏高 × 60%)。底部行是非权重子项，Column 先测它，
+ *         所以按钮既不会被压没、也滚不走；空间不够时由中段让步（滚动）。
+ *   取屏幕高度做上界：屏幕不够高时（横屏）也能保证按钮行有位置。
  *
  * 由广播 chen.action.hyperpods.moondrop.show_popup 启动（见 AndroidManifest）。
  * 「低延迟模式」开关已按用户要求移除；hasLowLatency 不再门控任何 UI。
@@ -33,6 +34,7 @@
 package moe.chenxy.hyperpods.ui
 
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -87,6 +89,7 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.ExpandLess
 import top.yukonga.miuix.kmp.icon.extended.ExpandMore
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -100,6 +103,9 @@ private const val POPUP_BODY_MAX_HEIGHT_FRACTION = 0.6f
 
 /** 极小屏兜底：正文至少保留这么高，别把滚动区压成一条缝（仍小于 0.6 × 常见屏高）。 */
 private val MIN_POPUP_BODY_HEIGHT = 160.dp
+
+/** 卡片之间的统一间距（与参考实现弹窗里的 12dp 一致）。 */
+private val CARD_GAP = 12.dp
 
 class PopupActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -134,14 +140,18 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
     val capabilities = snapshot.capabilities
     val exclusion = rememberMutualExclusionState()
     var showDialog by remember { mutableStateOf(true) }
+    // 「快捷控制」默认折叠（用户需求：通知栏弹窗里的快捷操作可以折叠）；
+    // 状态提到这里，横竖屏切换 / 重组都不会把用户展开的那次操作丢掉。
+    var quickControlsExpanded by remember { mutableStateOf(false) }
 
     val isDarkMode = when (loadThemeMode(context)) {
         1 -> false
         2 -> true
         else -> isSystemInDarkTheme()
     }
-    // 与参考实现 PopupActivity.kt:210 同一取色逻辑（弹框底色自己给，避免透明卡片看不清）
+    // 与参考实现 PopupActivity.kt:267 同一取色逻辑（弹框底色自己给，避免透明卡片看不清）
     val dialogBgColor = if (isDarkMode) Color(0xFF1A1A1A) else Color(0xFFF7F7F7)
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     // 提示音与提示音音量是同一行：任一能力位为 true 就该出现这张卡
     val hasQuickToggle = capabilities.hasPromptTone ||
         capabilities.hasPromptVolume ||
@@ -159,6 +169,9 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
             PopupBody(
                 snapshot = snapshot,
                 hasQuickToggle = hasQuickToggle,
+                isLandscape = isLandscape,
+                quickControlsExpanded = quickControlsExpanded,
+                onToggleQuickControls = { quickControlsExpanded = !quickControlsExpanded },
                 exclusion = exclusion,
                 onMore = onMore,
                 onClose = { showDialog = false },
@@ -171,11 +184,11 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
 }
 
 /**
- * 弹窗正文（对齐参考实现 PortraitPopupBody，并修掉内容被压没的版式 bug）：
+ * 弹窗正文（对齐参考实现的两套正文，并保留本项目的裁切修复）：
  *
  * ```
  * Column(heightIn(max = 0.6 × 屏高))                        // 正文总高上界
- *   ├─ Column(weight(1f, fill = false) + verticalScroll)    // 可滚动中段（电量 / 降噪 / 快捷控制）
+ *   ├─ 中段 weight(1f, fill = false) + verticalScroll        // 竖屏一列 / 横屏两列，均可滚
  *   ├─ Spacer(16dp)
  *   └─ Row { 更多设置 | 关闭 }                                // 固定底部，永远可见
  * ```
@@ -187,15 +200,17 @@ private fun PopupContent(onMore: () -> Unit, onDone: () -> Unit) {
 private fun PopupBody(
     snapshot: PodSnapshot,
     hasQuickToggle: Boolean,
+    isLandscape: Boolean,
+    quickControlsExpanded: Boolean,
+    onToggleQuickControls: () -> Unit,
     exclusion: MutualExclusionState,
     onMore: () -> Unit,
     onClose: () -> Unit,
 ) {
-    val capabilities = snapshot.capabilities
-    // 「快捷控制」默认折叠（用户需求：通知栏弹窗里的快捷操作可以折叠）
-    var quickControlsExpanded by remember { mutableStateOf(false) }
+    val hasGain = snapshot.capabilities.hasGain && snapshot.gainLabels.isNotEmpty()
 
-    // 正文总高上界（见文件头「版式修复」段）；LocalConfiguration 取法同参考实现 :211 / ui/Theme.kt
+    // 正文总高上界（见文件头「版式修复」段）：取屏幕高度而不是弹窗高度，
+    // 因为手机档位弹窗高度就是 Unspecified（没有上界可用）。
     val maxBodyHeight = (
         LocalConfiguration.current.screenHeightDp.dp * POPUP_BODY_MAX_HEIGHT_FRACTION
         ).coerceAtLeast(MIN_POPUP_BODY_HEIGHT)
@@ -205,84 +220,84 @@ private fun PopupBody(
             .fillMaxWidth()
             .heightIn(max = maxBodyHeight),
     ) {
-        // ── 可滚动中段 ──
-        // weight(1f, fill = false)：内容短时按内容高度收（折叠态不多占高度），
-        // 内容长时吃掉剩余空间并垂直滚动，绝不把下面的固定按钮顶出弹窗。
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f, fill = false)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                PodStatus(
-                    battery = snapshot.battery,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp),
-                )
-            }
-
-            if (!snapshot.connected) {
-                Text(
-                    text = stringResource(R.string.waiting_for_pod_hint),
-                    modifier = Modifier.padding(top = 10.dp),
-                    color = MiuixTheme.colorScheme.onBackgroundVariant,
-                    fontSize = 13.sp,
-                )
-            } else {
-                // 降噪：用户要求常驻可见，保持在折叠组之外（同现状）
-                if (snapshot.ancModes.isNotEmpty()) {
-                    Spacer(Modifier.height(12.dp))
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        AncSwitch(
-                            modes = snapshot.ancModes,
-                            selectedIndex = snapshot.ancIndex,
-                            onSelect = { index -> MoondropLink.setAnc(index) },
-                        )
+        if (isLandscape) {
+            // 横屏两列（同参考实现 LandscapePopupBody）：左列电量 + 降噪，右列增益 + 快捷控制。
+            // 两列各自垂直滚动；底部按钮仍在两列之外，不会被挤出弹窗。
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false),
+                horizontalArrangement = Arrangement.spacedBy(CARD_GAP),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(0.6f)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    BatteryCard(snapshot)
+                    if (!snapshot.connected) {
+                        WaitingHint()
+                    } else if (snapshot.ancModes.isNotEmpty()) {
+                        Spacer(Modifier.height(CARD_GAP))
+                        AncCard(snapshot)
                     }
                 }
-
-                // ── 快捷控制：可折叠分组（默认折叠）──
-                if (hasQuickToggle) {
-                    Spacer(Modifier.height(12.dp))
-                    QuickControlsHeader(
-                        expanded = quickControlsExpanded,
-                        onToggle = { quickControlsExpanded = !quickControlsExpanded },
-                    )
-                    // 收起时整块不渲染、不占高度；展开 / 收起走 expandVertically / shrinkVertically，
-                    // 与 ui/components/AncSwitch.kt:241-245（降噪子排）同一套写法
-                    AnimatedVisibility(
-                        visible = quickControlsExpanded,
-                        enter = expandVertically() + fadeIn(),
-                        exit = shrinkVertically() + fadeOut(),
-                    ) {
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            // 提示音开关 + 提示音音量：合并成同一行（内部按能力位决定显示开关/滑条）
-                            PromptToneSection(snapshot)
-                            if (capabilities.hasLhdc) {
-                                SwitchPreference(
-                                    title = stringResource(R.string.lhdc_title),
-                                    summary = stringResource(R.string.lhdc_summary),
-                                    checked = snapshot.lhdcOn ?: false,
-                                    onCheckedChange = { on ->
-                                        if (exclusion.request(snapshot, MutualExclusionTarget.LHDC, on)) {
-                                            MoondropLink.setLhdc(on)
-                                        }
-                                    },
-                                )
-                            }
-                            if (capabilities.hasDualConnection) {
-                                SwitchPreference(
-                                    title = stringResource(R.string.dual_connection_title),
-                                    summary = stringResource(R.string.dual_connection_summary),
-                                    checked = snapshot.dualConnectionOn ?: false,
-                                    onCheckedChange = { on ->
-                                        if (exclusion.request(snapshot, MutualExclusionTarget.DUAL_CONNECTION, on)) {
-                                            MoondropLink.setDualConnection(on)
-                                        }
-                                    },
-                                )
-                            }
+                Column(
+                    modifier = Modifier
+                        .weight(0.4f)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    // 未连接时右列留空（提示文案只在左列出现一次），不重复显示
+                    if (snapshot.connected) {
+                        if (hasGain) {
+                            GainCard(snapshot)
                         }
+                        if (hasQuickToggle) {
+                            if (hasGain) Spacer(Modifier.height(CARD_GAP))
+                            QuickControlsSection(
+                                snapshot = snapshot,
+                                expanded = quickControlsExpanded,
+                                onToggle = onToggleQuickControls,
+                                exclusion = exclusion,
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            // 竖屏一列（同参考实现 PortraitPopupBody 的内容顺序）。
+            // weight(1f, fill = false)：内容短时按内容高度收（折叠态不多占高度），
+            // 内容长时吃掉剩余空间并垂直滚动，绝不把下面的固定按钮顶出弹窗。
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                BatteryCard(snapshot)
+
+                if (!snapshot.connected) {
+                    WaitingHint()
+                } else {
+                    // 降噪：常驻可见，保持在折叠组之外
+                    if (snapshot.ancModes.isNotEmpty()) {
+                        Spacer(Modifier.height(CARD_GAP))
+                        AncCard(snapshot)
+                    }
+
+                    if (hasGain) {
+                        Spacer(Modifier.height(CARD_GAP))
+                        GainCard(snapshot)
+                    }
+
+                    if (hasQuickToggle) {
+                        Spacer(Modifier.height(CARD_GAP))
+                        QuickControlsSection(
+                            snapshot = snapshot,
+                            expanded = quickControlsExpanded,
+                            onToggle = onToggleQuickControls,
+                            exclusion = exclusion,
+                        )
                     }
                 }
             }
@@ -308,14 +323,112 @@ private fun PopupBody(
     }
 }
 
+/** 电量卡（离线 / 单设备 / 三路电量的判定都在 components/PodStatus.kt 内）。 */
+@Composable
+private fun BatteryCard(snapshot: PodSnapshot) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        PodStatus(
+            battery = snapshot.battery,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 16.dp),
+        )
+    }
+}
+
+/** 降噪卡：三选一 + 降噪子排，档位来自设备真实上报的 ancModes。 */
+@Composable
+private fun AncCard(snapshot: PodSnapshot) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        AncSwitch(
+            modes = snapshot.ancModes,
+            selectedIndex = snapshot.ancIndex,
+            onSelect = { index -> MoondropLink.setAnc(index) },
+        )
+    }
+}
+
+/** 增益卡（同参考实现弹窗里的增益行）：能力位为真且设备上报了档位时才出现。 */
+@Composable
+private fun GainCard(snapshot: PodSnapshot) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        OverlayDropdownPreference(
+            title = stringResource(R.string.gain_title),
+            items = snapshot.gainLabels,
+            selectedIndex = snapshot.gainIndex.coerceIn(0, snapshot.gainLabels.lastIndex),
+            onSelectedIndexChange = { index -> MoondropLink.setGain(index) },
+        )
+    }
+}
+
+/** 未连接时的中性提示（不显示任何 0% 之类的假数据）。 */
+@Composable
+private fun WaitingHint() {
+    Text(
+        text = stringResource(R.string.waiting_for_pod_hint),
+        modifier = Modifier.padding(top = 10.dp),
+        color = MiuixTheme.colorScheme.onBackgroundVariant,
+        fontSize = 13.sp,
+    )
+}
+
+/**
+ * 「快捷控制」可折叠分组：标题行（带展开 / 收起箭头）+ 展开后的开关卡
+ * （提示音含音量 / LHDC / 双设备连接，每行都由能力位门控）。
+ */
+@Composable
+private fun QuickControlsSection(
+    snapshot: PodSnapshot,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    exclusion: MutualExclusionState,
+) {
+    val capabilities = snapshot.capabilities
+
+    QuickControlsHeader(expanded = expanded, onToggle = onToggle)
+    // 收起时整块不渲染、不占高度；展开 / 收起走 expandVertically / shrinkVertically，
+    // 与 ui/components/AncSwitch.kt 的降噪子排同一套写法
+    AnimatedVisibility(
+        visible = expanded,
+        enter = expandVertically() + fadeIn(),
+        exit = shrinkVertically() + fadeOut(),
+    ) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            // 提示音开关 + 提示音音量：合并成同一行（内部按能力位决定显示开关/滑条）
+            PromptToneSection(snapshot)
+            if (capabilities.hasLhdc) {
+                SwitchPreference(
+                    title = stringResource(R.string.lhdc_title),
+                    summary = stringResource(R.string.lhdc_summary),
+                    checked = snapshot.lhdcOn ?: false,
+                    onCheckedChange = { on ->
+                        if (exclusion.request(snapshot, MutualExclusionTarget.LHDC, on)) {
+                            MoondropLink.setLhdc(on)
+                        }
+                    },
+                )
+            }
+            if (capabilities.hasDualConnection) {
+                SwitchPreference(
+                    title = stringResource(R.string.dual_connection_title),
+                    summary = stringResource(R.string.dual_connection_summary),
+                    checked = snapshot.dualConnectionOn ?: false,
+                    onCheckedChange = { on ->
+                        if (exclusion.request(snapshot, MutualExclusionTarget.DUAL_CONNECTION, on)) {
+                            MoondropLink.setDualConnection(on)
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
 /**
  * 「快捷控制」分组头：整行可点，右侧箭头表示展开 / 收起。
  *
- * 版式（缩进与行高）沿用原先这里的小标题：miuix SmallTitle 的默认内边距是
+ * 版式（缩进与行高）沿用原先的 miuix SmallTitle：其默认内边距是
  * PaddingValues(28.dp, 8.dp)（0.9.3 源码 basic/SmallTitle.kt:37 SmallTitleDefaults.InsideMargin），
  * 文字样式同样取 MiuixTheme.textStyles.subtitle（SmallTitle 内部就是它），
- * 只是换成可点 Row 以便挂箭头指示器。箭头用 miuix-icons 的 ExpandMore / ExpandLess
- * （0.9.3 产物里实有，见 icon/extended/ExpandMore.kt；与 MainUI.kt:46-48 用 extended.Back 同一导入写法）。
+ * 只是换成可点 Row 以便挂箭头指示器。箭头用 miuix-icons 的 ExpandMore / ExpandLess。
  */
 @Composable
 private fun QuickControlsHeader(expanded: Boolean, onToggle: () -> Unit) {

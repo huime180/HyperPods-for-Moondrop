@@ -36,10 +36,8 @@ import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.mutableStateOf
@@ -222,12 +220,19 @@ class RestartScopeState {
 fun rememberRestartScopeState(): RestartScopeState = remember { RestartScopeState() }
 
 /**
- * 确认框 + 作用域勾选 + 执行入口。形态对齐 ui/components/MutualExclusion.kt:120-158（OverlayDialog +
- * summary 说明 + 内容区 + 底部一排 TextButton，主按钮用 textButtonColorsPrimary），勾选框用
- * preference.CheckboxPreference（miuix-preference 0.9.3 实测存在：CheckboxPreference.kt）。
+ * 确认框 + 作用域勾选 + 执行入口。
+ *
+ * 呈现方式对齐参考实现 moondrop-pods 的 ui/dialogs/RestartScopeDialog.kt:48-89：
+ * OverlayDialog(title + summary) → 作用域勾选列表（行间 4dp、整块下留白 12dp）
+ * → 底部一排等宽 TextButton（间距 8dp，主按钮用 textButtonColorsPrimary）。
+ * 勾选控件仍用本项目的 preference.CheckboxPreference（miuix-preference 0.9.3 实测存在），
+ * 因此「勾选子集决定实际重启哪些进程」的行为与改造前完全一致。
+ *
+ * 参考实现在一个都没勾时仍允许点确认，本项目保留原有更稳妥的做法：一个都没勾时确认按钮禁用，
+ * 避免弹出一句「未能通知任何作用域进程」的误导提示。
  *
  * 必须挂在 Miuix `Scaffold` 里（OverlayDialog 默认渲染到根 Scaffold 的弹层宿主），
- * 因此在 MainUI 的 Home entry 里与页面内容并列放置。
+ * 因此挂在 MainTabsScaffold 的 Scaffold 里，三个页签共用同一个确认框状态。
  */
 @Composable
 fun RestartScopeDialog(state: RestartScopeState) {
@@ -242,7 +247,12 @@ fun RestartScopeDialog(state: RestartScopeState) {
         show = state.visible,
         onDismissRequest = { state.dismiss() },
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
             // 勾选要重启的作用域（默认全选）：没勾的不发广播、也不 force-stop
             for ((pkg, labelRes) in SCOPE_ENTRIES) {
                 CheckboxPreference(
@@ -255,14 +265,13 @@ fun RestartScopeDialog(state: RestartScopeState) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 TextButton(
                     text = stringResource(R.string.cancel),
                     onClick = { state.dismiss() },
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.width(20.dp))
                 TextButton(
                     text = stringResource(R.string.restart_scope_confirm),
                     onClick = {
