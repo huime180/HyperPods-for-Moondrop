@@ -97,6 +97,27 @@
             </intent-filter>
         </receiver>
 
+        <!--
+          应用侧「耳机连上就把本应用进程拉起来」（pods/BluetoothConnectReceiver.kt）。
+          上面那个 ControlReceiver 的 PODS_CONNECTED 来自 com.android.bluetooth 里的 hook，
+          模块没在 LSPosed 激活时它不存在 —— 「没打开过应用 + 在系统蓝牙里连上耳机」时进程就
+          不会被唤醒，通知也无从谈起。这条 action 是系统蓝牙进程在 A2DP 连接状态变化时发出的
+          **系统广播**（android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED，
+          代码里的常量是 BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED），
+          在 Android 8+ 的隐式广播豁免清单里，因此 manifest 静态注册也能收到
+          （本机核实：com.android.settings 的 .bluetooth.AudioShareStateChangedReceiver 同样
+          静态注册了这条 action）。
+          android:exported 按平台要求写 true：发送方是系统 / 蓝牙进程，不是本应用。
+        -->
+        <receiver
+            android:name=".pods.BluetoothConnectReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
         <!-- LSPosed / libxposed 模块声明 -->
         <meta-data android:name="xposedmodule" android:value="true" />
         <!--

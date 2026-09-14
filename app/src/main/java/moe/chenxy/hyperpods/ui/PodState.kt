@@ -47,9 +47,12 @@ private const val TAG = "MoondropPodState"
 /**
  * UI 侧本地偏好：只保存「上一次连接过的耳机地址」，供冷启动兜底优先重连。
  * 注意：刻意不复用 HyperPodsPrefsKey —— 那份契约里没有「上次连接地址」键。
+ *
+ * internal：pods/BluetoothConnectReceiver.kt（模块未激活时由系统蓝牙广播唤起的路径）在
+ * 拿不到设备名时也读同一个地址做设备判定，不在这里再抄一份字符串。
  */
-private const val UI_PREFS = "hyperpods_moondrop_ui"
-private const val KEY_LAST_ADDRESS = "last_connected_address"
+internal const val UI_PREFS_GROUP = "hyperpods_moondrop_ui"
+internal const val UI_PREFS_KEY_LAST_ADDRESS = "last_connected_address"
 
 /**
  * 订阅耳机状态，返回可直接用于组合的 [PodSnapshot]。
@@ -140,9 +143,9 @@ fun rememberPodSnapshot(): PodSnapshot {
             if (target == null) {
                 Log.i(TAG, "no bonded Moondrop device; waiting state")
             } else {
-                context.getSharedPreferences(UI_PREFS, Context.MODE_PRIVATE)
+                context.getSharedPreferences(UI_PREFS_GROUP, Context.MODE_PRIVATE)
                     .edit()
-                    .putString(KEY_LAST_ADDRESS, target.address)
+                    .putString(UI_PREFS_KEY_LAST_ADDRESS, target.address)
                     .apply()
                 Log.i(TAG, "cold-start connect to ${target.address} (${target.name})")
                 MoondropLink.connect(target)
@@ -172,8 +175,8 @@ private fun findBondedMoondropDevice(context: Context): BluetoothDevice? {
     val adapter = runCatching { BluetoothAdapter.getDefaultAdapter() }.getOrNull() ?: return null
     if (!adapter.isEnabled) return null
     val bonded = runCatching { adapter.bondedDevices }.getOrNull() ?: return null
-    val preferred = context.getSharedPreferences(UI_PREFS, Context.MODE_PRIVATE)
-        .getString(KEY_LAST_ADDRESS, null)
+    val preferred = context.getSharedPreferences(UI_PREFS_GROUP, Context.MODE_PRIVATE)
+        .getString(UI_PREFS_KEY_LAST_ADDRESS, null)
     val candidates = bonded.filter { MoondropModels.match(it.name) != null }
     return candidates.firstOrNull { it.address == preferred } ?: candidates.firstOrNull()
 }
