@@ -7,6 +7,9 @@ composeBom = "2025.05.00"
 kotlinxSerializationJson = "1.9.0"
 # libxposed API 102（LSPosed >= 2.1.1 / Vector）。仅编译期，运行时由框架注入。
 libxposedApi = "102.0.0"
+# LSPosed 服务端接口（应用进程侧）：模块页「LSPosed 已激活 / 作用域齐全」状态卡要靠它。
+# 与上面的 api 同版本 102（api 是 compileOnly 的模块侧，service 是应用侧的 runtime 依赖）。
+libxposedService = "102.0.0"
 # Miuix 从 0.5.1 的「聚合产物」改成 0.9.3 的「拆分产物」：只有拆分产物里才有
 # basic.LazyColumn 之外的 preference.* / icon.* / overlay.OverlayDialog 等等。
 miuix = "0.9.3"
@@ -26,6 +29,7 @@ lsplugin-resopt = { id = "org.lsposed.lsplugin.resopt", version = "1.6" }
 [libraries]
 coreKtx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 libxposedApi = { group = "io.github.libxposed", name = "api", version.ref = "libxposedApi" }
+libxposedService = { group = "io.github.libxposed", name = "service", version.ref = "libxposedService" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity-compose" }
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
@@ -36,6 +40,8 @@ compose-foundation = { module = "androidx.compose.foundation:foundation" }
 miuix = { group = "top.yukonga.miuix.kmp", name = "miuix-ui-android", version.ref = "miuix" }
 miuix-preference = { group = "top.yukonga.miuix.kmp", name = "miuix-preference-android", version.ref = "miuix" }
 miuix-icons = { group = "top.yukonga.miuix.kmp", name = "miuix-icons-android", version.ref = "miuix" }
+# 背景动效（ui/effect）需要：RuntimeShader 笔刷 + 混合模式 + Backdrop 模糊
+miuix-blur = { group = "top.yukonga.miuix.kmp", name = "miuix-blur-android", version.ref = "miuix" }
 miuix-navigation3-ui = { group = "top.yukonga.miuix.kmp", name = "miuix-navigation3-ui-android", version.ref = "miuix" }
 navigation3-runtime = { group = "androidx.navigation3", name = "navigation3-runtime", version.ref = "navigation3" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }

@@ -69,6 +69,9 @@ dependencies {
     implementation(libs.coreKtx)
     // libxposed API：仅编译期，运行时由 LSPosed / Vector 注入
     compileOnly(libs.libxposedApi)
+    // LSPosed 服务（应用进程侧）：绑定框架服务后可读框架版本与已勾选作用域，
+    // 供模块页的「LSPosed 已激活 / 作用域齐全」状态卡使用。
+    implementation(libs.libxposedService)
 
     implementation(libs.kotlinx.serialization.json)
 
@@ -84,6 +87,8 @@ dependencies {
     implementation(libs.miuix)
     implementation(libs.miuix.preference)
     implementation(libs.miuix.icons)
+    // 背景动效用的 RuntimeShader 封装与混合模式（ui/effect 目录，0.9.3 与其它 Miuix 产物同版本）
+    implementation(libs.miuix.blur)
     implementation(libs.miuix.navigation3.ui)
 
     // Navigation 3：MainUI 的 NavDisplay + rememberDecoratedNavEntries

@@ -79,6 +79,13 @@
     <string name="settings_section_module">模块</string>
     <string name="module_enable_title">启用模块</string>
     <string name="module_enable_summary">关闭后不再接管蓝牙，恢复系统原生行为</string>
+    <!-- LSPosed 服务状态卡（模块页顶部）：服务连上 + 5 个作用域齐全 = 已激活 -->
+    <string name="lsposed_status_active">LSPosed 已激活</string>
+    <string name="lsposed_status_inactive">LSPosed 未激活</string>
+    <string name="lsposed_status_scope_incomplete">作用域不齐全</string>
+    <string name="lsposed_status_scopes_ok">作用域齐全（5/5）</string>
+    <string name="lsposed_status_waiting">等待 LSPosed 服务连接…</string>
+    <string name="lsposed_status_scopes_missing">请在 LSPosed 中勾选作用域：%1$s</string>
     <string name="settings_section_notification">通知</string>
     <!-- 通知栏显示：耳机状态在系统通知栏 / 蓝牙设置里的常驻显示（默认开） -->
     <string name="notification_display_title">通知栏显示</string>
@@ -106,6 +113,8 @@
     <!-- 快速弹窗 -->
     <string name="more_settings">更多设置</string>
     <string name="close">关闭</string>
+    <!-- 连接弹窗：底部按钮 -->
+    <string name="done">完成</string>
     <string name="quick_controls">快捷控制</string>
     <!-- 快捷控制折叠头：箭头指示器的无障碍文案 -->
     <string name="quick_controls_expand">展开快捷控制</string>
@@ -170,6 +179,7 @@
     <string name="info_android_version">Android 版本</string>
     <string name="info_system_version">系统版本</string>
     <string name="info_device_model">设备型号</string>
+    <string name="info_lsposed_version">LSPosed 版本</string>
 
     <!-- 关于页：项目主页 -->
     <string name="about_repo_title">项目主页</string>

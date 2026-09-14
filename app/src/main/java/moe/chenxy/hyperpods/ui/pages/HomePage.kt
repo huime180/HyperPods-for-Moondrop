@@ -8,10 +8,17 @@
  *   · 每块内容装在 miuix 的 Card 里，区块标题用 basic.SmallTitle
  *     （本项目原设置页就是这套词汇，见 ui/pages/SettingsPage.kt 的注释）。
  *
- * 参考实现那张「LSPosed 已激活 / 蓝牙作用域是否齐全」的状态卡没有搬：
- * 它依赖 XposedService（io.github.libxposed.service），而本项目的 libxposed api 是
- * compileOnly，应用进程拿不到该服务；凭空显示一个「已激活」反而会误导用户。
- * 这里只显示本项目确实能读到的模块级设置与构建信息。
+ * 参考实现那张「LSPosed 已激活 / 作用域是否齐全」的状态卡已经搬过来（本轮补齐）：
+ * 本项目原先只有 compileOnly 的 io.github.libxposed:api，应用进程绑定不到框架服务，
+ * 所以迟迟没做；现在依赖了 io.github.libxposed:service（同 102.0.0），由
+ * ui/XposedServiceState.kt 负责订阅并把「框架版本 + 已勾选作用域」交给这里渲染。
+ * 状态口径严格按事实：服务没连上就显示「未激活 / 等待连接」，
+ * 连上了但 5 个作用域没勾齐就显示缺失清单，绝不乐观地写「已激活」。
+ *
+ * 视觉上与参考实现的差异：参考实现是一张 112dp 高、带耳机图标与固定浅色底
+ * （#FFE5E3 / #DFFAE4）的大卡片；那两档写死的浅色在深色主题下会刺眼，
+ * 所以这里用本项目统一的 miuix Card + BasicComponent 只读行，
+ * 信息（激活状态 + 缺失作用域 + 框架版本）与参考实现一致。
  */
 package moe.chenxy.hyperpods.ui.pages
 
@@ -31,6 +38,10 @@ import moe.chenxy.hyperpods.R
 import moe.chenxy.hyperpods.core.MoondropModels
 import moe.chenxy.hyperpods.ui.ModuleSettingsState
 import moe.chenxy.hyperpods.ui.rememberModuleSettings
+import moe.chenxy.hyperpods.ui.LsposedScopeState
+import moe.chenxy.hyperpods.ui.lsposedScopeState
+import moe.chenxy.hyperpods.ui.lsposedVersionText
+import moe.chenxy.hyperpods.ui.rememberXposedService
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
@@ -61,6 +72,10 @@ fun HomePage(
         ?: 0
     val systemInfo = remember(context) { readSystemInfo(context) }
 
+    // LSPosed 服务：null = 框架服务还没连上（没装框架 / 模块没激活 / 绑定中）
+    val xposedService = rememberXposedService()
+    val lsposedState = remember(xposedService) { lsposedScopeState(xposedService) }
+
     LazyColumn(
         modifier = modifier.fillMaxSize().scrollEndHaptic(),
         contentPadding = PaddingValues(
@@ -71,6 +86,8 @@ fun HomePage(
         ),
         overscrollEffect = null,
     ) {
+        item { LsposedStatusCard(state = lsposedState) }
+
         item { SmallTitle(text = stringResource(R.string.settings_section_module)) }
 
         item {
@@ -173,8 +190,43 @@ fun HomePage(
                     title = stringResource(R.string.info_device_model),
                     summary = systemInfo.deviceModel,
                 )
+                BasicComponent(
+                    title = stringResource(R.string.info_lsposed_version),
+                    summary = lsposedVersionText(xposedService)
+                        .ifBlank { stringResource(R.string.unknown_value) },
+                )
             }
         }
+    }
+}
+
+/**
+ * 「LSPosed 已激活 / 作用域是否齐全」状态卡（对应参考实现 HomePage.kt:133-193 的 StatusCard）。
+ *
+ * 三档文案全部由事实推出：
+ *   ① 服务已连上且 5 个作用域齐全 → 已激活 / 作用域齐全；
+ *   ② 服务没连上           → 未激活 / 等待 LSPosed 服务连接；
+ *   ③ 服务连上了但缺作用域 → 作用域不齐全 / 列出缺的那几个。
+ */
+@Composable
+private fun LsposedStatusCard(state: LsposedScopeState) {
+    val title = when {
+        state.active -> stringResource(R.string.lsposed_status_active)
+        state.serviceConnected -> stringResource(R.string.lsposed_status_scope_incomplete)
+        else -> stringResource(R.string.lsposed_status_inactive)
+    }
+    val summary = when {
+        state.active -> stringResource(R.string.lsposed_status_scopes_ok)
+        !state.serviceConnected -> stringResource(R.string.lsposed_status_waiting)
+        else -> {
+            // map 是 inline 函数，因此这里可以在 lambda 里调用 @Composable 的 stringResource
+            val names = state.missingScopes.map { stringResource(it) }.joinToString(" · ")
+            stringResource(R.string.lsposed_status_scopes_missing, names)
+        }
+    }
+
+    Card {
+        BasicComponent(title = title, summary = summary)
     }
 }
 

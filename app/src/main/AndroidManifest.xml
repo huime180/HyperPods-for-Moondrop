@@ -47,6 +47,29 @@
         </activity>
 
         <!--
+          连接弹窗（ConnectionPopupActivity）：连上耳机时弹一次，显示设备名 + 三路电量后自动关闭。
+          由应用进程 / hook 启动，两种方式都行：
+            · 显式组件：moe.chenxy.hyperpods.ui.ConnectionPopupActivity（推荐，不依赖 action）；
+            · 隐式 action：chen.action.hyperpods.moondrop.show_connection_popup
+              （字符串值见该 Activity 的 ACTION_SHOW_CONNECTION_POPUP 常量）。
+          extras：status 或 batteryParams（Bundle，ControlBridge 的电量编码）+ device_name + dismiss_seconds。
+          复用 Popup 的半透明主题；taskAffinity="" + excludeFromRecents="true" 与 PopupActivity 一致。
+        -->
+        <activity
+            android:name=".ui.ConnectionPopupActivity"
+            android:theme="@style/Theme.HyperPodsMoondrop.Popup"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density|fontScale|uiMode|locale|layoutDirection|smallestScreenSize|colorMode">
+            <intent-filter>
+                <action android:name="chen.action.hyperpods.moondrop.show_connection_popup" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!--
           应用侧跨进程控制桥（pods/ControlBridge.kt）。
           由 manifest 声明，因此系统各进程用显式广播即可唤醒本应用进程处理控制命令，
           不要求用户先打开本应用。显式广播（setPackage）不受 Android 8+ 隐式广播限制。

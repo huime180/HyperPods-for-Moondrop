@@ -8,12 +8,16 @@
  *   · 可点的行用 basic.BasicComponent(title, summary, onClick) 直接开浏览器（同参考实现的
  *     项目主页跳转），只读的行不传 onClick。
  * 本项目自己的图标与版本号沿用改造前的写法（R.drawable.ic_launcher_foreground + BuildConfig）。
+ *
+ * 背景动效（ui/effect）：与参考实现同一处理——整页正文包在 BgEffectBackground 里，
+ * 自动开关（RuntimeShader 可用 + Android 版本够新），关掉时退化为普通 Box。
  */
 package moe.chenxy.hyperpods.ui.pages
 
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -23,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
@@ -34,9 +39,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import moe.chenxy.hyperpods.BuildConfig
 import moe.chenxy.hyperpods.R
+import moe.chenxy.hyperpods.ui.effect.BgEffectBackground
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
@@ -52,69 +59,81 @@ fun AboutPage(
 ) {
     val context = LocalContext.current
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize().scrollEndHaptic(),
-        contentPadding = PaddingValues(
-            top = contentPadding.calculateTopPadding() + SECTION_GAP,
-            bottom = contentPadding.calculateBottomPadding() + SECTION_GAP,
-            start = 12.dp,
-            end = 12.dp,
-        ),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        overscrollEffect = null,
+    // OS3 动态背景：需要 RuntimeShader 支持 + Android 16 (SDK 36) 及以上，纯自动启用
+    // （同参考实现 AboutPage.kt:28-33 的判定；不支持时 BgEffectBackground 退化成普通 Box）
+    val effectBackground = remember {
+        runCatching { isRuntimeShaderSupported() }.getOrDefault(false) &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM
+    }
+
+    BgEffectBackground(
+        dynamicBackground = effectBackground,
+        modifier = modifier.fillMaxSize(),
     ) {
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = SECTION_GAP),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Image(
-                    painter = painterResource(R.drawable.ic_launcher_foreground),
-                    contentDescription = stringResource(R.string.app_name),
-                    modifier = Modifier.size(72.dp),
-                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onBackground),
-                )
-                Text(
-                    text = stringResource(R.string.app_name),
-                    modifier = Modifier.padding(top = 8.dp),
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 22.sp,
-                )
-                Text(
-                    text = stringResource(R.string.about_version, BuildConfig.VERSION_NAME),
-                    modifier = Modifier.padding(top = 2.dp),
-                    color = MiuixTheme.colorScheme.onBackgroundVariant,
-                    fontSize = 13.sp,
-                )
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().scrollEndHaptic(),
+            contentPadding = PaddingValues(
+                top = contentPadding.calculateTopPadding() + SECTION_GAP,
+                bottom = contentPadding.calculateBottomPadding() + SECTION_GAP,
+                start = 12.dp,
+                end = 12.dp,
+            ),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            overscrollEffect = null,
+        ) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = SECTION_GAP),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.ic_launcher_foreground),
+                        contentDescription = stringResource(R.string.app_name),
+                        modifier = Modifier.size(72.dp),
+                        colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onBackground),
+                    )
+                    Text(
+                        text = stringResource(R.string.app_name),
+                        modifier = Modifier.padding(top = 8.dp),
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 22.sp,
+                    )
+                    Text(
+                        text = stringResource(R.string.about_version, BuildConfig.VERSION_NAME),
+                        modifier = Modifier.padding(top = 2.dp),
+                        color = MiuixTheme.colorScheme.onBackgroundVariant,
+                        fontSize = 13.sp,
+                    )
+                }
             }
-        }
 
-        item { SmallTitle(text = stringResource(R.string.about)) }
+            item { SmallTitle(text = stringResource(R.string.about)) }
 
-        item {
-            Card {
-                BasicComponent(
-                    title = stringResource(R.string.about_credits_title),
-                    summary = stringResource(R.string.about_credits_summary),
-                )
-                BasicComponent(
-                    title = stringResource(R.string.about_license_title),
-                    summary = stringResource(R.string.about_license_value),
-                )
+            item {
+                Card {
+                    BasicComponent(
+                        title = stringResource(R.string.about_credits_title),
+                        summary = stringResource(R.string.about_credits_summary),
+                    )
+                    BasicComponent(
+                        title = stringResource(R.string.about_license_title),
+                        summary = stringResource(R.string.about_license_value),
+                    )
+                }
             }
-        }
 
-        item {
-            Card(modifier = Modifier.padding(top = SECTION_GAP)) {
-                BasicComponent(
-                    title = stringResource(R.string.about_repo_title),
-                    summary = stringResource(R.string.about_repo_url),
-                    onClick = {
-                        openUrl(context, context.getString(R.string.about_repo_url))
-                    },
-                )
+            item {
+                Card(modifier = Modifier.padding(top = SECTION_GAP)) {
+                    BasicComponent(
+                        title = stringResource(R.string.about_repo_title),
+                        summary = stringResource(R.string.about_repo_url),
+                        onClick = {
+                            openUrl(context, context.getString(R.string.about_repo_url))
+                        },
+                    )
+                }
             }
         }
     }

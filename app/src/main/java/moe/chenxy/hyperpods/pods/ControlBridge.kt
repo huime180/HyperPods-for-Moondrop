@@ -65,6 +65,12 @@ object ControlBridge {
     @Volatile private var initialized = false
     @Volatile private var connectedDevice: BluetoothDevice? = null
     @Volatile private var appContext: Context? = null
+    /**
+     * 本次连接是否已经弹过「连接弹窗」。参照实现是在**首次拿到有效电量**时弹
+     * （pods/RfcommController.kt:653 用 mShowedConnectedToast 守卫），
+     * 这里同样守卫，并在连接/断开时复位 —— 避免每次电量刷新都弹一次。
+     */
+    @Volatile private var connectionPopupShown = false
 
     /** 动态注册的编码接收器（见 registerCodecReceiver 的说明；非空即已注册）。 */
     @Volatile private var codecReceiver: BroadcastReceiver? = null
@@ -92,12 +98,14 @@ object ControlBridge {
         when (action) {
             // 蓝牙进程告知连接状态
             HyperPodsAction.PODS_CONNECTED -> {
+                connectionPopupShown = false
                 val mac = intent.getStringExtra(HyperPodsAction.EXTRA_MAC)
                 val name = intent.getStringExtra(HyperPodsAction.EXTRA_DEVICE_NAME)
                 Log.i(TAG, "PODS_CONNECTED name=$name mac=$mac")
                 onConnected(context, mac, name)
             }
             HyperPodsAction.PODS_DISCONNECTED -> {
+                connectionPopupShown = false
                 MoondropLink.disconnect()
                 connectedDevice = null
                 cancelNotification(context)
@@ -265,9 +273,11 @@ object ControlBridge {
                     pushAnc(ctx, snap)
                     pushBattery(ctx, snap.battery)
                     pushNotification(ctx, snap)
+                    maybeShowConnectionPopup(ctx, snap.battery.anyKnown)
                 }
                 is PodEvent.BatteryChanged -> {
                     pushBattery(ctx, event.battery)
+                    maybeShowConnectionPopup(ctx, event.battery.anyKnown)
                     MoondropLink.snapshot().takeIf { it.connected }?.let { pushNotification(ctx, it) }
                 }
                 is PodEvent.AncChanged ->
@@ -337,6 +347,21 @@ object ControlBridge {
             it.putExtra(HyperPodsAction.EXTRA_DEVICE, connectedDevice)
             it.putExtra(HyperPodsAction.EXTRA_MAC, connectedDevice?.address)
         }
+    }
+
+    /**
+     * 首次拿到有效电量时弹出「连接弹窗」（参照实现的做法）。
+     * 弹窗自己监听 BATTERY_CHANGED 刷新，所以启动时不需要带电量 Bundle。
+     */
+    private fun maybeShowConnectionPopup(context: Context, batteryKnown: Boolean) {
+        if (connectionPopupShown || !batteryKnown) return
+        connectionPopupShown = true
+        runCatching {
+            context.startActivity(
+                Intent(context, moe.chenxy.hyperpods.ui.ConnectionPopupActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            )
+        }.onFailure { Log.w(TAG, "connection popup launch failed: ${it.message}") }
     }
 
     private fun pushNotification(context: Context, snap: PodSnapshot) {

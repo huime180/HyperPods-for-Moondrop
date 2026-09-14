@@ -79,6 +79,13 @@
     <string name="settings_section_module">Module</string>
     <string name="module_enable_title">Enable module</string>
     <string name="module_enable_summary">Turning this off leaves bluetooth to the stock behaviour</string>
+    <!-- LSPosed 服务状态卡（模块页顶部）：服务连上 + 5 个作用域齐全 = 已激活 -->
+    <string name="lsposed_status_active">LSPosed activated</string>
+    <string name="lsposed_status_inactive">LSPosed not activated</string>
+    <string name="lsposed_status_scope_incomplete">Module scope incomplete</string>
+    <string name="lsposed_status_scopes_ok">All 5 required scopes are enabled</string>
+    <string name="lsposed_status_waiting">Waiting for the LSPosed service…</string>
+    <string name="lsposed_status_scopes_missing">Enable these scopes in LSPosed: %1$s</string>
     <string name="settings_section_notification">Notifications</string>
     <!-- 通知栏显示：耳机状态在系统通知栏 / 蓝牙设置里的常驻显示（默认开） -->
     <string name="notification_display_title">Notification display</string>
@@ -106,6 +113,8 @@
     <!-- popup -->
     <string name="more_settings">More settings</string>
     <string name="close">Close</string>
+    <!-- connection popup: bottom button -->
+    <string name="done">Done</string>
     <string name="quick_controls">Quick controls</string>
     <!-- quick controls collapsible header: chevron accessibility text -->
     <string name="quick_controls_expand">Expand quick controls</string>
@@ -170,6 +179,7 @@
     <string name="info_android_version">Android version</string>
     <string name="info_system_version">System version</string>
     <string name="info_device_model">Device model</string>
+    <string name="info_lsposed_version">LSPosed version</string>
 
     <!-- 关于页：项目主页 -->
     <string name="about_repo_title">Project home</string>
