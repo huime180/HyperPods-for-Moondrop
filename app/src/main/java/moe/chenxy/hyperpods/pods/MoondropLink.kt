@@ -1007,19 +1007,21 @@ object MoondropLink {
                 return@launch
             }
             var next = Gaia.GestureConf(current.copyOf()).with(slot, ear, actionId)
-            // 长按 1 秒 / 3 秒 **互斥**：设备上二者不能同时生效（按住 3 秒必然也满足 1 秒的
-            // 触发条件），所以把其中一个设成非「无」时，另一个整体清空为「无」。
-            // 这是设备/官方 App 的实际行为（用户实测确认），不是本项目的取舍。
-            if (actionId != Gaia.TOUCH_ACTION_NONE) {
-                next = when (slot) {
-                    Gaia.GestureSlot.LONG_PRESS_1S ->
-                        next.with(Gaia.GestureSlot.LONG_PRESS_3S, Gaia.Ear.LEFT, Gaia.TOUCH_ACTION_NONE)
-                            .with(Gaia.GestureSlot.LONG_PRESS_3S, Gaia.Ear.RIGHT, Gaia.TOUCH_ACTION_NONE)
-                    Gaia.GestureSlot.LONG_PRESS_3S ->
-                        next.with(Gaia.GestureSlot.LONG_PRESS_1S, Gaia.Ear.LEFT, Gaia.TOUCH_ACTION_NONE)
-                            .with(Gaia.GestureSlot.LONG_PRESS_1S, Gaia.Ear.RIGHT, Gaia.TOUCH_ACTION_NONE)
-                    else -> next
-                }
+            // 长按 1 秒 / 3 秒 **同侧互斥**：同一只耳朵上两档不能共存（按住 3 秒必然也满足
+            // 1 秒的触发条件，两条同时配时设备行为不确定），所以把某一个设成非「无」时，
+            // 只把**这只耳**的另一档清成「无」—— 另一只耳的长按配置不受影响。
+            // 与 dev 侧 pods/moondrop/MoondropController.setGesture 的同一条规则一致。
+            // 只有长按这一对有互斥关系；单击/双击/三击之间没有，别顺手扩大。
+            val counterpart = when (slot) {
+                Gaia.GestureSlot.LONG_PRESS_1S -> Gaia.GestureSlot.LONG_PRESS_3S
+                Gaia.GestureSlot.LONG_PRESS_3S -> Gaia.GestureSlot.LONG_PRESS_1S
+                else -> null
+            }
+            if (counterpart != null && actionId != Gaia.TOUCH_ACTION_NONE &&
+                next.action(counterpart, ear) != Gaia.TOUCH_ACTION_NONE
+            ) {
+                next = next.with(counterpart, ear, Gaia.TOUCH_ACTION_NONE)
+                Log.i(TAG, "setGesture: 同侧互斥 -> ${ear.labelZh} 的 ${counterpart.labelZh} 自动置空")
             }
             Log.i(
                 TAG,

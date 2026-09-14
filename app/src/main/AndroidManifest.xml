@@ -4,6 +4,14 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!--
+        连接弹窗要在应用**没有可见界面**时弹出（耳机连上时由 pods/BluetoothConnectReceiver.kt
+        唤醒进程），而 Android 10 起禁止后台启动 Activity（BAL）。不依赖厂商 ROM 的豁免只有
+        「显示在其他应用上层」（SYSTEM_ALERT_WINDOW）这一个，因此必须声明；
+        HyperOS 上系统设置同一页里还有 MIUI 自己的「后台弹出界面」，两个都开才稳。
+        这是特殊权限，只能在系统设置里由用户手动开启 —— 设置页提供了跳转入口。
+    -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:allowBackup="false"

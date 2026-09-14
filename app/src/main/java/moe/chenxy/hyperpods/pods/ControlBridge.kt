@@ -27,6 +27,7 @@ import android.os.Looper
 import android.util.Log
 import moe.chenxy.hyperpods.ui.ConnectionPopupActivity
 import moe.chenxy.hyperpods.ui.MODULE_PREFS_GROUP
+import moe.chenxy.hyperpods.ui.canStartActivityFromBackground
 import moe.chenxy.hyperpods.utils.data.HyperPodsPrefsKey
 import moe.chenxy.hyperpods.utils.data.HyperPodsAction
 
@@ -155,6 +156,14 @@ object ControlBridge {
     private fun launchConnectionPopup(context: Context) {
         val snapshot = MoondropLink.snapshot()
         if (!snapshot.connected || !snapshot.battery.anyKnown) return
+        // 后台启动 Activity 被系统拦掉时是**静默**的（不抛异常、不弹窗），所以这里先留一条
+        // 日志指明原因；是否放行由系统决定，因此判断结果不影响下面的启动尝试。
+        if (!canStartActivityFromBackground(context)) {
+            Log.w(
+                TAG,
+                "connection popup may be blocked by BAL: 缺「显示在其他应用上层」/「后台弹出界面」权限",
+            )
+        }
         runCatching {
             context.startActivity(
                 Intent(context, ConnectionPopupActivity::class.java)

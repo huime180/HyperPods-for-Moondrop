@@ -36,6 +36,8 @@ import moe.chenxy.hyperpods.R
 import moe.chenxy.hyperpods.pods.PodNotification
 import moe.chenxy.hyperpods.ui.ModuleSettingsState
 import moe.chenxy.hyperpods.ui.rememberModuleSettings
+import moe.chenxy.hyperpods.ui.canStartActivityFromBackground
+import moe.chenxy.hyperpods.ui.openBackgroundPopupPermissionSettings
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
@@ -114,7 +116,19 @@ fun SettingsPage(
                     title = stringResource(R.string.connect_popup_title),
                     summary = stringResource(R.string.connect_popup_summary),
                     checked = settings.autoPopupOnConnect,
-                    onCheckedChange = { settings.setAutoPopupOnConnect(it) },
+                    onCheckedChange = { checked ->
+                        settings.setAutoPopupOnConnect(checked)
+                        // 打开开关时若还缺「后台弹出」权限就直接带去授权页：否则用户把开关
+                        // 打开了却什么都不会发生（后台启动被系统静默拦掉，最难排查的一种）。
+                        if (checked && !canStartActivityFromBackground(context)) {
+                            openBackgroundPopupPermissionSettings(context)
+                        }
+                    },
+                )
+                ArrowPreference(
+                    title = stringResource(R.string.bg_popup_permission_title),
+                    summary = stringResource(R.string.bg_popup_permission_summary),
+                    onClick = { openBackgroundPopupPermissionSettings(context) },
                 )
             }
         }

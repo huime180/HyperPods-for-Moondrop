@@ -19,8 +19,9 @@
  *   2) `8..15` 未观测到：这种值不会被静默吞掉或回落成「无」，而是单列一条 `未知(0xN)` 选项
  *      （Gaia.TouchActions.matchOrUnknown）。
  *   3) 长按1秒 / 长按3秒是协议上**两个独立字节**（字节码里 onesL/onesR 与 threesL/threesR
- *      两组独立字段），设备行为上互斥：把其中一个设为「无」以外的动作时，另一个会被清空为
- *      「无」。该规则已在 pods/MoondropLink.kt 的 setGesture 里实现。
+ *      两组独立字段），设备行为上**同侧**互斥：把某一侧的长按1秒设为「无」以外的动作时，
+ *      只把**同一只耳**的长按3秒清空为「无」（另一只耳不受影响），反之亦然。
+ *      该规则已在 pods/MoondropLink.kt 的 setGesture 里实现。
  *   4) **没有「重置」按钮**：没有已知的重置命令，就不发明一个（宁缺毋滥）。
  */
 package moe.chenxy.hyperpods.ui
