@@ -132,7 +132,9 @@ fun DevicePickerPage(
         if (!hasPermission || !bluetoothEnabled) {
             emptyList()
         } else {
-            runCatching { adapter?.bondedDevices?.toList() }.getOrDefault(emptyList())
+            // getOrDefault 在这里会推出 List<BluetoothDevice>?（adapter/bondedDevices 都可空），
+            // 于是下面的 .filter 报 "nullable receiver" —— CI 实测错误。用 getOrNull().orEmpty() 归一。
+            runCatching { adapter?.bondedDevices?.toList() }.getOrNull().orEmpty()
                 // 只列水月雨耳机（与 ui/PodState.kt 冷启动兜底同一套匹配）
                 .filter { MoondropModels.match(it.name) != null }
                 .sortedBy { it.name.orEmpty() }
