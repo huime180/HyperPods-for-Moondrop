@@ -13,10 +13,20 @@
  *
  * 页签选择状态刻意放在 MainUI（NavDisplay 之外）而不是页签内部：
  * 这样从「设置」进「关于」再返回时，仍然停在「设置」页签上，不会被重置成第一个页签。
+ *
+ * 模块页两张状态卡要的数据也都由这里持有并往下传（同参考实现 MainUI.kt:121-132 与 554-559）：
+ *   · LSPosed 服务          -> ui/XposedServiceState.kt 的 rememberXposedService()
+ *   · 蓝牙开关 / 已配对数量 -> ui/BluetoothStatus.kt 的 rememberBluetoothStatus()
+ *   · 蓝牙进程是否在响应    -> ui/BluetoothStatus.kt 的 rememberBluetoothServiceResponsive()
+ * 以及「配对蓝牙」卡片要的 showDevicePicker（同参考实现 MainUI.kt:123、468-471）。
  */
 package moe.chenxy.hyperpods.ui
 
 import android.app.Activity
+import android.bluetooth.BluetoothAdapter
+import android.content.Intent
+import android.provider.Settings
+import android.widget.Toast
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -64,10 +74,18 @@ fun MainUI(
     val context = LocalContext.current
     val snapshot = rememberPodSnapshot()
     val settings = rememberModuleSettings()
+    // LSPosed 框架服务（模块页状态卡的「是否已激活」）与应用进程绑定一次，全 UI 共用
+    val xposedService = rememberXposedService()
+    // 模块页两张统计卡：蓝牙开关 + 已配对设备数（读 BluetoothAdapter）
+    val bluetoothStatus = rememberBluetoothStatus()
+    // 模块页状态卡：蓝牙进程里的模块是否还在响应（真实广播 + 75s 窗口，见 ui/BluetoothStatus.kt）
+    val bluetoothServiceResponsive = rememberBluetoothServiceResponsive(snapshot.connected)
     val backStack = remember { mutableStateListOf<Screen>(Screen.Main) }
     val tabs = remember { MainTab.entries.toList() }
     var selectedTab by remember { mutableStateOf(MainTab.Module) }
     var hasAppliedDefaultTab by remember { mutableStateOf(false) }
+    // 「配对蓝牙」卡片 -> 强制显示耳机页的设备选择页（同参考实现 MainUI.kt:123 的 showDevicePicker）
+    var showDevicePicker by remember { mutableStateOf(false) }
     // 「重启作用域」确认框状态：模块页右上角图标 / 设置页的入口都只调 request()，
     // 弹框里勾选作用域并再确认一次才执行（状态由 MainUI 持有，两个页签共用同一个弹框）。
     val restartScope = rememberRestartScopeState()
@@ -89,6 +107,33 @@ fun MainUI(
                 onTabSelected = { selectedTab = it },
                 snapshot = snapshot,
                 settings = settings,
+                xposedService = xposedService,
+                bluetoothServiceResponsive = bluetoothServiceResponsive,
+                bluetoothStatus = bluetoothStatus,
+                // 「蓝牙状态」卡片：开着就去系统蓝牙设置，关着就先请求打开（同参考实现 :459-466）
+                onBluetoothStatusClick = {
+                    val action = if (bluetoothStatus.enabled) {
+                        Settings.ACTION_BLUETOOTH_SETTINGS
+                    } else {
+                        BluetoothAdapter.ACTION_REQUEST_ENABLE
+                    }
+                    val intent = Intent(action).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                    runCatching { context.startActivity(intent) }
+                        .onFailure {
+                            Toast.makeText(
+                                context,
+                                R.string.open_bluetooth_settings_failed,
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                },
+                // 「配对蓝牙」卡片：去耳机页的已配对设备列表（同参考实现 :468-471 的 openDevicePicker）
+                onPairedBluetoothClick = {
+                    showDevicePicker = true
+                    selectedTab = MainTab.Earphones
+                },
+                showDevicePicker = showDevicePicker,
+                onExitDevicePicker = { showDevicePicker = false },
                 themeMode = themeMode,
                 onThemeModeChange = onThemeModeChange,
                 restartScope = restartScope,

@@ -17,6 +17,9 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
+        // 模块页「构建时间」一行：与参考实现 moondrop-pods 的 app/build.gradle.kts:30 同一写法
+        // （配置期取一次当前时间，编进 BuildConfig.BUILD_TIMESTAMP）。删掉这一行即可回退。
+        buildConfigField("long", "BUILD_TIMESTAMP", System.currentTimeMillis().toString())
     }
 
     buildTypes {

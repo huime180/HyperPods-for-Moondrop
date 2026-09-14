@@ -1,257 +1,397 @@
 /*
- * HyperPods for Moondrop — 模块页内容（底部导航第一个页签）
+ * HyperPods for Moondrop — 模块页内容（底部导航第一个页签，纯状态页）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * 版式对齐参考实现 moondrop-pods 的 ui/pages/HomePage.kt:44-264：
- *   · 顶层是 androidx 的 LazyColumn，12dp 左右的左右留白，块间距 12dp；
- *   · 底部一张只读的「系统信息」卡（参考实现叫 InfoCard），条目用 basic.BasicComponent；
- *   · 每块内容装在 miuix 的 Card 里，区块标题用 basic.SmallTitle
- *     （本项目原设置页就是这套词汇，见 ui/pages/SettingsPage.kt 的注释）。
+ * 本文件逐块复刻参考实现 moondrop-pods 的 ui/pages/HomePage.kt，只把数据线接到本项目：
+ *   · StatusGrid（参考 :92-130）——左边一张 StatusCard（LSPosed 激活状态 + 蓝牙进程是否在响应），
+ *     右边两张可点的 StatCard（蓝牙状态 / 配对蓝牙）。版式按参考原样分两档：
+ *     窄屏是「StatusCard 1:1 + 右侧一列两张 1:1」，宽屏（>= 600dp）是三张等宽 112dp 的横排。
+ *   · InfoCard（参考 :236-264）——只读六行：系统版本 / 应用版本 / Android 版本 /
+ *     LSPosed 版本 / 构建时间 / 设备型号。字号取参考同款 MiuixTheme.textStyles
+ *     （headline1 = 17sp 标题、body2 = 14sp 内容）。
  *
- * 参考实现那张「LSPosed 已激活 / 作用域是否齐全」的状态卡已经搬过来（本轮补齐）：
- * 本项目原先只有 compileOnly 的 io.github.libxposed:api，应用进程绑定不到框架服务，
- * 所以迟迟没做；现在依赖了 io.github.libxposed:service（同 102.0.0），由
- * ui/XposedServiceState.kt 负责订阅并把「框架版本 + 已勾选作用域」交给这里渲染。
- * 状态口径严格按事实：服务没连上就显示「未激活 / 等待连接」，
- * 连上了但 5 个作用域没勾齐就显示缺失清单，绝不乐观地写「已激活」。
+ * 模块级开关（启用 / 通知栏显示 / 强提示 / 超级岛 / 型号 / 调试）本轮已全部搬到设置页
+ * （ui/pages/SettingsPage.kt），本页只负责「看状态」，与参考实现的模块页职责一致。
  *
- * 视觉上与参考实现的差异：参考实现是一张 112dp 高、带耳机图标与固定浅色底
- * （#FFE5E3 / #DFFAE4）的大卡片；那两档写死的浅色在深色主题下会刺眼，
- * 所以这里用本项目统一的 miuix Card + BasicComponent 只读行，
- * 信息（激活状态 + 缺失作用域 + 框架版本）与参考实现一致。
+ * 数据来源（全部是真实读数，没有任何写死的假值）：
+ *   · LSPosed 激活状态 + 缺失作用域 —— ui/XposedServiceState.kt（同一份订阅 + 缺失清单）；
+ *   · 蓝牙开关 / 已配对设备数 —— BluetoothAdapter（权限门控，同参考 readBluetoothState）；
+ *   · 蓝牙进程是否在响应 —— ui/BluetoothStatus.kt（真实广播 + 75s 窗口，见该文件 KDoc 里的差异说明）；
+ *   · 应用版本 —— BuildConfig.VERSION_NAME/VERSION_CODE；
+ *     Android 版本 —— Build.VERSION.RELEASE + SDK_INT；
+ *     系统版本 —— Build.DISPLAY；
+ *     构建时间 —— BuildConfig.BUILD_TIMESTAMP（app/build.gradle.kts 配置期生成，同参考 :30）；
+ *     设备型号 —— Build.MANUFACTURER + Build.MODEL。
  */
 package moe.chenxy.hyperpods.ui.pages
 
 import android.content.Context
 import android.os.Build
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import io.github.libxposed.service.XposedService
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import moe.chenxy.hyperpods.BuildConfig
 import moe.chenxy.hyperpods.R
-import moe.chenxy.hyperpods.core.MoondropModels
-import moe.chenxy.hyperpods.ui.ModuleSettingsState
-import moe.chenxy.hyperpods.ui.rememberModuleSettings
-import moe.chenxy.hyperpods.ui.LsposedScopeState
+import moe.chenxy.hyperpods.ui.components.AppIcons
 import moe.chenxy.hyperpods.ui.lsposedScopeState
 import moe.chenxy.hyperpods.ui.lsposedVersionText
-import moe.chenxy.hyperpods.ui.rememberXposedService
-import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
-import top.yukonga.miuix.kmp.preference.SwitchPreference
-import top.yukonga.miuix.kmp.utils.scrollEndHaptic
-
-/** 卡片/区块之间的统一间距（与本项目其它页面一致）。 */
-private val SECTION_GAP = 12.dp
+import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 /**
- * 模块页：模块总开关、通知显示、型号识别、调试日志，以及只读的系统信息。
+ * 模块页（纯状态）。
  *
- * 这些开关就是原先设置页里的「模块」一组，只是按页签重新分组；读写仍走
- * [ModuleSettingsState]（键来自 utils/data/HyperPodsPrefsKey.kt）。
+ * @param xposedService LSPosed 框架服务；null = 没连上（没装框架 / 模块没激活 / 正在绑定）
+ * @param bluetoothServiceResponsive 蓝牙进程里的模块最近是否回过话（ui/BluetoothStatus.kt）
+ * @param bluetoothEnabled 蓝牙是否已开启（读 BluetoothAdapter）
+ * @param bondedDeviceCount 已配对设备数（读 BluetoothAdapter）
+ * @param onBluetoothStatusClick 「蓝牙状态」卡片 → 打开系统蓝牙设置（蓝牙关着时先请求打开）
+ * @param onPairedBluetoothClick 「配对蓝牙」卡片 → 已配对设备选择页
  */
 @Composable
 fun HomePage(
-    settings: ModuleSettingsState = rememberModuleSettings(),
+    xposedService: XposedService?,
+    bluetoothServiceResponsive: Boolean,
+    bluetoothEnabled: Boolean,
+    bondedDeviceCount: Int,
+    onBluetoothStatusClick: () -> Unit,
+    onPairedBluetoothClick: () -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
+    bottomContentPadding: Dp = 16.dp,
 ) {
     val context = LocalContext.current
-    val models = MoondropModels.MODELS
-    val modelNames = remember(models) { models.map { it.nameZh } }
-    val modelSelectedIndex = models.indexOfFirst { it.id == settings.modelId }
-        .takeIf { it >= 0 }
-        ?: 0
-    val systemInfo = remember(context) { readSystemInfo(context) }
-
-    // LSPosed 服务：null = 框架服务还没连上（没装框架 / 模块没激活 / 绑定中）
-    val xposedService = rememberXposedService()
+    val systemInfo = remember(context) { homeSystemInfo(context) }
     val lsposedState = remember(xposedService) { lsposedScopeState(xposedService) }
+    val active = lsposedState.active
+    val inactiveSummary = if (xposedService == null) {
+        stringResource(R.string.lsposed_status_waiting)
+    } else {
+        // 服务连上了但作用域没勾齐：把缺的那几个列出来（map 是 inline，可以在 lambda 里调 stringResource）
+        val names = lsposedState.missingScopes.map { stringResource(it) }.joinToString(" · ")
+        stringResource(R.string.lsposed_status_scopes_missing, names)
+    }
 
     LazyColumn(
-        modifier = modifier.fillMaxSize().scrollEndHaptic(),
+        modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(
-            top = contentPadding.calculateTopPadding() + SECTION_GAP,
-            bottom = contentPadding.calculateBottomPadding() + SECTION_GAP,
             start = 12.dp,
+            top = contentPadding.calculateTopPadding() + 12.dp,
             end = 12.dp,
+            bottom = bottomContentPadding,
         ),
-        overscrollEffect = null,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { LsposedStatusCard(state = lsposedState) }
-
-        item { SmallTitle(text = stringResource(R.string.settings_section_module)) }
-
         item {
-            Card {
-                SwitchPreference(
-                    title = stringResource(R.string.module_enable_title),
-                    summary = stringResource(R.string.module_enable_summary),
-                    checked = settings.enabled,
-                    onCheckedChange = { settings.setEnabled(it) },
+            StatusGrid(
+                serviceConnected = lsposedState.serviceConnected,
+                active = active,
+                inactiveSummary = inactiveSummary,
+                bluetoothServiceResponsive = bluetoothServiceResponsive,
+                bluetoothEnabled = bluetoothEnabled,
+                bondedDeviceCount = bondedDeviceCount,
+                onBluetoothStatusClick = onBluetoothStatusClick,
+                onPairedBluetoothClick = onPairedBluetoothClick,
+            )
+        }
+        item {
+            InfoCard(systemInfo = systemInfo, xposedService = xposedService)
+        }
+    }
+}
+
+/** 状态卡 + 两张统计卡；宽屏横排三张，窄屏左侧一张 1:1、右侧一列两张 1:1（同参考 :102-130）。 */
+@Composable
+private fun StatusGrid(
+    serviceConnected: Boolean,
+    active: Boolean,
+    inactiveSummary: String,
+    bluetoothServiceResponsive: Boolean,
+    bluetoothEnabled: Boolean,
+    bondedDeviceCount: Int,
+    onBluetoothStatusClick: () -> Unit,
+    onPairedBluetoothClick: () -> Unit,
+) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        if (maxWidth >= 600.dp) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StatusCard(
+                    serviceConnected = serviceConnected,
+                    active = active,
+                    inactiveSummary = inactiveSummary,
+                    bluetoothServiceResponsive = bluetoothServiceResponsive,
+                    modifier = Modifier.weight(1f).height(112.dp),
+                )
+                StatCard(
+                    title = stringResource(R.string.home_stat_bluetooth_status),
+                    value = if (bluetoothEnabled) {
+                        stringResource(R.string.home_stat_bluetooth_on)
+                    } else {
+                        stringResource(R.string.home_stat_bluetooth_off)
+                    },
+                    modifier = Modifier.weight(1f).height(112.dp),
+                    onClick = onBluetoothStatusClick,
+                )
+                StatCard(
+                    title = stringResource(R.string.home_stat_paired_bluetooth),
+                    value = bondedDeviceCount.toString(),
+                    modifier = Modifier.weight(1f).height(112.dp),
+                    onClick = onPairedBluetoothClick,
                 )
             }
-        }
-
-        item { SmallTitle(text = stringResource(R.string.settings_section_notification)) }
-
-        item {
-            Card {
-                // 「通知栏显示」：默认开；值落到 hyperpods_moondrop_settings 组的
-                // HyperPodsPrefsKey.SHOW_NOTIFICATION，hook 侧经 getRemotePreferences(同组名) 读取。
-                SwitchPreference(
-                    title = stringResource(R.string.notification_display_title),
-                    summary = stringResource(R.string.notification_display_summary),
-                    checked = settings.showNotification,
-                    onCheckedChange = { settings.setShowNotification(it) },
-                    enabled = settings.enabled,
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StatusCard(
+                    serviceConnected = serviceConnected,
+                    active = active,
+                    inactiveSummary = inactiveSummary,
+                    bluetoothServiceResponsive = bluetoothServiceResponsive,
+                    modifier = Modifier.weight(1f).aspectRatio(1f),
                 )
-                SwitchPreference(
-                    title = stringResource(R.string.show_strong_toast_title),
-                    summary = stringResource(R.string.show_strong_toast_summary),
-                    checked = settings.showStrongToast,
-                    onCheckedChange = { settings.setShowStrongToast(it) },
-                    enabled = settings.enabled,
-                )
-                SwitchPreference(
-                    title = stringResource(R.string.show_focus_island_title),
-                    summary = stringResource(R.string.show_focus_island_summary),
-                    checked = settings.showFocusIsland,
-                    onCheckedChange = { settings.setShowFocusIsland(it) },
-                    enabled = settings.enabled,
-                )
-            }
-        }
-
-        item { SmallTitle(text = stringResource(R.string.settings_section_model)) }
-
-        item {
-            Card {
-                SwitchPreference(
-                    title = stringResource(R.string.model_auto_title),
-                    summary = stringResource(R.string.model_auto_summary),
-                    checked = settings.modelAuto,
-                    onCheckedChange = { settings.setModelAuto(it) },
-                    enabled = settings.enabled,
-                )
-                if (modelNames.isNotEmpty()) {
-                    OverlayDropdownPreference(
-                        title = stringResource(R.string.model_manual_title),
-                        items = modelNames,
-                        selectedIndex = modelSelectedIndex,
-                        onSelectedIndexChange = { index ->
-                            models.getOrNull(index)?.let { settings.setModelId(it.id) }
+                Column(
+                    modifier = Modifier.weight(1f).aspectRatio(1f),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    StatCard(
+                        title = stringResource(R.string.home_stat_bluetooth_status),
+                        value = if (bluetoothEnabled) {
+                            stringResource(R.string.home_stat_bluetooth_on)
+                        } else {
+                            stringResource(R.string.home_stat_bluetooth_off)
                         },
-                        enabled = settings.enabled && !settings.modelAuto,
+                        modifier = Modifier.weight(1f),
+                        onClick = onBluetoothStatusClick,
+                    )
+                    StatCard(
+                        title = stringResource(R.string.home_stat_paired_bluetooth),
+                        value = bondedDeviceCount.toString(),
+                        modifier = Modifier.weight(1f),
+                        onClick = onPairedBluetoothClick,
                     )
                 }
             }
         }
-
-        item { SmallTitle(text = stringResource(R.string.settings_section_debug)) }
-
-        item {
-            Card {
-                SwitchPreference(
-                    title = stringResource(R.string.debug_log_title),
-                    summary = stringResource(R.string.debug_log_summary),
-                    checked = settings.debugLog,
-                    onCheckedChange = { settings.setDebugLog(it) },
-                    enabled = settings.enabled,
-                )
-            }
-        }
-
-        item { SmallTitle(text = stringResource(R.string.settings_section_system)) }
-
-        item {
-            Card {
-                BasicComponent(
-                    title = stringResource(R.string.info_app_version),
-                    summary = systemInfo.appVersion,
-                )
-                BasicComponent(
-                    title = stringResource(R.string.info_android_version),
-                    summary = systemInfo.androidVersion,
-                )
-                BasicComponent(
-                    title = stringResource(R.string.info_system_version),
-                    summary = systemInfo.systemVersion,
-                )
-                BasicComponent(
-                    title = stringResource(R.string.info_device_model),
-                    summary = systemInfo.deviceModel,
-                )
-                BasicComponent(
-                    title = stringResource(R.string.info_lsposed_version),
-                    summary = lsposedVersionText(xposedService)
-                        .ifBlank { stringResource(R.string.unknown_value) },
-                )
-            }
-        }
     }
 }
 
 /**
- * 「LSPosed 已激活 / 作用域是否齐全」状态卡（对应参考实现 HomePage.kt:133-193 的 StatusCard）。
- *
- * 三档文案全部由事实推出：
- *   ① 服务已连上且 5 个作用域齐全 → 已激活 / 作用域齐全；
- *   ② 服务没连上           → 未激活 / 等待 LSPosed 服务连接；
- *   ③ 服务连上了但缺作用域 → 作用域不齐全 / 列出缺的那几个。
+ * 模块状态卡（同参考 :133-193 的 StatusCard，配色与图标位置原样照搬）：
+ *   ① 服务没连上 -> 红「LSPosed 未激活」；
+ *   ② 服务连上但作用域没勾齐 -> 红「作用域不齐全」+ 缺哪几个；
+ *   ③ 作用域齐全但蓝牙进程 75s 没响应 -> 橙「模块服务超时」；
+ *   ④ 都正常 -> 绿「LSPosed 已激活」。
  */
 @Composable
-private fun LsposedStatusCard(state: LsposedScopeState) {
-    val title = when {
-        state.active -> stringResource(R.string.lsposed_status_active)
-        state.serviceConnected -> stringResource(R.string.lsposed_status_scope_incomplete)
-        else -> stringResource(R.string.lsposed_status_inactive)
+private fun StatusCard(
+    serviceConnected: Boolean,
+    active: Boolean,
+    inactiveSummary: String,
+    bluetoothServiceResponsive: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val serviceTimeout = active && !bluetoothServiceResponsive
+    val statusColor = when {
+        !active -> Color(0xFFFF5A52)
+        serviceTimeout -> Color(0xFFFF9F0A)
+        else -> Color(0xFF36D167)
     }
-    val summary = when {
-        state.active -> stringResource(R.string.lsposed_status_scopes_ok)
-        !state.serviceConnected -> stringResource(R.string.lsposed_status_waiting)
-        else -> {
-            // map 是 inline 函数，因此这里可以在 lambda 里调用 @Composable 的 stringResource
-            val names = state.missingScopes.map { stringResource(it) }.joinToString(" · ")
-            stringResource(R.string.lsposed_status_scopes_missing, names)
+    val statusBackground = when {
+        !active -> Color(0xFFFFE5E3)
+        serviceTimeout -> Color(0xFFFFF0D7)
+        else -> Color(0xFFDFFAE4)
+    }
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.defaultColors(color = statusBackground),
+        pressFeedbackType = PressFeedbackType.Tilt,
+        showIndication = true,
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier.fillMaxSize().offset(34.dp, 38.dp),
+                contentAlignment = Alignment.BottomEnd,
+            ) {
+                Icon(
+                    modifier = Modifier.size(136.dp),
+                    imageVector = AppIcons.Headphones,
+                    contentDescription = null,
+                    tint = statusColor.copy(alpha = 0.78f),
+                )
+            }
+            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                Text(
+                    text = when {
+                        !serviceConnected -> stringResource(R.string.lsposed_status_inactive)
+                        !active -> stringResource(R.string.lsposed_status_scope_incomplete)
+                        serviceTimeout -> stringResource(R.string.lsposed_status_service_timeout)
+                        else -> stringResource(R.string.lsposed_status_active)
+                    },
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF101010),
+                )
+                Text(
+                    text = when {
+                        !active -> inactiveSummary
+                        serviceTimeout -> stringResource(R.string.lsposed_status_service_no_response)
+                        else -> stringResource(R.string.lsposed_status_scopes_ok)
+                    },
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = when {
+                        !active -> Color(0xFFFF5A52)
+                        serviceTimeout -> Color(0xFFFF9F0A)
+                        else -> Color(0xFF2F3A32).copy(alpha = 0.78f)
+                    },
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
         }
-    }
-
-    Card {
-        BasicComponent(title = title, summary = summary)
     }
 }
 
-/** 只读的构建/系统信息（同参考实现 HomePage.kt:266-285 的 HomeSystemInfo）。 */
-private data class SystemInfo(
+/** 一张可点的统计卡（同参考 :206-234）：标题 + 大号数值，整卡可点。 */
+@Composable
+private fun StatCard(
+    title: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        pressFeedbackType = PressFeedbackType.Tilt,
+        showIndication = true,
+        onClick = onClick,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(14.dp),
+            horizontalAlignment = Alignment.Start,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = title,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+            Text(
+                text = value,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MiuixTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+    }
+}
+
+/** 只读的系统信息卡（同参考 :236-248 的六行）。 */
+@Composable
+private fun InfoCard(systemInfo: HomeSystemInfo, xposedService: XposedService?) {
+    Card {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            InfoText(title = stringResource(R.string.info_system_version), content = systemInfo.systemVersion)
+            InfoText(title = stringResource(R.string.info_app_version), content = systemInfo.appVersion)
+            InfoText(title = stringResource(R.string.info_android_version), content = systemInfo.androidVersion)
+            InfoText(
+                title = stringResource(R.string.info_lsposed_version),
+                content = lsposedVersionText(xposedService).ifBlank { stringResource(R.string.unknown_value) },
+            )
+            InfoText(
+                title = stringResource(R.string.info_build_time),
+                content = systemInfo.buildDate.ifBlank { stringResource(R.string.unknown_value) },
+            )
+            InfoText(
+                title = stringResource(R.string.info_device_model),
+                content = systemInfo.deviceModel.ifBlank { stringResource(R.string.unknown_value) },
+                bottomPadding = 0.dp,
+            )
+        }
+    }
+}
+
+/** 一行信息：标题（headline1 = 17sp）+ 内容（body2 = 14sp），行距由 bottomPadding 控制。 */
+@Composable
+private fun InfoText(title: String, content: String, bottomPadding: Dp = 24.dp) {
+    Text(
+        text = title,
+        fontSize = MiuixTheme.textStyles.headline1.fontSize,
+        fontWeight = FontWeight.Medium,
+        color = MiuixTheme.colorScheme.onSurface,
+    )
+    Text(
+        text = content,
+        fontSize = MiuixTheme.textStyles.body2.fontSize,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        modifier = Modifier.padding(top = 2.dp, bottom = bottomPadding),
+    )
+}
+
+/** 只读的构建/系统信息（同参考 :266-285 的 HomeSystemInfo）。 */
+private data class HomeSystemInfo(
+    val systemVersion: String,
     val appVersion: String,
     val androidVersion: String,
-    val systemVersion: String,
+    val buildDate: String,
     val deviceModel: String,
 )
 
-private fun readSystemInfo(context: Context): SystemInfo {
-    val packageInfo = runCatching {
-        context.packageManager.getPackageInfo(context.packageName, 0)
-    }.getOrNull()
-    val versionName = packageInfo?.versionName ?: BuildConfig.VERSION_NAME
-    val versionCode = packageInfo?.longVersionCode ?: BuildConfig.VERSION_CODE.toLong()
-    val model = listOf(Build.MANUFACTURER, Build.MODEL)
-        .filter { it.isNotBlank() }
-        .joinToString(" ")
-    return SystemInfo(
-        appVersion = "$versionName ($versionCode)",
-        androidVersion = "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+private fun homeSystemInfo(context: Context): HomeSystemInfo {
+    val buildTimestamp = BuildConfig.BUILD_TIMESTAMP
+    // 兜底：非常规构建下 BUILD_TIMESTAMP 可能为 0，那就退回 APK 自己的安装/更新时间，绝不写死。
+    val installedAt = runCatching {
+        context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
+    }.getOrDefault(0L)
+    return HomeSystemInfo(
         systemVersion = Build.DISPLAY,
-        // 只读展示行：厂商/型号都读不到时留一个中性占位，不谎报机型
-        deviceModel = model.ifBlank { "-" },
+        appVersion = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+        androidVersion = "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+        buildDate = buildDate(if (buildTimestamp > 0L) buildTimestamp else installedAt),
+        deviceModel = listOf(Build.MANUFACTURER, Build.MODEL).filter { it.isNotBlank() }.joinToString(" "),
     )
+}
+
+/** 时间戳 -> yyyy-MM-dd HH:mm；<= 0 时给空串，由调用方回落成「未知」。 */
+private fun buildDate(timeMillis: Long): String {
+    if (timeMillis <= 0L) return ""
+    return SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(timeMillis))
 }
