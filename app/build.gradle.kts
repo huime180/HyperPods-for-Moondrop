@@ -27,9 +27,16 @@ android {
             isMinifyEnabled = false
         }
         release {
-            // 普通应用，未开启混淆与资源压缩：保持与 debug 一致的构建产物，暂不引入混淆规则
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // 与 HyperPods（dev）的构建配置一致：开启 R8 与资源压缩。
+            // 关闭时 release 产物 25 MB —— 其中 23.5 MB 是未混淆的 dex（Compose + Miuix
+            // 全量符号、无死代码消除）；开启后同类工程落在 4~8 MB 量级。
+            // keep 规则见 proguard-rules.pro（协议层 core.** / pods.** 全保留）。
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 

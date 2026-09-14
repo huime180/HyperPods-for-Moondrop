@@ -1,23 +1,32 @@
-name: Build APK
+name: Build Release APK
 
 on:
   push:
-    branches: [ main, master ]
+    tags: [ "v*" ]
+    branches: [ "main", "master" ]
   pull_request:
+    branches: [ "main", "master" ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      # 构建配置与 HyperPods（dev）的工作流保持一致：Java 21 + setup-gradle + assembleRelease，
+      # 产出的是开了 R8 与资源压缩的 release 包（不再是 37 MB 的 debug 包）。
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -28,24 +37,13 @@ jobs:
         continue-on-error: true
         run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
 
-      - name: Make gradlew executable
-        run: chmod +x ./gradlew
+      - name: Grant execute permission
+        run: chmod +x gradlew
 
+      # 本仓库有 47 个协议层单测（HyperPods 的工作流里没有这一步，这里保留：
+      # 它是本应用唯一的自动化验收手段），失败即整个 job 失败。
       - name: Unit tests (protocol core)
         run: ./gradlew :app:testDebugUnitTest --stacktrace
-
-      - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
-
-      - name: Build release APK
-        run: ./gradlew :app:assembleRelease --stacktrace
-        continue-on-error: true
-
-      - name: Collect artifacts
-        run: |
-          mkdir -p out
-          find app/build/outputs/apk -name "*.apk" -exec cp {} out/ \;
-          ls -la out
 
       - name: Test report
         if: always()
@@ -54,9 +52,83 @@ jobs:
           name: test-results
           path: app/build/reports/tests/**
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      # 不开 continue-on-error：R8 裁错必须让 job 变红，不能静默产出坏包。
+      - name: Build release APK
+        run: ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Restore fallback signing keystore
+        uses: actions/cache@v4
         with:
-          name: MiuixMoondrop-apk
-          path: out/*.apk
+          path: ~/.android/miuixmoondrop-ci.jks
+          key: miuixmoondrop-ci-keystore-v1
+
+      - name: Sign release APK
+        id: sign
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        run: |
+          set -e
+          UNSIGNED_APK=$(find app/build/outputs/apk/release -maxdepth 2 -name '*.apk' | head -1)
+          if [ -z "$UNSIGNED_APK" ]; then
+            echo "No release APK found." >&2
+            exit 1
+          fi
+
+          VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts || echo "unversioned")
+          OUT_NAME="MiuixMoondrop-${VERSION_NAME}-release.apk"
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)
+
+          if [ -n "$SIGNING_KEY" ]; then
+            # 仓库配好 secrets 时用正式签名（与 HyperPods 的流程一致）
+            echo "$SIGNING_KEY" | base64 -d > /tmp/keystore.jks
+            KEYSTORE=/tmp/keystore.jks
+            KS_ALIAS="${{ secrets.ALIAS }}"
+            KS_PASS="${{ secrets.KEYSTORE_PASSWORD }}"
+            KEY_PASS="${{ secrets.KEY_PASSWORD }}"
+            SIGNED=secret
+          else
+            # 没配 secrets 时的兜底：用固定路径的 CI keystore，并由 actions/cache 跨 run 复用。
+            # 必须复用：GitHub runner 每次都是新环境，若每次重新生成调试 keystore，签名就每次都变，
+            # Android 会以「签名不一致」拒绝覆盖安装，等于每次都要先卸载旧包。
+            KEYSTORE="$HOME/.android/miuixmoondrop-ci.jks"
+            KS_ALIAS=miuixmoondrop-ci
+            KS_PASS=miuixmoondrop-ci
+            KEY_PASS=miuixmoondrop-ci
+            if [ ! -f "$KEYSTORE" ]; then
+              mkdir -p "$(dirname "$KEYSTORE")"
+              keytool -genkeypair -v -keystore "$KEYSTORE" -alias "$KS_ALIAS" \
+                -keyalg RSA -keysize 2048 -validity 10000 \
+                -storepass "$KS_PASS" -keypass "$KEY_PASS" \
+                -dname "CN=MiuixMoondrop CI, OU=dev, O=huime180, C=CN"
+            fi
+            SIGNED=fallback
+          fi
+
+          "${BUILD_TOOLS}zipalign" -f 4 "$UNSIGNED_APK" "./$OUT_NAME"
+          "${BUILD_TOOLS}apksigner" sign \
+            --ks "$KEYSTORE" \
+            --ks-key-alias "$KS_ALIAS" \
+            --ks-pass "pass:$KS_PASS" \
+            --key-pass "pass:$KEY_PASS" \
+            "./$OUT_NAME"
+          if [ "$KEYSTORE" = "/tmp/keystore.jks" ]; then rm -f /tmp/keystore.jks; fi
+          echo "apk=$OUT_NAME" >> "$GITHUB_OUTPUT"
+          echo "signed=$SIGNED" >> "$GITHUB_OUTPUT"
+
+      # 非压缩上传（GitHub Actions 2026-02 特性）：产物直接就是 APK，不用再解 zip
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.sign.outputs.apk }}
+          path: ./${{ steps.sign.outputs.apk }}
+          archive: false
           if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: ${{ startsWith(github.ref, 'refs/tags/') && steps.sign.outputs.signed == 'secret' }}
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ github.token }}
+          artifacts: "./${{ steps.sign.outputs.apk }}"
+          generateReleaseNotes: true
+          makeLatest: true
