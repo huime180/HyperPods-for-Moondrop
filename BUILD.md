@@ -19,7 +19,7 @@
 
 | 项 | 要求 | 依据 |
 |---|---|---|
-| JDK | **17**（GitHub Actions 用 temurin 17；AGP 9 要求 JDK 17+） | `app/build.gradle.kts` 的 `java { toolchain }` 与 `kotlin { jvmToolchain(17) }` |
+| JDK | 工具链目标 **17**；CI 用 **temurin 21** 运行 Gradle（AGP 9 要求 JDK 17+） | `app/build.gradle.kts` 的 `java { toolchain }` 与 `kotlin { jvmToolchain(17) }`、`.github/workflows/build.yml` |
 | Android SDK | `compileSdk = 37` 的平台 + `build-tools;36.0.0`；`ANDROID_HOME` / `local.properties` 指向 SDK。**compileSdk 必须是 37**：Miuix 0.9.3 的 AAR metadata 声明 `minCompileSdk=37` | `app/build.gradle.kts`、`.github/workflows/build.yml` 的 `sdkmanager` 步骤 |
 | Gradle | **9.4.1**（wrapper 会自动下载 `gradle-9.4.1-bin.zip`） | `gradle/wrapper/gradle-wrapper.properties` |
 | Android Studio | 能打开 AGP 9.1 项目的版本即可（建议较新版本） | — |
@@ -65,11 +65,17 @@
 产物位置：
 
 ```
-app/build/outputs/apk/debug/app-debug.apk
-app/build/outputs/apk/release/app-release-unsigned.apk     # 未签名（见第 7 节）
+app/build/outputs/apk/debug/app-debug.apk                  # 未混淆，约 37 MB
+app/build/outputs/apk/release/app-release-unsigned.apk     # R8 + 资源压缩，约 2.5 MB（未签名，见第 7 节）
 ```
 
-`release` 构建设置：`isMinifyEnabled = false`、`isShrinkResources = false`（普通应用、不引入混淆规则）。
+`release` 构建设置：`isMinifyEnabled = true`、`isShrinkResources = true`（与 HyperPods 一致），
+keep 规则见 `app/proguard-rules.pro`（协议层 `core.**` / `pods.**` 全保留）。
+
+> **release 为什么能小这么多**：不开 R8 时 release 是 25 MB，其中 **23.5 MB 是未混淆的 dex** ——
+> Compose / Miuix 的符号与没人调用的实现全留在包里；开启后同一个包 **2.83 MB**（签名后，
+> 其中 `classes.dex` 2.40 MB）。本地 `assembleRelease` 产出的是**未签名**包，装之前要自己签
+> （见第 7 节）；CI 会替你签（见第 4 节）。
 
 Android Studio：直接 `Open` 仓库根目录 → 等待 Gradle Sync → 选择 `app` 运行配置 → Run。
 （`local.properties` 不在版本库中，需要由 IDE 或手工创建以指向 Android SDK。）
@@ -98,42 +104,56 @@ Android Studio：直接 `Open` 仓库根目录 → 等待 Gradle Sync → 选择
 
 ## 4. GitHub Actions 如何产出 APK
 
-工作流：`.github/workflows/build.yml`（`name: Build APK`，job 名 `build`，`runs-on: ubuntu-latest`）。
+工作流：`.github/workflows/build.yml`（`name: Build Release APK`，job 名 `build`，`runs-on: ubuntu-latest`）。
+做法与 HyperPods（dev）的工作流一致：**构建 release 包 → 签名 → 非压缩上传**。
 
 | 项 | 值 |
 |---|---|
-| 触发 | `push` 到 `main`/`master`、任意 `pull_request`、`workflow_dispatch`（手动） |
+| 触发 | `push` 到 `main`/`master`、`push` tag `v*`、`pull_request`、`workflow_dispatch`（手动） |
 | Runner | `ubuntu-latest` |
+| 产物 | `MiuixMoondrop-<versionName>-release.apk`（**已签名，可直接安装**）+ `test-results` |
 
 步骤（逐条对应工作流文件）：
 
 1. `actions/checkout@v4` 拉取代码；
-2. `actions/setup-java@v4` 安装 **temurin JDK 17**；
-3. `android-actions/setup-android@v3` 准备 Android SDK；
-4. `sdkmanager "platforms;android-37" "build-tools;36.0.0"`（带 `continue-on-error: true`，
-   失败也不阻塞 —— AGP 自身会在需要时自动下载缺失组件）；
+2. `actions/setup-java@v4` 安装 **temurin JDK 21**（工程工具链目标仍是 17）；
+3. `gradle/actions/setup-gradle@v4` 配好 Gradle 与依赖缓存；
+4. `android-actions/setup-android@v3` + `sdkmanager "platforms;android-37" "build-tools;36.0.0"`
+   （带 `continue-on-error: true`，失败也不阻塞 —— AGP 自身会在需要时下载缺失组件）；
 5. `chmod +x ./gradlew`；
 6. `./gradlew :app:testDebugUnitTest --stacktrace` —— **单测失败即整个 job 失败**；
-7. `./gradlew :app:assembleDebug --stacktrace`；
-8. `./gradlew :app:assembleRelease --stacktrace`，带 `continue-on-error: true`（release 未签名，失败不阻塞）；
-9. 收集 `app/build/outputs/apk/**/*.apk` 到 `out/`；
-10. 上传两个 artifact：
-    * **`MiuixMoondrop-apk`** → `out/*.apk`（`if-no-files-found: error`，没有 APK 就报错）；
-    * **`test-results`** → `app/build/reports/tests/**`（`if: always()`）。
+7. 上传 `test-results`（`if: always()`）；
+8. `./gradlew :app:assembleRelease --stacktrace` —— **不带 `continue-on-error`**：R8 裁错必须让 job
+   变红，不能静默产出一个坏包；
+9. `actions/cache@v4` 取回兜底签名用的 keystore；
+10. 用 build-tools 的 `zipalign` + `apksigner` 签名，输出 `MiuixMoondrop-<versionName>-release.apk`；
+11. `actions/upload-artifact@v7` 非压缩上传（`archive: false`，下载到的直接就是 APK）；
+12. tag 构建且用的是**正式签名**时，`ncipollo/release-action@v1` 创建 GitHub Release。
 
-> 拿产物：Actions → 选择对应 run → 页面底部 Artifacts → 下载 `MiuixMoondrop-apk`。
-> Debug APK 使用 Android 默认 debug 签名，可直接安装。
+**签名**：仓库目前没配签名 secrets（HyperPods 也没有），因此走兜底 —— 用
+`~/.android/miuixmoondrop-ci.jks`（首次由 `keytool` 生成，之后由 `actions/cache` **跨 run 复用**；
+必须复用：GitHub runner 每次都是新环境，若每次重新生成 keystore，签名就每次都不同，
+Android 会以签名不一致拒绝覆盖安装）。配好 `SIGNING_KEY`（base64 的 keystore）、`ALIAS`、
+`KEYSTORE_PASSWORD`、`KEY_PASSWORD` 四个 secrets 后自动切换为正式签名，
+并且只有正式签名才创建 Release。
+
+> 拿产物：Actions → 选择对应 run → 页面底部 Artifacts → 下载 `MiuixMoondrop-1.0.0-release.apk`。
 
 ---
 
 ## 5. 安装
 
 ```bash
-# 从 CI 产物或本地构建结果安装（debug 包可直接装）
-adb install -r app-debug.apk
+# CI 产出的包已签名，可直接安装
+adb install -r MiuixMoondrop-1.0.0-release.apk
 ```
 
-也可以把 APK 拷到设备上直接点击安装。
+也可以把 APK 拷到设备上直接点击安装。调试用途也可以装
+`app/build/outputs/apk/debug/app-debug.apk`（未混淆，约 37 MB）。
+
+> 从旧包换过来时**先卸载一次**：旧包的签名与现在这套 CI keystore 不同（包名可能也还是改名前的
+> `moe.chenxy.hyperpods.moondrop`），Android 不允许签名不同的同包名覆盖安装。
+> 之后同一套 CI 签名可以直接升级安装。
 
 安装后：
 
@@ -188,7 +208,9 @@ adb shell dumpsys notification --noredact | grep -i HyperPodsAppState   # 本应
 ## 7. Release 签名
 
 `app/build.gradle.kts` 的 `release` **没有配置 `signingConfig`**，所以
-`./gradlew :app:assembleRelease` 产出的是 `app-release-unsigned.apk`。
+`./gradlew :app:assembleRelease` 产出的是 `app-release-unsigned.apk`（R8 已开，体积约 2.5 MB）。
+本地这样装之前要自己签；**CI 会替你签**（见第 4 节：先用 secrets 里的正式 keystore，
+没配 secrets 时用缓存的 CI keystore，产物名 `MiuixMoondrop-<versionName>-release.apk`）。
 
 自签名步骤（示例，密钥请自行保管、不要提交到仓库）：
 
@@ -200,11 +222,11 @@ keytool -genkeypair -v -keystore miuixmoondrop.jks \
 # 2) 用 apksigner 签名（build-tools 里的工具）
 $ANDROID_HOME/build-tools/36.0.0/apksigner sign \
   --ks miuixmoondrop.jks --ks-key-alias miuixmoondrop \
-  --out MiuixMoondrop-1.0.0.apk \
+  --out MiuixMoondrop-1.0.0-release.apk \
   app/build/outputs/apk/release/app-release-unsigned.apk
 
 # 3) 校验
-$ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs MiuixMoondrop-1.0.0.apk
+$ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs MiuixMoondrop-1.0.0-release.apk
 ```
 
 若希望 Gradle 直接产出已签名包，在 `app/build.gradle.kts` 里增加
