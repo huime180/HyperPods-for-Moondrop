@@ -554,63 +554,76 @@ PuddingPods 文档也把它归类为 `BluetoothDeviceDetailsFragment` 提供的�
 
 ---
 
-## 10.5 HyperOS 焦点通知 / 超级岛：`miui.focus.*`（**已在真机 ROM 上反汇编核对**）
+## 10.5 HyperOS 焦点通知 / 超级岛：`miui.focus.*`（**已用真机 dumpsys 原文核对**）
 
 这一节不是 GAIA 协议，而是「耳机状态怎么显示在 HyperOS 上」的宿主侧契约。
-键名**全部**来自本机 HyperOS 4（Xiaomi Pad 8 Pro，`ro.mi.os.version.code=4`）的
-`com.xiaomi.bluetooth.apk`：该 APK 里水月雨（被本模块伪装成小米耳机）的连接通知由
-`com.android.bluetooth.ble.app.MiuiBluetoothNotification` 自己构造，用
-[tools/dex_find_method.py](tools/dex_find_method.py) 反汇编它引用 `miui.focus.param` /
-`param_v2` 的方法，逐条读出下列键与常量。
 
-### 10.5.1 通知 extra
+> ⚠ **本节修正过一次。** 初版是反汇编 ROM APK 猜出来的，把 `miui.focus.param` 记成了
+> `Bundle{ param_v2 = JSON }` —— **错的**。后来从同作者的另一个仓库
+> （`huimeyc/HyperPods` 的 `dev` 分支，跑在同一台 HyperOS 4 平板上、插同一副水月雨耳机）
+> 用 `dumpsys notification --noredact` 读到了系统里真实存在的那条通知，下面是原文。
 
-| 键 | 类型 | 内容 |
-| --- | --- | --- |
-| `miui.focus.param` | Bundle | 焦点通知参数；内含 `param_v2`（JSON 字符串） |
-| `miui.focus.pics` | Bundle | 图标；内含 `title` / `pic` / `type` |
-| `miui.showAction` | boolean | 小米蓝牙自己的（通知动作按钮） |
-| `miui.appIcon` | Icon | 小米蓝牙自己的（应用图标） |
+### 10.5.1 通知 extra（原文）
 
-`miui.focus.pics` 里两个图片名（反汇编读到的字面量）：
-`miui.focus.pic_earphone`、`miui.focus.pic_connect_button`。
+```
+miui.focus.param = String ( {"type":"com.xzakota.hyper.notification.focus
+                                  .FocusNotification.FocusTemplateFactory.V3",
+                              "param_v2":{ …见 10.5.2… } } )
+miui.focus.pics   = Bundle
+miui.focus.actions= Bundle
+```
 
-### 10.5.2 `param_v2` 的 JSON 键（按 ROM 代码写入顺序）
+**`miui.focus.param` 是字符串**（不是 Bundle），值是 JSON：
+- `type` = 焦点通知的**模板工厂类名**（`xzakota` 那套焦点通知库的 V3 模板），这是渲染器认的标识，
+  不是协议字段；
+- 内容全部在它下面的 `param_v2` 里。
 
-`protocol` · `business` · `updatable` · `enableFloat` · `timeout` · `ticker` · `tickerPic` ·
-`islandProperty` · `islandTimeout` · `imageTextInfoLeft` · `textInfo` · `bigIslandArea` ·
-`smallIslandArea` · `param_island` · `content` · `animIconInfo` · `iconTextInfo` ·
-`actionTitle` · `actionTitleColor` · `actionTitleColorDark` · `actionBgColorDark` ·
-`actionIntentType` · `actionIntent` · `actions`
+### 10.5.2 `param_v2` 的 JSON 结构（原文，节选）
 
-反汇编能读到**值**的常量（其余由调用方用寄存器传入，看不到值）：
+```json
+{
+  "ticker": "MOONDROP Pudding",
+  "updatable": true,
+  "enableFloat": true,
+  "iconTextInfo": {
+    "title": "MOONDROP Pudding",
+    "content": "左0% 右91% ",
+    "animIconInfo": { "type": 0, "src": "key_headset" }
+  },
+  "textButton": [
+    { "action": "key_anc_cycle",  "actionTitle": "切换降噪" },
+    { "action": "key_disconnect", "actionTitle": "断开连接" }
+  ],
+  "param_island": {
+    "islandProperty": 1,
+    "bigIslandArea": {
+      "imageTextInfoLeft":  { "type": 1, "picInfo":  { "type": 1, "pic": "key_headset" } },
+      "imageTextInfoRight": { "type": 2, "textInfo": { "title": "MOONDROP Pudding", "content": "左0% 右91% " } }
+    }
+  },
+  "aodTitle": "L 0% | R 91%",
+  "aodPic": "key_headset"
+}
+```
 
-| 键 | 值 |
-| --- | --- |
-| `protocol` | `1` |
-| `business` | `"btheadsetnotification"` |
-| `islandProperty` | `1` |
-| `islandTimeout` | `10` |
-| `actionTitleColor` | `"#FF000000"` |
-| `actionTitleColorDark` | `"#FFFFFF"` |
-| `actionBgColorDark` | `"#0D84FF"` |
-| `actionIntent` | `Intent("com.xiaomi.bluetooth.headset.autoswitch.connect")` + `setPackage("com.xiaomi.bluetooth")` + `putExtra("EXTRA_ADDRESS", mAddress)`，再 `toUri()` |
+要点：
+- **超级岛就是 `param_island` 这一块**（`islandProperty` / `bigIslandArea` / `imageTextInfoLeft/Right`），
+  不需要另外发一条「强提示」广播 —— 对耳机这条通知来说，岛是焦点通知 JSON 的一部分。
+- `textButton` 里的 `action` 是**系统侧认的 key**（`key_anc_cycle` / `key_disconnect`），
+  不是我们自己的 Intent action。
+- 图标用 `key_headset`（不是 `miui.focus.pic_*` 那种资源名）。
 
-`islandProperty` / `islandTimeout` / `param_island` / `bigIslandArea` / `smallIslandArea` /
-`textInfo` 这六个就是**超级岛**那一半；本模块把它们与「超级岛提示」开关绑定。
+### 10.5.3 本模块的实现与已知取舍
 
-### 10.5.3 强提示（strong toast）的 extra —— **动作名未确定**
-
-`MiuiBluetoothNotification$d.handleMessage` 里另有一条「强提示」通路，
-用到的 **extra 键**已核对到：`param` · `island_param` · `strong_toast_action` ·
-`package_name`（值 `"com.xiaomi.bluetooth"`）· `show_custom_strong_toast` ·
-`status_bar_strong_toast` · `duration`（值 `3000` / `5000` / `10000`）· `target` ·
-`strong_toast_category`（值 `"video_text"` / `"video_text_text_video"`）。
-
-⚠ `strong_toast_action` 是 **extra 的键**，不是 `Intent` 的 action；真正那条广播的 action
-字符串**没有**出现在 `com.xiaomi.bluetooth.apk`、`com.milink.service.apk`、
-`com.android.settings.apk` 任何一个的 dex 串池里（推测来自框架侧共享库），
-因此本模块**不猜**它，也就不自己发这条广播 —— 「超级岛提示」改为写上面 10.5.2 的 island 字段。
+- 实现在 `hook/MiBluetoothToastHook.kt` 的 `focusExtras()`：按上面原文复刻，外层 `putString`，
+  内层 `param_v2`；`param_island` 只在「超级岛提示」开关打开时写。
+- 焦点通知与超级岛都只用真机核对过的字段；**没有**凭空构造官方那套 12 字符按键配置串之类的东西。
+- 另有一条「强提示（strong toast）」通路（extra 键 `param` / `island_param` / `strong_toast_action` /
+  `duration` / `strong_toast_category` 等已在 ROM 里核对到），但那条广播的 **Intent action 字符串
+  在 `com.xiaomi.bluetooth` / `com.milink.service` / `com.android.settings` 三个 APK 的 dex 串池里
+  都找不到**（推测在框架侧共享库），所以本模块**不猜也不发**这条广播。
+- 真机上验证方式：`dumpsys notification --noredact | grep -A3 miui.focus`，以及 logcat 里
+  每条通知都会打的 `focus=` / `island=` 两个值。
 
 ## 11. 来源与推导
 

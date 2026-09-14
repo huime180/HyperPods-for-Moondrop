@@ -58,6 +58,7 @@ import moe.chenxy.hyperpods.BuildConfig
 import moe.chenxy.hyperpods.core.MoondropModels
 import moe.chenxy.hyperpods.utils.data.HyperPodsAction
 import moe.chenxy.hyperpods.utils.data.HyperPodsPrefsKey
+import org.json.JSONArray
 import org.json.JSONObject
 
 @SuppressLint("MissingPermission")
@@ -92,14 +93,32 @@ object MiBluetoothToastHook : HookContext() {
     private const val FALLBACK_RIGHT = "右耳"
     private const val FALLBACK_DISCONNECT = "断开连接"
 
+    // 焦点通知按钮文案：与上面的 RES_ 开头常量 + FALLBACK_ 开头默认值是同一套做法（先查厂商资源，取不到用默认值）。
+    // 注意 miheadset_key_config_* 是 com.android.settings 的资源，本进程（com.xiaomi.bluetooth）
+    // 查不到时会走 FALLBACK，这是预期行为，不是 bug。
+    private const val RES_ANC_CYCLE = "miheadset_key_config_noise_control"
+    private const val FALLBACK_ANC_CYCLE = "切换降噪"
+
     // ── 小米焦点通知 / 超级岛的 extra 键（键名与常量出处见 focusExtras 的 KDoc）──
     private const val EXTRA_FOCUS_PARAM = "miui.focus.param"
     private const val EXTRA_FOCUS_PICS = "miui.focus.pics"
     private const val EXTRA_MIUI_SHOW_ACTION = "miui.showAction"
     private const val EXTRA_MIUI_APP_ICON = "miui.appIcon"
-    private const val FOCUS_BUSINESS = "btheadsetnotification"
-    private const val FOCUS_PIC = "miui.focus.pic_earphone"
-    private const val FOCUS_TICKER_PIC = "miui.focus.pic_connect_button"
+
+    /**
+     * `miui.focus.param` 外层 JSON 的 `type`：焦点通知模板工厂（`xzakota` 那套焦点通知库）。
+     * 这**不是**协议字段，而是 HyperOS 焦点通知渲染器认的模板标识 —— 值来自 dev 分支
+     * （同一作者的另一个仓库 `huimeyc/HyperPods`）在 **HyperOS 4 真机**上 dumpsys 出来的原文。
+     */
+    private const val FOCUS_TEMPLATE_V3 =
+        "com.xzakota.hyper.notification.focus.FocusNotification.FocusTemplateFactory.V3"
+
+    /** 焦点通知/超级岛用的图标 key（真机原文 `"pic":"key_headset"`）。 */
+    private const val FOCUS_ICON_KEY = "key_headset"
+
+    /** `textButton` 的动作 key：由系统侧认，不是我们自己的 Intent action。 */
+    private const val FOCUS_BUTTON_ANC_CYCLE = "key_anc_cycle"
+    private const val FOCUS_BUTTON_DISCONNECT = "key_disconnect"
 
     private val hookedConstructors = LinkedHashSet<String>()
 
@@ -540,7 +559,7 @@ object MiBluetoothToastHook : HookContext() {
             // miui.* / miui.focus.* 只在**真的**跑在小米 ROM 上时才写：
             // 非 HyperOS 上这些键没有任何消费者，写进去只是脏数据。
             if (RomProfile.isXiaomiRom) {
-                runCatching { builder.setExtras(miuiExtras(context, device, title, content)) }
+                runCatching { builder.setExtras(miuiExtras(context, device, title, content, batteryAodTitle(battery))) }
                     .onFailure { Log.d(TAG, "miui extras unsupported", it) }
             }
             accentColor(context)?.let { builder.setColor(it) }
@@ -629,93 +648,172 @@ object MiBluetoothToastHook : HookContext() {
      * 一次性返回**一个** Bundle：Notification.Builder.setExtras() 是整体替换而不是合并，
      * 分两次调用会把前一次的键丢掉。
      */
-    private fun miuiExtras(context: Context, device: BluetoothDevice, title: String, content: String): Bundle =
-        Bundle().apply {
-            putBoolean(EXTRA_MIUI_SHOW_ACTION, true)
-            val icon = vendorDrawable(context, RES_ICON)
-            if (icon != 0) putParcelable(EXTRA_MIUI_APP_ICON, Icon.createWithResource(context, icon))
-            if (focusIslandEnabled()) {
-                focusExtras(device, title, content, strongToastEnabled())?.let { putAll(it) }
-            }
+    private fun miuiExtras(
+        context: Context,
+        device: BluetoothDevice,
+        title: String,
+        content: String,
+        aodTitle: String
+    ): Bundle = Bundle().apply {
+        putBoolean(EXTRA_MIUI_SHOW_ACTION, true)
+        val icon = vendorDrawable(context, RES_ICON)
+        if (icon != 0) putParcelable(EXTRA_MIUI_APP_ICON, Icon.createWithResource(context, icon))
+        if (focusIslandEnabled()) {
+            focusExtras(context, device, title, content, aodTitle, strongToastEnabled())?.let { putAll(it) }
         }
+    }
 
     /**
      * HyperOS 焦点通知（`miui.focus.param`）+ 图标（`miui.focus.pics`）的 extra。
      *
-     * ── 这些键名和常量是哪来的（**不是猜的**）────────────────────────────────────
-     * 本机 HyperOS 4 的 com.xiaomi.bluetooth.apk 里，水月雨（被本模块伪装成小米耳机）的
-     * 连接通知由 `com.android.bluetooth.ble.app.MiuiBluetoothNotification` 自己构造。
-     * 用 tools/dex_find_method.py 反汇编它引用 `miui.focus.param` / `param_v2` 的那两个方法，
-     * 逐条读出它写下的键与常量：
-     *   · Bundle 键：`miui.focus.param`（内含 `param_v2`，值是 JSON 字符串）、
-     *     `miui.focus.pics`（内含 `title` / `pic` / `type`）；
-     *   · JSON 键：protocol / business / updatable / enableFloat / timeout / ticker /
-     *     tickerPic / islandProperty / islandTimeout / imageTextInfoLeft / textInfo /
-     *     bigIslandArea / smallIslandArea / param_island / content / animIconInfo /
-     *     iconTextInfo / actionTitle / actionTitleColor / actionTitleColorDark /
-     *     actionBgColorDark / actionIntentType / actionIntent / actions；
-     *   · 读到的常量：protocol=1、business="btheadsetnotification"、islandProperty=1、
-     *     islandTimeout=10、actionTitleColor="#FF000000"、actionTitleColorDark="#FFFFFF"、
-     *     actionBgColorDark="#0D84FF"、pic/tickerPic 用 miui.focus.pic_earphone /
-     *     miui.focus.pic_connect_button。
-     * 少数值由调用方用寄存器传进去（反汇编只能看到寄存器，看不到值），这里取 ROM 调用点
-     * 那一档：updatable=true、enableFloat=true、ticker=false、timeout=5000、
-     * actionIntentType=1。这些键写得不对最多是「焦点通知不显示」，不会影响下面那条
-     * 原生通知，所以真机上看一眼 logcat（本文件每条通知都打 focus=/island=）就能定位。
+     * ── 格式是哪来的（**修正过一次，这里是实测过的**）────────────────────────────
+     * 第一版是反汇编 `com.android.bluetooth.ble.app.MiuiBluetoothNotification` 猜的：
+     * 把 `miui.focus.param` 当成 `Bundle{ param_v2 = JSON }`。**那是错的。**
+     * 后来在同作者的另一个仓库（`huimeyc/HyperPods` 的 dev 分支，跑在同一台
+     * HyperOS 4 平板上）里 `dumpsys notification --noredact` 直接读到了系统里
+     * 真实存在的那条水月雨通知，原文是：
      *
-     * @param withIsland 「超级岛提示」开关：打开时才写 island 那一半字段。
+     *   miui.focus.param = String ( {"type":"com.xzakota.hyper.notification.focus
+     *                                  .FocusNotification.FocusTemplateFactory.V3",
+     *                               "param_v2":{ "ticker":…, "updatable":true, "enableFloat":true,
+     *                                            "iconTextInfo":{ "title":…, "content":…,
+     *                                                             "animIconInfo":{"type":0,"src":"key_headset"} },
+     *                                            "textButton":[ {"action":"key_anc_cycle","actionTitle":"切换降噪"},
+     *                                                           {"action":"key_disconnect","actionTitle":"断开连接"} ],
+     *                                            "param_island":{ "islandProperty":1,
+     *                                                             "bigIslandArea":{ "imageTextInfoLeft":{…},
+     *                                                                               "imageTextInfoRight":{…} } },
+     *                                            "aodTitle":"L 0% | R 91%", "aodPic":"key_headset" } } )
+     *   miui.focus.pics = Bundle
+     *
+     * 也就是说：外层 extra 是**字符串**，JSON 里 `type` 是模板工厂名（`xzakota` 那套焦点通知库），
+     * 内容都在它下面的 `param_v2` 里。本函数按这份原文复刻，键名不做「看起来更合理」的改名。
+     *
+     * 写得不对最多是「焦点通知不显示」，不会影响下面那条原生通知 —— 本文件每条通知都打
+     * `focus=/island=`，真机上一眼能看出走没走到。
+     *
+     * @param aodTitle 息屏/超级岛上的紧凑电量串（见 batteryAodTitle）
+     * @param withIsland 「超级岛提示」开关：打开时才写 param_island 那一块
      */
     private fun focusExtras(
+        context: Context,
         device: BluetoothDevice,
         title: String,
         content: String,
+        aodTitle: String,
         withIsland: Boolean
     ): Bundle? = runCatching {
-        val json = JSONObject().apply {
-            put("protocol", 1)
-            put("business", FOCUS_BUSINESS)
+        // ── 内层 param_v2：内容（成对的 title/content、图标、按钮、超级岛区域）────────
+        // 字段名照真机原文，不做「看起来更合理」的改名。
+        val paramV2 = JSONObject().apply {
+            put("ticker", title)
             put("updatable", true)
             put("enableFloat", true)
-            put("timeout", 5000)
-            put("ticker", false)
-            put("tickerPic", FOCUS_TICKER_PIC)
-            put("title", title)
-            put("content", content)
-            if (withIsland) {
-                put("islandProperty", 1)
-                put("islandTimeout", 10)
-                put("param_island", JSONObject().put("title", title))
-                put("bigIslandArea", JSONObject().put("title", title))
-                put("smallIslandArea", JSONObject().put("title", title))
-                put("textInfo", JSONObject().put("title", title))
-            }
-            put("actionTitleColor", "#FF000000")
-            put("actionTitleColorDark", "#FFFFFF")
-            put("actionBgColorDark", "#0D84FF")
-            put("actionIntentType", 1)
-            // 点焦点通知的按钮 → 回到本模块的设备页（与 contentIntent 同一个入口）。
             put(
-                "actionIntent",
-                Intent(HyperPodsAction.SHOW_POPUP).apply { setPackage(PKG_APP) }
-                    .toUri(Intent.URI_INTENT_SCHEME)
+                "iconTextInfo",
+                JSONObject().apply {
+                    put("title", title)
+                    put("content", content)
+                    put(
+                        "animIconInfo",
+                        JSONObject().apply {
+                            put("type", 0)
+                            put("src", FOCUS_ICON_KEY)
+                        }
+                    )
+                }
             )
+            put(
+                "textButton",
+                JSONArray().apply {
+                    put(
+                        JSONObject().apply {
+                            put("action", FOCUS_BUTTON_ANC_CYCLE)
+                            put("actionTitle", vendorString(context, RES_ANC_CYCLE) ?: FALLBACK_ANC_CYCLE)
+                        }
+                    )
+                    put(
+                        JSONObject().apply {
+                            put("action", FOCUS_BUTTON_DISCONNECT)
+                            put("actionTitle", vendorString(context, RES_DISCONNECT) ?: FALLBACK_DISCONNECT)
+                        }
+                    )
+                }
+            )
+            if (withIsland) {
+                put(
+                    "param_island",
+                    JSONObject().apply {
+                        put("islandProperty", 1)
+                        put(
+                            "bigIslandArea",
+                            JSONObject().apply {
+                                put(
+                                    "imageTextInfoLeft",
+                                    JSONObject().apply {
+                                        put("type", 1)
+                                        put(
+                                            "picInfo",
+                                            JSONObject().apply {
+                                                put("type", 1)
+                                                put("pic", FOCUS_ICON_KEY)
+                                            }
+                                        )
+                                    }
+                                )
+                                put(
+                                    "imageTextInfoRight",
+                                    JSONObject().apply {
+                                        put("type", 2)
+                                        put(
+                                            "textInfo",
+                                            JSONObject().apply {
+                                                put("title", title)
+                                                put("content", content)
+                                            }
+                                        )
+                                    }
+                                )
+                            }
+                        )
+                    }
+                )
+            }
+            put("aodTitle", aodTitle)
+            put("aodPic", FOCUS_ICON_KEY)
         }
-        val param = Bundle().apply { putString("param_v2", json.toString()) }
+        // ── 外层：`miui.focus.param` 是**一个字符串**（JSON），里面放模板标识 + param_v2 ──
+        val param = JSONObject().apply {
+            put("type", FOCUS_TEMPLATE_V3)
+            put("param_v2", paramV2)
+        }
         val pics = Bundle().apply {
-            putString("title", FOCUS_PIC)
-            putString("pic", FOCUS_PIC)
+            putString("pic", FOCUS_ICON_KEY)
             putInt("type", 1)
         }
         Log.d(
             TAG,
             "focus extras built address=${SystemApisUtils.deviceAddress(device)} island=$withIsland " +
-                "json=${json.toString().length}B"
+                "json=${param.toString().length}B"
         )
         Bundle().apply {
-            putBundle(EXTRA_FOCUS_PARAM, param)
+            // 注意 putString 而不是 putBundle：真机上这个 extra 就是字符串。
+            putString(EXTRA_FOCUS_PARAM, param.toString())
             putBundle(EXTRA_FOCUS_PICS, pics)
         }
     }.onFailure { Log.w(TAG, "focus extras build failed", it) }.getOrNull()
+
+    /**
+     * 息屏 / 超级岛上的紧凑电量串（真机原文形如 `L 0% | R 91%`）。
+     * 没有读数的一侧写 `--`，不写 0%（0 在协议里是「无读数」，见 batteryLine 的说明）。
+     */
+    private fun batteryAodTitle(battery: IntArray): String {
+        fun part(prefix: String, raw: Int): String {
+            val level = SystemApisUtils.decodeLevel(raw)
+            return if (level <= 0) "$prefix --" else "$prefix $level%"
+        }
+        return part("L", battery.getOrElse(0) { 0 }) + " | " + part("R", battery.getOrElse(1) { 0 })
+    }
 
     private fun accentColor(context: Context): Int? {
         val id = vendorResourceId(context, "color", RES_ACCENT_COLOR)
