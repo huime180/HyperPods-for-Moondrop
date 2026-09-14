@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 配置键
+ * MiuixMoondrop — 配置键
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 普通 App 收窄后只剩两个偏好键，都是应用自己发的东西：

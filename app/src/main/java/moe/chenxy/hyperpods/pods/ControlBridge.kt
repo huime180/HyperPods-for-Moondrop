@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 应用内状态桥
+ * MiuixMoondrop — 应用内状态桥
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 为什么还需要它：

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- HyperPods for Moondrop — 简体中文 -->
+<!-- MiuixMoondrop — 简体中文 -->
 <resources>
     <string name="app_name">MiuixMoondrop</string>
     <string name="about">关于</string>
@@ -147,5 +147,5 @@
 
     <!-- 关于页：项目主页 -->
     <string name="about_repo_title">项目主页</string>
-    <string name="about_repo_url">https://github.com/huime180/HyperPods-for-Moondrop</string>
+    <string name="about_repo_url">https://github.com/huime180/MiuixMoondrop</string>
 </resources>

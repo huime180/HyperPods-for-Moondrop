@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 「手势操作」页
+ * MiuixMoondrop — 「手势操作」页
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 协议（真机实测 + 官方 App 字节码，见 core/Gaia.kt 的 TOUCHV2 段落）：

@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 等待耳机连接（详情页的未连接状态整页）
+ * MiuixMoondrop — 等待耳机连接（详情页的未连接状态整页）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 形态对齐参考实现 _refs/OppoPods/.../ui/MainUI.kt:1257-1288 的 ConnectingPage()：

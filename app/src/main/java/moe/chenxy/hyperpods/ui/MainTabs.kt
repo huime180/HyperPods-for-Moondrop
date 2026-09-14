@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 主页面骨架（底部两页签 + HorizontalPager）
+ * MiuixMoondrop — 主页面骨架（底部两页签 + HorizontalPager）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 结构对齐参考实现 moondrop-pods 的 ui/MainTabs.kt:61-533：

@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — LHDC / 双设备连接互斥确认
+ * MiuixMoondrop — LHDC / 双设备连接互斥确认
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 用户实测（Moondrop PUDDING）：LHDC 与「双设备连接」在固件层互斥，不能同时开启。

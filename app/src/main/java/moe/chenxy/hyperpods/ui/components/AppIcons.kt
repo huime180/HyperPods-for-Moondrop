@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 底部导航用的矢量图标
+ * MiuixMoondrop — 底部导航用的矢量图标
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 图标本体照搬参考实现 moondrop-pods 的 ui/components/AppIcons.kt:12-60（Home / Headphones），

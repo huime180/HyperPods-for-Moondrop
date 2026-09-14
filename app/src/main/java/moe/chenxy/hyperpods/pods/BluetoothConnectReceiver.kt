@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 系统蓝牙广播：耳机连上就把应用进程拉起来
+ * MiuixMoondrop — 系统蓝牙广播：耳机连上就把应用进程拉起来
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 为什么需要它：

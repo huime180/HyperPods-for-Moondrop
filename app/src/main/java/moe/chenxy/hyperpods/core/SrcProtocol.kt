@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 中科蓝讯私有协议（BleSourceSwitch / 9ECA0000）
+ * MiuixMoondrop — 中科蓝讯私有协议（BleSourceSwitch / 9ECA0000）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 部分水月雨耳机（猫饼 NEKOCAKE / 太空漫游2 / 音乐胶囊 等）主控为中科蓝讯

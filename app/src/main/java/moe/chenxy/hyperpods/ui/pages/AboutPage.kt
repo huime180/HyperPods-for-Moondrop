@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 关于页
+ * MiuixMoondrop — 关于页
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 版式对齐参考实现 moondrop-pods 的 ui/pages/AboutPage.kt:39-77：

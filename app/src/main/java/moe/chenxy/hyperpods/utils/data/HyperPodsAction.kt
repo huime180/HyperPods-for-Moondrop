@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 应用内 intent 常量
+ * MiuixMoondrop — 应用内 intent 常量
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 普通 App 收窄后只剩两组「应用自己给自己用」的 intent 常量：

@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — UI 侧状态订阅（弹窗与详情页共用）
+ * MiuixMoondrop — UI 侧状态订阅（弹窗与详情页共用）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 普通 App 收窄后的职责边界：

@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 设置页内容（底部导航第二个页签）
+ * MiuixMoondrop — 设置页内容（底部导航第二个页签）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 版式与分组对齐参考实现 moondrop-pods 的 ui/pages/SettingsPage.kt:104-204：

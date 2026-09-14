@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 设备页（单页滚动）
+ * MiuixMoondrop — 设备页（单页滚动）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 版式与行词汇对齐参考实现 _refs/OppoPods/.../ui/PodDetailPage.kt:94-212：

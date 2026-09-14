@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 应用首选项（设置页读写的一层薄封装）
+ * MiuixMoondrop — 应用首选项（设置页读写的一层薄封装）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 键与默认值的唯一来源是 utils/data/HyperPodsPrefsKey.kt。

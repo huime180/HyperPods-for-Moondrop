@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 运行时状态快照
+ * MiuixMoondrop — 运行时状态快照
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 package moe.chenxy.hyperpods.pods

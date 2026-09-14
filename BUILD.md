@@ -1,4 +1,8 @@
 # 构建与安装（BUILD）
+> ⚠️ **状态说明**：本文件第 5 节及 `module.prop` / 作用域 / `scope.list` 相关的段落写于
+> **早期 LSPosed 模块形态**（那些文件已随去模块化删除）。当前 MiuixMoondrop 是**普通应用**：
+> 构建产物是全功能 APK，安装后**不需要 root / Xposed**，只需授予蓝牙与通知权限；
+> 连接弹窗还需要「显示在其他应用上层」/「后台弹出界面」权限（见应用内设置页入口）。
 
 > 本文说明如何编译、测试、打包与安装本模块。
 >
@@ -112,10 +116,10 @@ Android Studio：直接 `Open` 仓库根目录 → 等待 Gradle Sync → 选择
 7. `./gradlew :app:assembleRelease --stacktrace`，带 `continue-on-error: true`（release 未签名，失败不阻塞）；
 8. 收集 `app/build/outputs/apk/**/*.apk` 到 `out/`；
 9. 上传两个 artifact：
-   * **`HyperPods-for-Moondrop-apk`** → `out/*.apk`（`if-no-files-found: error`，没有 APK 就报错）；
+   * **`MiuixMoondrop-apk`** → `out/*.apk`（`if-no-files-found: error`，没有 APK 就报错）；
    * **`test-results`** → `app/build/reports/tests/**`（`if: always()`）。
 
-> 拿产物：Actions → 选择对应 run → 页面底部 Artifacts → 下载 `HyperPods-for-Moondrop-apk`。
+> 拿产物：Actions → 选择对应 run → 页面底部 Artifacts → 下载 `MiuixMoondrop-apk`。
 > Debug APK 使用 Android 默认 debug 签名，可直接安装。
 
 ---
@@ -126,7 +130,7 @@ Android Studio：直接 `Open` 仓库根目录 → 等待 Gradle Sync → 选择
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-1. 打开 **LSPosed / Vector** → 模块列表里启用 **HyperPods for Moondrop**；
+1. 打开 **LSPosed / Vector** → 模块列表里启用 **MiuixMoondrop**；
 2. 勾选作用域（`module.prop` 声明 `staticScope=true`，作用域同时写在 `scope.list` 与
    `res/values/arrays.xml` 的 `xposedscope`，两处必须一致）：
 
@@ -212,11 +216,11 @@ keytool -genkeypair -v -keystore hyperpods-moondrop.jks \
 # 2) 用 apksigner 签名（build-tools 里的工具）
 $ANDROID_HOME/build-tools/36.0.0/apksigner sign \
   --ks hyperpods-moondrop.jks --ks-key-alias hyperpods \
-  --out HyperPods-for-Moondrop-1.0.0.apk \
+  --out MiuixMoondrop-1.0.0.apk \
   app/build/outputs/apk/release/app-release-unsigned.apk
 
 # 3) 校验
-$ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs HyperPods-for-Moondrop-1.0.0.apk
+$ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs MiuixMoondrop-1.0.0.apk
 ```
 
 若希望 Gradle 直接产出已签名包，在 `app/build.gradle.kts` 里增加

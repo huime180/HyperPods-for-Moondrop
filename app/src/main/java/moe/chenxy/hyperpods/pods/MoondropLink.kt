@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 协议客户端
+ * MiuixMoondrop — 协议客户端
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 与水月雨耳机建立一条控制通道并维护状态。两条传输：

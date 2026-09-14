@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 快速弹窗（PuddingPods 形态的主入口）
+ * MiuixMoondrop — 快速弹窗（PuddingPods 形态的主入口）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 版式与组件逐条对齐参考实现 moondrop-pods 的 PopupActivity.kt：

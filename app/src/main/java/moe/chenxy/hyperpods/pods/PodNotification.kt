@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 应用进程自己发的耳机状态通知
+ * MiuixMoondrop — 应用进程自己发的耳机状态通知
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 为什么需要它：

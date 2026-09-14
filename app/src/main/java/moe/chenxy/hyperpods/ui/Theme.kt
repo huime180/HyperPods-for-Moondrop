@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — Miuix 主题
+ * MiuixMoondrop — Miuix 主题
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 逐条对齐参考实现 _refs/OppoPods/app/src/main/java/moe/chenxy/oppopods/ui/Theme.kt:12-37：

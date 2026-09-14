@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — RFCOMM/SPP 流式 GAIA 切帧器
+ * MiuixMoondrop — RFCOMM/SPP 流式 GAIA 切帧器
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * GAIA V4 设备（布丁 PUDDING 等）在 Classic Bluetooth RFCOMM/SPP 上存在两种封装：

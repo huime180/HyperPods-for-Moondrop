@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 电量解析（「右耳电量不显示」的修复核心）
+ * MiuixMoondrop — 电量解析（「右耳电量不显示」的修复核心）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * ────────────────────────────────────────────────────────────────────────────

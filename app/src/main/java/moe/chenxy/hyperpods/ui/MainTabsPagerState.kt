@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 页签切换的分页器状态
+ * MiuixMoondrop — 页签切换的分页器状态
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 照搬参考实现 moondrop-pods 的 ui/MainTabsPagerState.kt:17-65：

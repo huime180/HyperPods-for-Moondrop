@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 降噪选择器（主排三格 + 降噪子排）
+ * MiuixMoondrop — 降噪选择器（主排三格 + 降噪子排）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 形态对齐参照实现 _refs/own-HyperPods 的 ui/components/AncSwitch.kt:277-332（AncButton）

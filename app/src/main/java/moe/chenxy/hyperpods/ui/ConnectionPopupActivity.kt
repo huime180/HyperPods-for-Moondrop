@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 连接弹窗（连上耳机时弹一次，显示三路电量后自动关闭）
+ * MiuixMoondrop — 连接弹窗（连上耳机时弹一次，显示三路电量后自动关闭）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 移植自参考实现 moondrop-pods 的 ConnectionPopupActivity.kt（429 行）：

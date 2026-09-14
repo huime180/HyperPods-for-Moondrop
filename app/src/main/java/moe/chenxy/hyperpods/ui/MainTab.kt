@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 底部导航的两个页签
+ * MiuixMoondrop — 底部导航的两个页签
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 本应用已从 Xposed 模块收窄为普通 App，导航面只剩「应用自己」的两页：

@@ -1,11 +1,16 @@
-# HyperPods for Moondrop
+# MiuixMoondrop
 
-> 让 **Xiaomi HyperOS** 把 **MOONDROP（水月雨）** 蓝牙耳机当作系统原生耳机来管理：
-> 融合设备中心设备卡、超级岛 / 通知电量、设置页耳机入口、系统级降噪与增益控制。
+> **MiuixMoondrop** —— 水月雨（MOONDROP）蓝牙耳机控制应用：连接与三路电量、降噪（含子档位）、
+> 手势操作、增益 / 指示灯 / 提示音、LHDC 与双设备连接；界面用 Miuix 按 HyperOS 风格实现。
 >
-> 这是一个 **LSPosed / Xposed 模块**（libxposed API 102），Kotlin + Jetpack Compose + Miuix。
-> 命名空间 `moe.chenxy.hyperpods`，applicationId `moe.chenxy.hyperpods.moondrop`，
-> minSdk 35 / compileSdk 36 / targetSdk 36，许可 GPL-3.0。
+> 现在这是一个**普通 Android 应用**：协议栈（GAIA over GATT / RFCOMM）跑在应用进程内，
+> **不需要 root，也不需要 Xposed / LSPosed**（早期那套模块形态已整体删除）。
+> 应用名 `MiuixMoondrop`，applicationId `moe.huime.miuixmoondrop`（namespace 仍是
+> `moe.chenxy.hyperpods`，Kotlin 包名未动），许可 GPL-3.0。
+>
+> ⚠️ 本文档靠后的若干章节（作用域勾选 / 模块结构 / 跨进程控制桥 / 融合设备中心接管 / 设置页伪装等）
+> 描述的是**早期的 LSPosed 模块形态** —— 那部分代码与 manifest 声明都已删除，相关章节仅作历史记录，
+> 当前实现一律**以代码为准**。
 
 ---
 

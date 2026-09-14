@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 页面骨架（Navigation 3 单返回栈 + 底部两页签）
+ * MiuixMoondrop — 页面骨架（Navigation 3 单返回栈 + 底部两页签）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 两级结构：

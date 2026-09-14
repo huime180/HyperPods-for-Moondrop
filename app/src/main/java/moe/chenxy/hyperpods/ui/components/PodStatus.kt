@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 电量卡片（三栏式）
+ * MiuixMoondrop — 电量卡片（三栏式）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 版式对齐参照实现 _refs/own-HyperPods 的 ui/components/PodStatus.kt:43-149

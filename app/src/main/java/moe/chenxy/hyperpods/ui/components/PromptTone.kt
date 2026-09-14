@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 提示音开关 + 提示音音量（合并成一行）
+ * MiuixMoondrop — 提示音开关 + 提示音音量（合并成一行）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 用户需求：提示音与提示音音量原来分成两行，现在合并成同一个 Miuix 组件。

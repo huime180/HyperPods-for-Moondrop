@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 应用根组件
+ * MiuixMoondrop — 应用根组件
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 与参考实现 _refs/OppoPods/app/src/main/java/moe/chenxy/oppopods/ui/App.kt:8-21 一致：

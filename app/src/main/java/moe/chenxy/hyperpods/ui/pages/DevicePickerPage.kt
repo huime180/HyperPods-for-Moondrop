@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 设备选择页（耳机页签在「未连接」时的内容）
+ * MiuixMoondrop — 设备选择页（耳机页签在「未连接」时的内容）
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 结构对齐参考实现 moondrop-pods 的 ui/pages/DevicePickerPage.kt:66-266：

@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 应用 UI 入口
+ * MiuixMoondrop — 应用 UI 入口
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 桌面的 LAUNCHER 图标直接拉起本 Activity（见 AndroidManifest 的 intent-filter）；

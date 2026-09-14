@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 水月雨耳机型号档案库
+ * MiuixMoondrop — 水月雨耳机型号档案库
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 目标：一套代码适配水月雨（MOONDROP）全系 TWS / 颈挂。

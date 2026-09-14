@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — GAIA 协议核心
+ * MiuixMoondrop — GAIA 协议核心
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 水月雨（Moondrop）耳机使用高通 GAIA（QTiL）业务协议。本文件是该协议的权威定义，

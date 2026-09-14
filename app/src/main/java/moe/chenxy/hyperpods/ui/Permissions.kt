@@ -1,5 +1,5 @@
 /*
- * HyperPods for Moondrop — 应用打开时的运行时权限申请
+ * MiuixMoondrop — 应用打开时的运行时权限申请
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * 用户需求：应用打开时主动申请蓝牙权限（否则连不上耳机）。
