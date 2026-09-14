@@ -15,6 +15,11 @@
  * 本项目**没有** Application 子类，且本轮不允许改 manifest 的 android:name，因此这里把注册
  * 做成「首次被 UI 订阅时惰性注册一次」，全局单例持有，UI 侧只订阅 / 退订。
  * 效果等价：只要模块页被打开过，状态就与参考实现一致；差别只是绑定时机晚到「第一次进 UI」。
+ *
+ * 应用进程里还有第二个消费者：pods/PodNotification.kt（应用自己发的那条耳机状态通知）要在
+ * **没有 UI** 的情况下判断「模块是否激活」，所以本文件另外暴露两个非 Composable 入口
+ * （primeXposedServiceRegistration / currentXposedService）。注册时机也与上面同一套：
+ * 由 pods/ControlBridge.kt 的 ensureInit 在应用进程起来时调一次，因此不再依赖「模块页被打开过」。
  */
 package moe.chenxy.hyperpods.ui
 
@@ -78,6 +83,23 @@ internal fun lsposedVersionText(service: XposedService?): String {
 }
 
 /**
+ * 通知相关的那个作用域：hook/MiBluetoothToastHook.kt 只有被注入 com.xiaomi.bluetooth
+ * 才会发它那条耳机电量通知（作用域清单见 META-INF/xposed/scope.list）。
+ */
+internal const val HOOK_NOTIFICATION_SCOPE = "com.xiaomi.bluetooth"
+
+/**
+ * 框架服务报出来的作用域里有没有 [HOOK_NOTIFICATION_SCOPE]。
+ *
+ * service.scope 是跨进程调用，异常一律按「没有」处理：宁可多发一条应用侧通知，
+ * 也不要因为读不到作用域而静默不发（与 [lsposedScopeState] 同一套兜底思路）。
+ */
+internal fun hookNotificationScopeActive(service: XposedService): Boolean {
+    val granted = runCatching { service.scope }.getOrNull() ?: return false
+    return HOOK_NOTIFICATION_SCOPE in granted
+}
+
+/**
  * LSPosed 服务桥：进程内只向 XposedServiceHelper 注册一次，UI 侧多消费者各自订阅。
  * 用 CopyOnWriteArraySet 是因为 onServiceBind / onServiceDied 可能在别的线程回来。
  */
@@ -102,6 +124,9 @@ private object XposedServiceBridge : XposedServiceHelper.OnServiceListener {
             .onFailure { registered = false }
     }
 
+    /** 当前缓存的框架服务（pods/PodNotification 读取用）；写只有 onServiceBind / onServiceDied 两处。 */
+    val current: XposedService? get() = service
+
     override fun onServiceBind(service: XposedService) {
         this.service = service
         listeners.forEach { it(service) }
@@ -124,6 +149,23 @@ private object XposedServiceBridge : XposedServiceHelper.OnServiceListener {
         listeners.remove(listener)
     }
 }
+
+/**
+ * 主动触发一次框架服务绑定（幂等；与 [rememberXposedService] 首次订阅时走的是同一条路）。
+ * 供非 UI 的调用方（pods/PodNotification）使用：只有注册过 listener，框架才会把 Binder 递进来。
+ *
+ * 注意：只在主线程调用 —— libxposed 的 registerListener 内部会走 ContentProvider
+ * （ControlBridge.ensureInit 的两个调用方都是主线程）。
+ */
+internal fun primeXposedServiceRegistration() {
+    XposedServiceBridge.ensureRegistered()
+}
+
+/**
+ * 当前缓存的框架服务；null = 还没绑上（框架没装 / 模块没激活 / 正在绑定）。
+ * **不触发**绑定，也不阻塞：只读 [XposedServiceBridge] 里那个 @Volatile 字段。
+ */
+internal fun currentXposedService(): XposedService? = XposedServiceBridge.current
 
 /**
  * 订阅 LSPosed 服务；返回 null 表示服务还没连上（或框架没装 / 模块未激活）。

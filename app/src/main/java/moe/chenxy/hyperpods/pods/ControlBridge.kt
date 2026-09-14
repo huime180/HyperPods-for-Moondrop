@@ -20,6 +20,7 @@
  *   本桥 --UI_INIT--> com.android.bluetooth（请它重放一次系统真实编码：UI 打开时 + LHDC 切换后）
  *   本桥 --UPDATE_SYSTEM_BATTERY--> com.android.bluetooth（写进 AdapterService，系统 UI 显示电量）
  *   本桥 --UPDATE_PODS_NOTIFICATION / SEND_STRONG_TOAST / CANCEL_*--> com.xiaomi.bluetooth（通知）
+ *   本桥 --> pods/PodNotification.kt（应用进程**自己**发的耳机状态通知：模块未激活时唯一的通知来源）
  */
 package moe.chenxy.hyperpods.pods
 
@@ -86,6 +87,9 @@ object ControlBridge {
         // 把「请蓝牙进程重放编码」的通道交给协议侧，由它在切换后有界地调用几次
         // （次数/间隔在 MoondropLink 里，见 reprobeSystemCodec）。
         MoondropLink.setSystemCodecReprobe { reprobeSystemCodec() }
+        // 应用进程自己的那条状态通知（pods/PodNotification.kt）：提前触发 LSPosed 服务绑定，
+        // 这样「连上耳机后该不该由自己发」是在服务状态确定之后判的（见那个文件的去重策略）。
+        PodNotification.prime(context.applicationContext)
         initialized = true
         Log.i(TAG, "ControlBridge initialized")
     }
@@ -109,6 +113,9 @@ object ControlBridge {
                 MoondropLink.disconnect()
                 connectedDevice = null
                 cancelNotification(context)
+                // 应用自己那条同样要撤（MoondropLink.disconnect() 也会让 Disconnected 事件走到
+                // 转发器里再撤一次，这里先撤一次是为了「没有监听者」时也不留旧通知）
+                PodNotification.cancel(context)
             }
 
             // 蓝牙进程报告系统实际协商的 A2DP 编码
@@ -273,12 +280,18 @@ object ControlBridge {
                     pushAnc(ctx, snap)
                     pushBattery(ctx, snap.battery)
                     pushNotification(ctx, snap)
+                    // 应用自己那条：模块未激活（com.xiaomi.bluetooth 里没有我们的代码）时，
+                    // 它是唯一的通知来源；激活时它会被 PodNotification 自己撤销（见那个文件）
+                    PodNotification.onSnapshot(ctx, snap)
                     maybeShowConnectionPopup(ctx, snap.battery.anyKnown)
                 }
                 is PodEvent.BatteryChanged -> {
                     pushBattery(ctx, event.battery)
                     maybeShowConnectionPopup(ctx, event.battery.anyKnown)
-                    MoondropLink.snapshot().takeIf { it.connected }?.let { pushNotification(ctx, it) }
+                    MoondropLink.snapshot().takeIf { it.connected }?.let {
+                        pushNotification(ctx, it)
+                        PodNotification.onSnapshot(ctx, it)
+                    }
                 }
                 is PodEvent.AncChanged ->
                     pushAnc(ctx, MoondropLink.snapshot())
@@ -295,7 +308,10 @@ object ControlBridge {
                     }
                 }
                 is PodEvent.GestureChanged -> pushGesture(ctx, event.conf.toPayload())
-                is PodEvent.Disconnected -> cancelNotification(ctx)
+                is PodEvent.Disconnected -> {
+                    cancelNotification(ctx)
+                    PodNotification.cancel(ctx)
+                }
                 else -> Unit
             }
         }

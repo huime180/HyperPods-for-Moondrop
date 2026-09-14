@@ -34,11 +34,13 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import moe.chenxy.hyperpods.R
 import moe.chenxy.hyperpods.core.MoondropModels
 import moe.chenxy.hyperpods.hook.RomProfile
+import moe.chenxy.hyperpods.pods.PodNotification
 import moe.chenxy.hyperpods.ui.ModuleSettingsState
 import moe.chenxy.hyperpods.ui.rememberModuleSettings
 import top.yukonga.miuix.kmp.basic.Card
@@ -73,6 +75,9 @@ fun SettingsPage(
     // 严格判定（只看 HyperOS 自报版本属性）：非 HyperOS 上没有焦点通知 / 超级岛这两套实现，
     // 两个开关直接禁用，而不是让用户打开一个什么都不做的开关。
     val isHyperOs = remember { RomProfile.isXiaomiRom }
+    // 通知开关/总开关改完要立刻生效（应用自己发的那条通知由 pods/PodNotification.kt 落地）：
+    // 不必等下一次电量轮询（最长 30s）才把已经发出去的那条撤掉。
+    val context = LocalContext.current
     val themeOptions = listOf(
         stringResource(R.string.theme_follow_system),
         stringResource(R.string.theme_light),
@@ -113,7 +118,10 @@ fun SettingsPage(
                     title = stringResource(R.string.module_enable_title),
                     summary = stringResource(R.string.module_enable_summary),
                     checked = settings.enabled,
-                    onCheckedChange = { settings.setEnabled(it) },
+                    onCheckedChange = {
+                        settings.setEnabled(it)
+                        PodNotification.refreshFromSnapshot(context)
+                    },
                 )
                 // 「通知栏显示」：默认开；值落到 hyperpods_moondrop_settings 组的
                 // HyperPodsPrefsKey.SHOW_NOTIFICATION，hook 侧经 getRemotePreferences(同组名) 读取。
@@ -121,7 +129,10 @@ fun SettingsPage(
                     title = stringResource(R.string.notification_display_title),
                     summary = stringResource(R.string.notification_display_summary),
                     checked = settings.showNotification,
-                    onCheckedChange = { settings.setShowNotification(it) },
+                    onCheckedChange = {
+                        settings.setShowNotification(it)
+                        PodNotification.refreshFromSnapshot(context)
+                    },
                     enabled = settings.enabled,
                 )
                 // 焦点显示 / 超级岛提示：HyperOS 专有（见文件头与 RomProfile.isXiaomiRom）。

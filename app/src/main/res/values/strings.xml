@@ -90,6 +90,9 @@
     <!-- 通知栏显示：耳机状态在系统通知栏 / 蓝牙设置里的常驻显示（默认开） -->
     <string name="notification_display_title">Notification display</string>
     <string name="notification_display_summary">Show the earbuds state as a normal notification in the status bar (works on any ROM)</string>
+    <!-- 应用进程自己发的那条耳机状态通知（pods/PodNotification.kt）：模块未激活时它是唯一的通知来源 -->
+    <string name="notification_channel_status">Earbuds status</string>
+    <string name="notification_channel_status_desc">Connection state and battery of the connected Moondrop earbuds</string>
     <string name="show_strong_toast_title">Super Island</string>
     <string name="show_strong_toast_summary">Also show battery and mode changes on the HyperOS Super Island</string>
     <string name="show_focus_island_title">Focus display</string>

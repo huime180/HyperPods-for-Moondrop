@@ -18,8 +18,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import moe.chenxy.hyperpods.utils.data.HyperPodsPrefsKey
 
-/** 模块首选项组名，与 hook/XposedEntry.kt 的 PREFS_GROUP 完全一致。 */
-private const val MODULE_PREFS_GROUP = "hyperpods_moondrop_settings"
+/**
+ * 模块首选项组名，与 hook/XposedEntry.kt 的 PREFS_GROUP 完全一致。
+ * internal：pods/PodNotification.kt（应用自己那条状态通知的开关）读的是同一组，
+ * 不在这里再抄一份字符串。
+ */
+internal const val MODULE_PREFS_GROUP = "hyperpods_moondrop_settings"
 
 /** HyperPodsPrefsKey.MODEL_MODE 的两个取值。 */
 private const val MODEL_MODE_AUTO = "auto"
