@@ -101,8 +101,10 @@ fun rememberModuleSettings(): ModuleSettingsState {
     }
 }
 
-/** UI 侧偏好文件名：与 ui/PodState.kt 的 UI_PREFS 同值（同一个文件，避免 UI 偏好分散成两份）。 */
-private const val UI_PREFS_GROUP = "hyperpods_moondrop_ui"
+/*
+ * 主题模式用的偏好文件就是 ui/PodState.kt 那份 UI 侧偏好（同一个文件，避免 UI 偏好分散成两份），
+ * 因此不再在这里另存一份文件名字符串：直接复用同包内的 UI_PREFS_GROUP（见 PodState.kt）。
+ */
 
 /** 主题模式：0 跟随系统 / 1 浅色 / 2 深色（与 ui/App.kt 的映射一致）。 */
 const val THEME_MODE_KEY = "theme_mode"

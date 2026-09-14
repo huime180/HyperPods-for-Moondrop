@@ -155,7 +155,8 @@ private object XposedServiceBridge : XposedServiceHelper.OnServiceListener {
  * 供非 UI 的调用方（pods/PodNotification）使用：只有注册过 listener，框架才会把 Binder 递进来。
  *
  * 注意：只在主线程调用 —— libxposed 的 registerListener 内部会走 ContentProvider
- * （ControlBridge.ensureInit 的两个调用方都是主线程）。
+ * （ControlBridge.ensureInit 的调用方 —— ui/PodState.kt 的 UI、pods/ControlReceiver、
+ * pods/BluetoothConnectReceiver 的 BroadcastReceiver.onReceive —— 都在主线程）。
  */
 internal fun primeXposedServiceRegistration() {
     XposedServiceBridge.ensureRegistered()
