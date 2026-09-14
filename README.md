@@ -17,19 +17,6 @@
 
 ---
 
-## 构建状态（1.0.0 / versionCode 1）
-
-| 项 | 状态 |
-|---|---|
-| 单元测试 | ✅ CI 跑 `:app:testDebugUnitTest`，**47** 个用例：`GaiaProtocolTest` 14 + `BatteryCodecTest` 15 + `TouchV2Test` 18 |
-| 编译 | ✅ CI `:app:assembleDebug` 与 `:app:assembleRelease`（release 步骤带 `continue-on-error: true`）；AGP 9.1.0 / Kotlin 2.3.20 / JDK 17 / Gradle 9.4.1 |
-| APK | ✅ GitHub Actions 产出 `app-debug.apk`（可直接安装）与 `app-release-unsigned.apk`（需自行签名）；artifact 名 **`MiuixMoondrop-apk`**（另有 `test-results`） |
-| 装机 | ✅ 已装到目标平板（Xiaomi Pad 8 Pro / HyperOS 4.0） |
-| 真机功能验证 | 🟡 **布丁（PUDDING）** 已在真机上联调（2026-09-14 / 09-15），结论写在代码注释里：`core/MoondropModels.kt` 的 `note`、`pods/MoondropLink.kt`、`pods/ControlBridge.kt`、`ui/ConnectionPopupActivity.kt`。其余 16 款机型**没有**本应用自己的真机结论 |
-
-> 本文档作者的本机环境没有 JDK / Android SDK，**CI 是唯一的编译验收手段**；
-> 工作流见 [`.github/workflows/build.yml`](.github/workflows/build.yml)（job 名 `Build APK`）。
-
 ## 一、这是什么
 
 把一副水月雨（MOONDROP）蓝牙耳机接进 Android：应用自己通过 BLE GATT 或 Classic BT
@@ -55,12 +42,6 @@ RFCOMM/SPP 与耳机通话（Qualcomm GAIA 协议），读写三路电量、降�
 ---
 
 ## 二、本项目的由来
-
-本项目**不是**从 PuddingPods fork 出来的 —— [lingbai-rong/PuddingPods](https://github.com/lingbai-rong/PuddingPods)
-的 GitHub 仓库里**只有文档，没有源码**（本仓库根的 `PuddingPods/` 目录就是它的克隆，
-里面只有 `PUDDING_ADAPTATION.md`、README 和 gradle 空壳）。
-
-因此本项目的做法是「拼装 + 重写协议层」：
 
 | 来源 | 取用了什么 |
 |---|---|
