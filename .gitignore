@@ -40,3 +40,6 @@ __pycache__/
 *.p12
 /keystore.properties
 /signing.properties
+
+# 设备抓包（GAIA / btsnoop / logcat 导出），可能含蓝牙地址，不入库
+/_captures/
