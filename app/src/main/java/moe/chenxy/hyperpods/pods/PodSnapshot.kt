@@ -108,15 +108,13 @@ data class PodSnapshot(
     val promptIndex: Int = 0,
     /** LHDC 开关；null = 未知。false 时按 AAC/LDAC 等基础编码工作。 */
     val lhdcOn: Boolean? = null,
-    /** 当前系统 A2DP 实际协商到的编解码名（来自系统，用于与 LHDC 开关对照） */
-    val activeCodec: String = "",
     /** 双设备连接；null = 未知 */
     val dualConnectionOn: Boolean? = null,
     /**
      * 空间音频（feature 18）开关；null = 还没读到。
      *
      * ⚠ 取值语义见 [Gaia.spatialGet] / [Gaia.spatialSet]：payload `0`=关 / `1`=开。
-     * 这份状态**从未在真机上验证过**（PROTOCOL.md 第 8 节把它标为未接线/未验证），
+     * 读写与回读都已接线（PROTOCOL.md 第 8 节），但这份状态**尚未在真机上验证过**，
      * 所以 UI 在 null 时按「关」保守呈现，而不是猜成已开启。
      */
     val spatialEnabled: Boolean? = null,

@@ -102,7 +102,7 @@ commandValue = (feature << 9) | (type << 7) | (command & 0x7F)
 | ANC V2：设模式 4 | `00 1D 40 04 04` | cmd 4 + 模式码 |
 | ANC V2：读切换配置 | `00 1D 40 29` | cmd 41 |
 | ANC V2：写切换配置 | `00 1D 40 2A 01 01 01 01 00` | cmd 42 + `[STATE][ANC_ON][ANC_OFF][TRANSPARENT][ORDER]` |
-| 空间音频：读 | `00 1D 24 01` | feature 18/cmd 1（未接线） |
+| 空间音频：读 | `00 1D 24 01` | feature 18/cmd 1（**已接线**；命令号与 payload 只来自本表，未真机验证） |
 | 左右声道反转：读 | `00 1D 3C 01` | feature 30/cmd 1（未接线） |
 | 关机 | `00 1D 30 01` | feature 24/cmd 1（未接线） |
 
@@ -159,7 +159,7 @@ commandValue = (feature << 9) | (type << 7) | (command & 0x7F)
 | 15 | `0x0F` `F_DAC_GAIN` | 增益 | ✅ |
 | 16 | `0x10` `F_CODEC_TYPE` | 编解码（LC3 / LDAC / LHDC） | ✅ LHDC（LC3/LDAC 未接线） |
 | 17 | `F_LIGHT_SENSOR` | 光线传感器 | — |
-| 18 | `F_SPATIAL_AUDIO` | 空间音频 | ⚠ 仅档案标记，未接线 |
+| 18 | `F_SPATIAL_AUDIO` | 空间音频 | ✅ 已接线（读/写/回读都有实现：cmd 1 读、cmd 2 写，头动追踪 cmd 3/4）；⚠ 命令号与 payload 只来自本表，**未真机验证** |
 | 19 | `0x13` `F_LED` | 指示灯 | ✅ |
 | 20 | `0x14` `F_ONEBRINGTWO` | 双设备连接 / 一拖二 | ✅ |
 | 21 | `F_BT_ADDRESS` | 蓝牙地址 | — |
@@ -369,6 +369,10 @@ ANC V2 模式枚举（官方 `AncV2Handler` / moondrop-link `constants.py` 一�
 | 30 声道反转 | 1 / 2 | — |
 | 24 电源 | SET_PWR_OFF = 1 | — |
 | 27 动态低音 | 1 / 2 | — |
+
+> 上表中 **18 空间音频已接线**（`MoondropLink.refreshSpatial` / `setSpatial` / `setHeadTracking`
+> 三条读写路径 + 详情页两个开关），但命令号与 payload 只来自本表，**未真机验证**；
+> 30 声道反转、24 电源、27 动态低音目前只有 `Gaia` 的帧构造函数，客户端没有读写路径。
 
 ### CODEC_TYPE（16）
 
@@ -689,7 +693,8 @@ dev 分支同库同版本）—— 手拼 `miui.focus.pics` / `miui.focus.action
    参数本身待真机复核；`anc4Identity` 系列（`getMap=null`，`setMap.indexOf()` 反查）若读回是 0-based 仍会得到 `-1`。
 4. **GAIA 版本探测**：`00 0A 03 00` 已在连接流程中发送；**探测结果的解析与用途**（是否需要据此切换包格式）未真机确认。
 5. **LHDC 打开后的稳定性**、**双设备连接的写入/断开单台**（需双机）、**9ECA 全部功能**、
-   **空间音频/头动追踪**、**充电位解析**：均未验证。
+   **空间音频/头动追踪**（读/写/回读都已接线，**未真机验证**：命令号与 payload 只来自本表）、
+   **充电位解析**：均未验证。
 6. 上游 FxxkMoondrop 表中把三条 ANC 路径的探测条件写成「BASIC 特性位图含 bit1 / bit3 / bit5」，
    与 feature ID（2 / 8 / 32）不是同一套编号；本项目按 feature ID 在 32-bit word 位图中取位，
    即 `bit 2`、`bit 8`、`bit 32` 对应的位。**哪套读法正确同样取决于第 2 条。**

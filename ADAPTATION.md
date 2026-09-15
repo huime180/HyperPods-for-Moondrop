@@ -198,9 +198,11 @@ data class DcProfile(
 | 猫咖 MOCA | 恒等 `[0,1,2]`（预置待实测） | 有指示灯 | FxxkMoondrop 真机日志 + 用户确认；增益映射**未实测** |
 | EDGE | 档案为恒等 `[0,1,2]`（低/中/高） | — | ⚠ **无实测证据**：EDGE 的增益映射是推断值 |
 
-> ⚠ 空间音频：`hasSpatial` / `hasHeadTracking` 目前只有档案标记与能力字段，
-> `MoondropLink` **没有** `refreshSpatial()` / `setSpatial()` 调用路径（`Gaia.spatialGet()/spatialSet()/headTracking*` 已定义但未被调用）。
-> 也就是说这三个开关当前不会真正读写设备。
+> 空间音频：`hasSpatial` / `hasHeadTracking` 是档案标记 + 能力字段；
+> `MoondropLink` 已接线读写路径（`refreshSpatial()` / `setSpatial()` / `setHeadTracking()`，
+> 命令分别走 `Gaia.spatialGet()/spatialSet()/headTrackingGet()/headTrackingSet()`），
+> 详情页有「空间音频」「头部追踪」两个开关。**命令号与 payload 均未真机验证**，
+> 读不到值时开关按「关」展示、写入按乐观更新 + 回读处理。
 
 ---
 
@@ -377,7 +379,7 @@ payload(V2, size>=3) = `[enabled(0/1)][volume(0..100)][index]`；**没有独立�
 | 5 | EDGE 增益映射 | 档案为恒等 `[0,1,2]`，无实测证据 |
 | 6 | 提示音音量量程 | 已确认为 **0..100 百分比**（官方 App logcat）；但**不同固件是否仍为 100** 未确认，档案可逐机型覆盖 `promptVolumeMax` |
 | 7 | 9ECA 私有协议 | 已实现但未接线、未验证（上游亦标注未实机验证） |
-| 8 | 空间音频 / 头动追踪 | 档案与能力字段存在，客户端无读写路径 |
+| 8 | 空间音频 / 头动追踪 | 客户端读写已接线（`refreshSpatial` / `setSpatial` / `setHeadTracking` + 详情页两个开关），但**未真机验证**：命令号与 payload 只来自本表 |
 | 9 | `AudioCuration cmd 41/42`（ANC 切换配置） | 上游 FxxkMoondrop 记录 GA2 对 cmd 41 回包不稳定，**不推荐**；本项目也未使用 |
 | 10 | 双设备连接的写入与断开单台 | 读取已验证，写入/断开需双机实测（上游原文） |
 | 11 | 13 款「推断」机型 | 需逐型核对 ANC/Gain/LED 映射 |
@@ -389,7 +391,7 @@ payload(V2, size>=3) = `[enabled(0/1)][volume(0..100)][index]`；**没有独立�
 
 * `ancV2Identity()` 已定义但无任何机型引用（死代码）；`AncMode.LIVE` 亦只出现在该组合里。
 * `Gaia` 中以下 API 已实现但客户端未调用：`registerNotification()`、
-  `spatialGet/Set()`、`headTrackingGet/Set()`、`powerOff()`、`basicGetVariant/AppVersion/SerialNumber/TwsStatus/EarbudLang()`、
+  `powerOff()`、`basicGetVariant/AppVersion/SerialNumber/TwsStatus/EarbudLang()`、
   `ldacGet/Set()`、`lc3Get/Set()`、`ancV2GetSwitchConf()/ancV2SwitchConf()`、`audioCurationSetStateIndex()`。
 * `BatteryCodec.buildSupportedQuery()` / `buildLegacyQuery()` 与部分解析器同样是「备用实现」，
   真正在流程里用的是 `Gaia.batteryGetAllV4()` / `Gaia.batteryGetAll()` / `Gaia.batteryGet()`。
@@ -421,15 +423,18 @@ payload(V2, size>=3) = `[enabled(0/1)][volume(0..100)][index]`；**没有独立�
 |---|---|---|
 | 系统蓝牙 → 应用进程 | A2DP `CONNECTION_STATE_CHANGED` 系统广播 | `BluetoothConnectReceiver` 判定是否水月雨设备（名字 → 已存地址 → 否则 fail-closed），命中才 `MoondropLink.connect(device)` |
 | `MoondropLink` → `ControlBridge` | `PodEvent.Connected` / `BatteryChanged` / `Disconnected` | `PodListener` 回调：刷新状态栏通知（`PodNotification`）、首次拿到有效电量后排队弹连接弹窗 |
-| UI → `MoondropLink` | `setAnc` / `setGain` / `setLed` / `setPromptTone` / `setPromptVolumeRaw` / `setLhdc` / `setDualConnection` / `setGesture` | 直接方法调用（同进程），没有任何广播 |
+| UI → `MoondropLink` | `setAnc` / `setGain` / `setLed` / `setPromptTone` / `setPromptVolumeRaw` / `setLhdc` / `setDualConnection` / `setGesture` / `setSpatial` / `setHeadTracking` | 直接方法调用（同进程），没有任何广播 |
 
 电量在进程内以 `BatterySnapshot` 流转；弹连接弹窗时用 `BatteryCodecWire` 编码成 `Bundle`
 （`left`/`right`/`case` + `*_charging`；`255 = 未知`、`value or 128 = 充电中`）塞进 Intent extra。
 
-**仍未接线 / 未验证的部分**：
+**仍需真机验证的部分**：
 
-* 空间音频 / 头动追踪（`Gaia.spatialGet/Set`、`headTracking*`）**未接到客户端**；
+* 空间音频 / 头动追踪：读（`Gaia.spatialGet/headTrackingGet`）、写（`spatialSet/headTrackingSet`）、
+  写完回读都已接到客户端，**但从未在支持该功能的真机上验证过**（命令号与 payload 只来自本文档的协议表）；
 * 低延迟模式本应用不实现（不是 GAIA 命令，也没有自己的开关）。
 
-这些是**接线**而不是**协议**问题：新增机型时，只要档案能被匹配、能力位图/回包能被解析，
-协议层与应用界面就能工作；系统级的那套集成（设置页伪装 / 融合设备中心 / 超级岛）已不在本项目中。
+接线已经完成，剩下的风险在**协议**（空间音频的命令号与 payload 没有真机证据）而不是接线：
+新增机型时，只要档案能被匹配、能力位图/回包能被解析，协议层与应用界面就能工作。
+系统级的那套集成（设置页伪装 / 融合设备中心接管）已不在本项目中；通知侧的 HyperOS
+焦点通知与超级岛改由应用自己实现（`pods/PodFocusNotification.kt` / `pods/PodIslandNotification.kt`）。

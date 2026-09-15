@@ -91,9 +91,13 @@ object MoondropOfficialImages {
     private val json = Json { ignoreUnknownKeys = true }
 
     /**
-     * 拉官方产品目录（105 款、约 120 KB）。
+     * 拉官方产品目录。
      *
-     * 只保留蓝牙耳机（`type = "BT"`）且拿得到机型图的条目，按名称排序。
+     * 接口原始返回**一百余条**（含非蓝牙产品；2026-09-15 curl 实测 106 条、约 123 KB，
+     * 此前的记录是 105 条，官方上下架会让它继续变动）。这里只保留蓝牙耳机
+     * （`type = "BT"`）且拿得到机型图的条目，因此**过滤后是 49 款** —— 这才是 UI 里
+     * 真正能选的机型数量（同次实测）。
+     *
      * 任何失败都返回**空列表**：调用方据此显示「拉取失败 / 手动选择」，不要把异常带进 Compose。
      */
     fun fetchProducts(): List<MoondropOfficialProduct> = runCatching {

@@ -89,7 +89,7 @@ object PodImageStore {
      * 连接后自动取图：按设备名在官方目录里找对应机型，找到就拉一张落盘（阻塞 IO）。
      *
      * 认不出来就**不猜**（返回 false），让用户在详情页「机型图片」里手动选 ——
-     * 官方目录 105 款、本应用的型号档案 17 款，名称对不上是常态。
+     * 官方目录过滤后 49 款（接口原始一百余条）、本应用的型号档案 17 款，名称对不上是常态。
      */
     fun fetchOfficialImage(context: Context, address: String, deviceName: String?): Boolean {
         if (address.isBlank()) return false

@@ -6,7 +6,7 @@
  * 底部等宽 TextButton；必须放在 Miuix Scaffold 里（详情页就是）。
  *
  * 三处与「列表直接铺满」不同的取舍：
- *   · 官方目录有 105 款，一次拉 105 张缩略图不现实（每张 160~230 KB），所以列表行**懒加载**：
+ *   · 官方目录过滤后有 49 款，一次拉 49 张缩略图不现实（每张 160~230 KB），所以列表行**懒加载**：
  *     每行的缩略图由这一行自己的 LaunchedEffect 下载（LazyColumn 只为真正组合出来的那几行
  *     跑），下载 + 解码全部在 Dispatchers.IO，结果进 [OfficialThumbCache] 内存缓存；
  *     下载中 / 失败显示仓库既有的 img_box 占位图；
@@ -108,7 +108,7 @@ fun OfficialImagePickerDialog(
         loading = false
     }
 
-    // 只为选中项下一个预览（105 款全下太重）
+    // 只为选中项下一个预览（49 款全下太重）
     LaunchedEffect(selected?.uuid) {
         preview = null
         val path = selected?.boxPath() ?: return@LaunchedEffect
@@ -230,7 +230,7 @@ fun OfficialImagePickerDialog(
  * 列表里的一行：左侧缩略图 + 机型名（置顶的当前机型再多一行小字）。
  *
  * 缩略图在**这一行自己的 LaunchedEffect** 里加载 —— LazyColumn 只为真正组合出来的行跑它，
- * 所以滑到哪一行才下哪一张（不会一进列表就下 105 张）。
+ * 所以滑到哪一行才下哪一张（不会一进列表就下 49 张）。
  */
 @Composable
 private fun OfficialProductRow(
@@ -302,7 +302,7 @@ private fun OfficialProductRow(
  * 为什么单独放一个对象：
  *   · 缓存要跨行、跨滚动存活 —— 放进 composable 的 remember 里，行一滑出组合就被回收，
  *     来回滚动会反复下载同一张图；
- *   · 解码必须采样：官方原图 1125×597，整张 ARGB 位图约 2.6 MB，105 行全尺寸留在内存里
+ *   · 解码必须采样：官方原图 1125×597，整张 ARGB 位图约 2.6 MB，49 行全尺寸留在内存里
  *     是几百 MB。缩略图只有 48dp，这里用 `inJustDecodeBounds` 量一次尺寸、再算 inSampleSize，
  *     把长边压到 200~300 px 量级（1125×597 → inSampleSize=4，约 170 KB/张）。
  *
@@ -317,10 +317,10 @@ private object OfficialThumbCache {
     private const val TARGET_PX = 128
 
     /**
-     * 缓存上限（项数）。官方目录只有 105 款蓝牙耳机，128 足以装下整份列表。
+     * 缓存上限（项数）。官方目录过滤后只有 49 款蓝牙耳机，128 足以装下整份列表。
      *
      * 位图按 [TARGET_PX] 量级采样后每张约 170 KB（281×149×4B），装满也就 20 MB 上下；
-     * 不设上限的话，反复开关对话框会把 105 张全尺寸图（每张 2.6 MB）慢慢攒在内存里。
+     * 不设上限的话，反复开关对话框会把 49 张全尺寸图（每张 2.6 MB）慢慢攒在内存里。
      */
     private const val MAX_ENTRIES = 128
 

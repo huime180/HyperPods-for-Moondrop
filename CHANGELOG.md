@@ -30,16 +30,31 @@
   静默拦掉，因此最多**重试 3 次**（间隔 800 ms，用 `lastShownAt` / `visible` 确认是否真的显示）。
 * **后台弹出权限**：为让应用在后台也能弹连接弹窗，声明了 `SYSTEM_ALERT_WINDOW`
   （「显示在其他应用上层」），并在设置页提供跳转入口；**HyperOS 上还需手动开启「后台弹出界面」**。
-* **设置页收窄**：只剩「主题」+ 三项（通知栏显示 / 连接时自动唤出连接弹窗 / 后台弹出弹窗权限入口）
-  + 手势入口 + 关于；原来的「模块」页签（LSPosed 状态卡、模块开关、重启作用域）整组删除。
+* **设置页收窄**：只剩「主题」+ 通知卡四项（通知栏显示 / 连接时自动唤出连接弹窗 /
+  **超级岛** / 后台弹出弹窗权限入口）+ 关于；手势入口只留在详情页（耳机相关功能都在耳机页），
+  原来的「模块」页签（LSPosed 状态卡、模块开关、重启作用域）整组删除。
 * **降噪子排图标**：主排「通透 / 降噪 / 关闭」图标在上、文案在下；降噪生效时展开
   「自定义 / 抗风噪 / 基本」，每档 on/off 两态（自定义 `ic_adaptive_*`、抗风噪 `ic_anti_wind_*`
   为本项目自绘、基本复用 `ic_openanc_*`），idle 图标另有 `drawable-night` 变体。
 * **手势**（`ui/GesturePage.kt`，TOUCHV2 / feature 22）：5 个字节每字节双耳（高 4 位左、低 4 位右），
   页面为 5 × 2 = **10 行**；**同侧**长按 1 秒与长按 3 秒互斥（只清同一只耳的另一档），
   单击/双击/三击之间没有互斥。
+* **机型图自动导入**：连上后按设备名在 MOONDROP 官方产品目录里找对应机型，命中就下载那张
+  **85% 透明的官方产品渲染**落盘（`pods/MoondropOfficialImages.kt` + `pods/PodImageStore.kt`；
+  目录原始一百余条，按 `type = "BT"` 且拿得到机型图过滤后是 **49 款**）。认不出来就**不猜**，
+  由用户在详情页「机型图片」选择框（`ui/components/OfficialImagePickerDialog.kt`，缩略图懒加载 + 采样解码）
+  里手动选或恢复默认。
+* **空间音频 / 头部追踪**（feature 18）：详情页两个开关，读（`refreshSpatial`，随 `refreshAll` 轮询）、
+  写（`setSpatial` / `setHeadTracking`）与写完回读都已接线，状态落在
+  `PodSnapshot.spatialEnabled` / `headTrackingOn`；同一 feature 上 cmd 1 与 cmd 3 两条读共用一把
+  串行锁（`spatialReadLock`，因为 `responses` 只按 feature 建键，并发会让回包串台）。
+  **命令号与 payload 未真机验证**，读不到就按「关」展示。
 * **已移除**：低延迟开关（不是 GAIA 命令，交由系统蓝牙设备详情页）；详情页的「当前编码」行
-  （数据源是蓝牙进程的 hook 广播，随去模块化消失、恒显示「未知」，已整行删除）。
+  （数据源是蓝牙进程的 hook 广播，随去模块化消失、恒显示「未知」，已整行删除），
+  连同它**整条死数据链**：`PodSnapshot.activeCodec`、`MoondropLink` 的 `activeCodec` 字段 /
+  断开清空 / `onSystemCodecChanged()` 回调，以及无人注册的系统编码重放钩子
+  （`systemCodecReprobe` / `setSystemCodecReprobe()` / `reprobeSystemCodec()` 与两个
+  `CODEC_REPROBE_*` 常量）。
 * **测试**：CI 跑 `:app:testDebugUnitTest`，共 **47** 例（`GaiaProtocolTest` 14 +
   `BatteryCodecTest` 15 + `TouchV2Test` 18）。
 
@@ -254,7 +269,7 @@
 6. **低延迟链路已实现但未在真机验证**：`ControlBridge` → `com.android.bluetooth` 的反射桥
    （厂商方法优先，A2DP codec `getCodecStatus` / `setCodecConfigPreference` 兜底）→ `LOW_LATENCY_CHANGED`；
    隐藏 API 不可用时只回「保持原状态」并记日志。
-7. 空间音频 / 头动追踪（`Gaia.spatialGet/Set`、`headTracking*`）仍未接线到客户端。
+7. 空间音频 / 头动追踪（`Gaia.spatialGet/Set`、`headTracking*`）仍未接线到客户端。**（后续已接线：见文首「当前状态」——读/写/回读都有实现，但同样没有真机验证）**
 8. 9ECA 全部功能、LHDC 打开后的稳定性、双设备连接写入/断开、充电位解析均未验证。
 9. `SettingsHeadsetHook` 的注入签名（`updateAtUiInfo / updateAncUi / refreshStatus`）需实机核对；
    `MiuiHeadsetBattery` 电量控件注入未实现。

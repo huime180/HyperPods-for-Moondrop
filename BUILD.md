@@ -246,8 +246,11 @@ $ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs MiuixMoondrop-1.
 4. 「连上了但不弹连接弹窗」九成是缺「显示在其他应用上层」/「后台弹出界面」——
    Android 10+ 的 BAL 会**静默**拦掉后台启动 Activity（不报错、无回调）。
    `ControlBridge` 会重试 3 次并把判定结果写进日志。
-5. 若干「已实现但未接线」的能力（空间音频 / 头动追踪、9ECA、LC3 / LDAC）构建不会报错，
-   但功能不会生效；清单见 [README.md](README.md) 第七节。
+5. 若干「已实现但未接线」的能力（9ECA、LC3 / LDAC、声道反转 / 关机 / 动态低音）构建不会报错，
+   但功能不会生效；清单见 [ADAPTATION.md](ADAPTATION.md) 第九 / 十一节与
+   [PROTOCOL.md](PROTOCOL.md) 第 12 节。空间音频 / 头动追踪**已接线**（详情页两个开关 + 读写 +
+   回读），构建同样不会报错，但**未真机验证**，命令号与 payload 只来自
+   [PROTOCOL.md](PROTOCOL.md) 第 8 节。
 6. 提示音（feature `0x0E`）的命令号与 payload **已由官方 App 自身 logcat 实机确认**
    （GET=cmd 1 / SET=cmd 2，payload(V2)=`[enabled, volume(0..100), index]`，写入必须一次给全三字节），
    单测断言的就是日志原样字节；`index` 语义未确认（见 [PROTOCOL.md](PROTOCOL.md) 第 6 节）。

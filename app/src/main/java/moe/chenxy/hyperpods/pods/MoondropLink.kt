@@ -87,8 +87,6 @@ object MoondropLink {
     @Volatile private var sessionStartedAt = 0L
     private var readerJob: Job? = null
     private var pollJob: Job? = null
-    /** 有界的「请系统侧重放编码」探测协程（LHDC 切换后起，断开时取消） */
-    private var codecReprobeJob: Job? = null
 
     private val framer = GaiaFramer()
     private val batteryState = BatteryState()
@@ -111,14 +109,14 @@ object MoondropLink {
      * 只由真实回包（回读 / 主动通知，见 [applyLhdc]）更新，不被乐观值污染。
      */
     @Volatile private var lhdcConfirmed: Boolean? = null
-    @Volatile private var activeCodec = ""
     @Volatile private var dualConnectionOn: Boolean? = null
     /**
      * 空间音频（feature 18）开关；null = 还没读到。
      *
      * ⚠ 协议语义核实于 PROTOCOL.md 第 8 节：GET/SET = 1/2、payload `0/1`（与指示灯同一口径，
-     * 见 [Gaia.spatialSet] 的写法）；**本应用从未在支持空间音频的真机上跑通它**，PROTOCOL.md
-     * 也把这一节标为「未接线 / 未验证」。所以 UI 只按读回值展示，读不到就不猜。
+     * 见 [Gaia.spatialSet] 的写法）；读/写/回读都已接线，但**本应用从未在支持空间音频的真机上
+     * 验证过**（PROTOCOL.md 把这一节标为「已接线、未真机验证」）。所以 UI 只按读回值展示，
+     * 读不到就不猜。
      */
     @Volatile private var spatialEnabled: Boolean? = null
     /** 头部追踪（同一 feature 18 的 cmd 3/4：GET/SET）；null = 还没读到。同样待真机确认。 */
@@ -137,16 +135,6 @@ object MoondropLink {
 
     // 每个 feature 只保留一个等待者，避免并发请求互相覆盖（GAIA 无序列号）
     private val responses = HashMap<Int, java.util.concurrent.CompletableFuture<ByteArray>>()
-
-    /**
-     * 系统编码重放钩子：由外部注入，**当前没有任何注入方**。
-     *
-     * 原注入方是 `ControlBridge`（给 `com.android.bluetooth` 里的 hook 发显式广播 `UI_INIT`，
-     * 那边回一条 `CODEC_CHANGED`），那套 hook 已随 Xposed 模块删除。保留这个接口是为了让
-     * 协议层不硬依赖任何系统侧实现：未注入时静默跳过（纯 JVM 单测 / 未初始化），
-     * 将来若能从系统 A2DP 拿到真实编码，再接上即可。
-     */
-    @Volatile private var systemCodecReprobe: (() -> Unit)? = null
 
     /** 版本探测响应的伪 feature key（真实 feature 非负，不会冲突） */
     private const val PROBE_FEATURE_KEY = -1
@@ -182,13 +170,6 @@ object MoondropLink {
     private const val LHDC_CONFIRM_RETRIES = 2
     private const val LHDC_CONFIRM_RETRY_DELAY_MS = 700L
 
-    /**
-     * LHDC 切换后请系统侧重放 A2DP 编码的次数与间隔。
-     * 系统编码是**异步**重新协商的：固定几次探测即止，不是轮询。
-     */
-    private const val CODEC_REPROBE_ATTEMPTS = 3
-    private const val CODEC_REPROBE_INTERVAL_MS = 700L
-
     fun init(context: Context, listener: PodListener) {
         appContext = context.applicationContext
         addListener(listener)
@@ -204,14 +185,6 @@ object MoondropLink {
     }
 
     fun isInitialized(): Boolean = appContext != null
-
-    /**
-     * 注册「请系统侧重放一次真实编码」的钩子（可选；当前无人注册）。
-     * 传 null 可注销。调用次数由本侧限死，见 [reprobeSystemCodec]。
-     */
-    fun setSystemCodecReprobe(action: (() -> Unit)?) {
-        systemCodecReprobe = action
-    }
 
     fun sniffModel(deviceName: String?): MoondropModel? = MoondropModels.match(deviceName)
 
@@ -244,7 +217,6 @@ object MoondropLink {
         promptVolumeMax = model.features.promptVolumeMax,
         promptIndex = promptIndex,
         lhdcOn = lhdcOn,
-        activeCodec = activeCodec,
         dualConnectionOn = dualConnectionOn,
         spatialEnabled = spatialEnabled,
         headTrackingOn = headTrackingOn,
@@ -307,15 +279,6 @@ object MoondropLink {
         gatt = null; cmdChar = null
         device = null
         responses.clear()
-        // 迟到的编码重放探测不能跨越会话继续存活
-        codecReprobeJob?.cancel(); codecReprobeJob = null
-        // ⚠ 系统编码属于**本次会话**：不清掉的话，重连后 UI 会把上一段会话的编码
-        //   （例如 AAC）当成当前编码显示。空串 = UI 的「未知」占位
-        //   （见 PodDetailPage.activeCodecLabel 规则 ④）。
-        if (activeCodec.isNotEmpty()) {
-            Log.i(TAG, "disconnect: clear activeCodec=$activeCodec")
-            activeCodec = ""
-        }
         // 乐观更新的回退基线同样只在本会话内有效
         lhdcConfirmed = null
         if (notify) emit(PodEvent.Disconnected)
@@ -984,9 +947,7 @@ object MoondropLink {
      *      [LHDC_CONFIRM_RETRIES] 次（旧实现直接 return，[lhdcOn] 留在旧值，
      *      UI 就把开关弹回去 —— 用户看到的「打开 LHDC 没反应」）；
      *   ④ 只有全部重试都失败才回退到最后一次被设备确认的值（[lhdcConfirmed]，
-     *      可能为 null = 未知），并打日志 —— 绝不留一个永远错误的值；
-     *   ⑤ 最后请系统侧重放一次真实编码：系统 A2DP 是异步重新协商的，
-     *      见 [reprobeSystemCodec]（该钩子当前无人注册，因此这一步会直接跳过）。
+     *      可能为 null = 未知），并打日志 —— 绝不留一个永远错误的值。
      */
     fun setLhdc(on: Boolean) {
         val lastConfirmed = lhdcConfirmed
@@ -1017,7 +978,6 @@ object MoondropLink {
                 lhdcOn = lastConfirmed
                 lastConfirmed?.let { emit(PodEvent.LhdcChanged(it)) }
             }
-            reprobeSystemCodec()
             emitState()
         }
     }
@@ -1032,34 +992,6 @@ object MoondropLink {
             }
         }
         return false
-    }
-
-    /**
-     * LHDC 切换后请系统侧重放一次真实 A2DP 编码。
-     *
-     * 为什么需要：耳机侧开关生效后，系统 A2DP 会话要**异步**重新协商才会从 AAC 切到
-     * LHDC，而系统回调的时机不保证，于是「当前编码」可能长期停在切换前的旧值。
-     * 有钩子时这里主动问一次系统侧；**当前没有注入方**（原注入方是蓝牙进程里的 hook，
-     * 已随模块删除），所以本方法会直接打一条日志后返回。
-     *
-     * **有界**：固定 [CODEC_REPROBE_ATTEMPTS] 次、间隔 [CODEC_REPROBE_INTERVAL_MS]，
-     * 发完即止（不是轮询）；断开时会取消本协程（见 [disconnectInternal]）。
-     */
-    private fun reprobeSystemCodec() {
-        val probe = systemCodecReprobe
-        if (probe == null) {
-            Log.d(TAG, "codec re-probe skipped: no system codec reprobe hook registered")
-            return
-        }
-        codecReprobeJob?.cancel()
-        codecReprobeJob = scope.launch {
-            repeat(CODEC_REPROBE_ATTEMPTS) { i ->
-                if (i > 0) delay(CODEC_REPROBE_INTERVAL_MS)
-                runCatching { probe() }
-                    .onFailure { Log.w(TAG, "codec re-probe #${i + 1} failed", it) }
-                Log.i(TAG, "codec re-probe #${i + 1}/$CODEC_REPROBE_ATTEMPTS requested after LHDC switch")
-            }
-        }
     }
 
     fun setDualConnection(on: Boolean) {
@@ -1115,25 +1047,6 @@ object MoondropLink {
             refreshGestures()
             emitState()
         }
-    }
-
-    /**
-     * 由系统侧（A2DP 编解码协商）回调进来，用于 UI 显示当前实际编码。
-     * **当前无人调用**：原调用方是收蓝牙进程 `CODEC_CHANGED` 广播的 ControlBridge，
-     * 那条链路已随模块删除，因此详情页的「当前编码」会一直落到「未知」。
-     *
-     * ⚠ 断线时 [disconnectInternal] 会清空 [activeCodec]；此时**迟到**的回调
-     * （LHDC 切换后的重放探测、系统回调排队）绝不能把旧编码写回来，
-     * 否则「断开清空」会被立刻撤销。未连接时只记日志。
-     */
-    fun onSystemCodecChanged(codecName: String) {
-        if (!connected) {
-            Log.d(TAG, "onSystemCodecChanged($codecName) ignored: not connected")
-            return
-        }
-        activeCodec = codecName
-        Log.i(TAG, "system codec -> $codecName")
-        emitState()
     }
 
     /** 由系统侧（低延迟开关）回调进来。 */
