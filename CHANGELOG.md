@@ -11,7 +11,8 @@
   `HomePage` / `RestartScope` 等模块专属页面都已删除。
 * **身份**：应用名 `MiuixMoondrop`，`applicationId = moe.huime.miuixmoondrop`，
   Gradle `rootProject.name = "MiuixMoondrop"`，CI 产物名 `MiuixMoondrop-apk`；
-  namespace 与 Kotlin 包名仍是 `moe.chenxy.hyperpods`。仓库页
+  `applicationId`、namespace 与 Kotlin 包名现在统一为 `moe.huime.miuixmoondrop`
+  （2026-09 起源码包名/路径也从 `moe.chenxy.hyperpods` 迁移过来，仓库页
   <https://github.com/huime180/MiuixMoondrop>（旧地址会 301 重定向）。
 * **进程唤醒**：唯一的外部入口是 `pods/BluetoothConnectReceiver.kt` —— manifest 静态接收器，
   监听系统 A2DP `CONNECTION_STATE_CHANGED` 广播，耳机连上时唤醒应用进程。

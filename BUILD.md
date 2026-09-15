@@ -41,7 +41,7 @@
 | kotlinx-serialization-json | 1.9.0 |
 | JUnit | 4.13.2 |
 | minSdk / targetSdk / compileSdk | 35 / 36 / 37 |
-| applicationId / namespace | `moe.huime.miuixmoondrop` / `moe.chenxy.hyperpods` |
+| applicationId / namespace | `moe.huime.miuixmoondrop`（两者同一个，Kotlin 包名同） |
 | versionCode / versionName | 1 / `1.0.0` |
 
 > `libs.versions.toml` 里还有 `agp-lib`（`com.android.library`）与 `kotlinSerialization` / `compose-compiler`
@@ -86,7 +86,7 @@ Android Studio：直接 `Open` 仓库根目录 → 等待 Gradle Sync → 选择
 
 ```bash
 ./gradlew :app:testDebugUnitTest                       # 全部单元测试（CI 用的就是这一条）
-./gradlew :app:testDebugUnitTest --tests "moe.chenxy.hyperpods.core.BatteryCodecTest"
+./gradlew :app:testDebugUnitTest --tests "moe.huime.miuixmoondrop.core.BatteryCodecTest"
 ./gradlew :app:test --stacktrace                       # 全部变体 + 堆栈
 ```
 
@@ -151,9 +151,8 @@ adb install -r MiuixMoondrop-1.0.0-release.apk
 也可以把 APK 拷到设备上直接点击安装。调试用途也可以装
 `app/build/outputs/apk/debug/app-debug.apk`（未混淆，约 37 MB）。
 
-> 从旧包换过来时**先卸载一次**：旧包的签名与现在这套 CI keystore 不同（包名可能也还是改名前的
-> `moe.chenxy.hyperpods.moondrop`），Android 不允许签名不同的同包名覆盖安装。
-> 之后同一套 CI 签名可以直接升级安装。
+> 从旧包换过来时**先卸载一次**：旧包的签名与现在这套正式签名不同，Android 不允许签名不同的
+> 同包名覆盖安装。之后同一套签名可以直接升级安装。
 
 安装后：
 

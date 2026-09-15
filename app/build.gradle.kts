@@ -23,13 +23,13 @@ val signingKeyPassword: String? =
         ?: System.getenv("KEY_PASSWORD")?.takeIf { it.isNotBlank() }
 
 android {
-    namespace = "moe.chenxy.hyperpods"
+    namespace = "moe.huime.miuixmoondrop"
     // Miuix 0.9.3 的 AAR metadata 声明 minCompileSdk=37，低于 37 会在
     // CheckAarMetadata 阶段直接失败，所以必须跟着提到 37。
     compileSdk = 37
 
     defaultConfig {
-        // 应用身份（包名）：与 namespace 解耦 —— namespace 仍是 moe.chenxy.hyperpods
+        // 应用身份（包名）：与 namespace 解耦 —— namespace 仍是 moe.huime.miuixmoondrop
         // （R 类与资源包路径由它决定，改它会牵动全仓库 import，收益与风险不成比例）。
         applicationId = "moe.huime.miuixmoondrop"
         minSdk = 35

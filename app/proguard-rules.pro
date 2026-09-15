@@ -4,5 +4,5 @@
 # 应用只用 Compose / Miuix（纯 Kotlin + 无反射），没有其它需要额外 keep 的入口。
 # 原模块专属的两条已删除：hook 入口类的 keep 与框架依赖的 -dontwarn
 # （Xposed 模块与对应依赖都已从工程里移除，本应用是普通 App）。
--keep class moe.chenxy.hyperpods.core.** { *; }
--keep class moe.chenxy.hyperpods.pods.** { *; }
+-keep class moe.huime.miuixmoondrop.core.** { *; }
+-keep class moe.huime.miuixmoondrop.pods.** { *; }
