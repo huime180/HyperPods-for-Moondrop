@@ -22,15 +22,13 @@
   断开连接时程序化撤掉），由设置页「通知栏显示」开关控制。
   这条通知同时带上 **HyperOS 焦点通知**的 extra（`pods/PodFocusNotification.kt`，
   用 `com.xzakota.hyper.notification:focus-api` 模板库，同 dev 分支），AOD 行是 `L 59% | R 64%`；
-  **超级岛只在连接 / 断开那一刻出现**（`pods/PodIslandNotification.kt`：连接显示「设备名 +
-  已连接」、断开显示「设备名 + 已断开」），5 秒后自动收起，
-  岛布局为「左 = 机型图 + 设备名，右 = 内容」；岛的收起时间写在岛模板的 `islandTimeout`
-  （单位**秒**；模板基类的 `timeout` 是**分钟**，别混）上，并给通知挂 `setTimeoutAfter`
-  作系统侧兜底。常驻那条要「不留岛」靠三条（详见 `PROTOCOL.md` §10.5.3）：岛模板**只写
-  `bigIslandArea`、不写 `smallIslandArea`**、**不写 `islandFirstFloat = false`**（那是强制
-  摘要态，正中小胶囊的地盘）、并显式 `dismissIsland = true` 让摘要态消失 —— 单纯把 `island`
-  置空没用（焦点通知自带摘要态，系统会用默认形态补一个常驻胶囊）。其它 ROM 忽略这些 extra，
-  通知照常显示。
+  **超级岛挂在它上面**（2026-09 起）：岛跟着这条常驻通知一起出现（连接、以及电量每 30s 变化的
+  那一刻），几秒内自己收掉。岛模板只写 `bigIslandArea`、不写 `smallIslandArea`，再显式
+  `dismissIsland = true` ＋ `islandTimeout = 5`（**秒**）—— 四条结论见 `PROTOCOL.md` §10.5.3
+  （含「把 `island` 置空没用」「别写 `islandFirstFloat = false`」这两条负面结论）。
+  同一版删掉了原来那条「连接 / 断开瞬时岛」通知（`pods/PodIslandNotification.kt`）与设置页的
+  「超级岛」开关：岛既已由常驻通知自己带，就不需要第二条通知与第二个开关了；旧版遗留的通道
+  `hyperpods_moondrop_island` 会在下次建通道时被程序化删除。其它 ROM 忽略这些 extra，通知照常显示。
   通知上还挂着一个动作按钮 **「断开连接」**（模板动作栏 `param_v2.actions`，`type = 2` 文字按钮；
   普通通知回落 `Notification.Builder.addAction`），落点是 `pods/PodDisconnectReceiver.kt` →
   `MoondropLink.disconnect()`：断掉的是**本应用**与耳机的那条链路（A2DP / HFP 音频链路归系统
@@ -40,8 +38,8 @@
   静默拦掉，因此最多**重试 3 次**（间隔 800 ms，用 `lastShownAt` / `visible` 确认是否真的显示）。
 * **后台弹出权限**：为让应用在后台也能弹连接弹窗，声明了 `SYSTEM_ALERT_WINDOW`
   （「显示在其他应用上层」），并在设置页提供跳转入口；**HyperOS 上还需手动开启「后台弹出界面」**。
-* **设置页收窄**：只剩「主题」+ 通知卡四项（通知栏显示 / 连接时自动唤出连接弹窗 /
-  **超级岛** / 后台弹出弹窗权限入口）+ 关于；手势入口只留在详情页（耳机相关功能都在耳机页），
+* **设置页收窄**：只剩「主题」+ 通知卡三项（通知栏显示 / 连接时自动唤出连接弹窗 /
+  后台弹出弹窗权限入口）+ 关于；手势入口只留在详情页（耳机相关功能都在耳机页），
   原来的「模块」页签（LSPosed 状态卡、模块开关、重启作用域）整组删除。
 * **降噪子排图标**：主排「通透 / 降噪 / 关闭」图标在上、文案在下；降噪生效时展开
   「自定义 / 抗风噪 / 基本」，每档 on/off 两态（自定义 `ic_adaptive_*`、抗风噪 `ic_anti_wind_*`

@@ -17,9 +17,6 @@
  *   · 「连接时自动唤出连接弹窗」—— 控制 pods/ControlBridge.kt 在耳机连上后自动弹出的
  *     ui/ConnectionPopupActivity（三路电量，与状态栏通知同时刷新）；键
  *     HyperPodsPrefsKey.AUTO_POPUP_ON_CONNECT，同样只走 [ModuleSettingsState]。
- *   · 「超级岛」—— 控制 pods/PodIslandNotification.kt 在连接 / 断开那一刻临时发的那条
- *     超级岛提示（5 秒后收起）；关掉后只保留常驻的焦点通知。键
- *     HyperPodsPrefsKey.SHOW_ISLAND。
  *   · 应用级入口：关于。
  *
  * 「手势操作」入口原本也在这张卡里（由 hasGestures 门控），现已删除：手势是耳机相关功能，
@@ -129,13 +126,6 @@ fun SettingsPage(
                             openBackgroundPopupPermissionSettings(context)
                         }
                     },
-                )
-                // 超级岛开关：关掉后连接 / 断开都不再发那条临时岛（常驻的焦点通知不受影响）
-                SwitchPreference(
-                    title = stringResource(R.string.island_switch_title),
-                    summary = stringResource(R.string.island_switch_summary),
-                    checked = settings.islandEnabled,
-                    onCheckedChange = { settings.setIslandEnabled(it) },
                 )
                 ArrowPreference(
                     title = stringResource(R.string.bg_popup_permission_title),

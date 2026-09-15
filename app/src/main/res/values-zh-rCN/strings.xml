@@ -94,19 +94,14 @@
     <string name="notification_section">通知</string>
     <string name="notification_display_title">通知栏显示</string>
     <string name="notification_display_summary">在状态栏常驻显示耳机的连接与电量状态；HyperOS 上同时按焦点通知 / 超级岛渲染（其它 ROM 就是一条普通通知）</string>
-    <string name="island_switch_title">超级岛</string>
-    <string name="island_switch_summary">连接 / 断开时在 HyperOS 超级岛上短暂提示；关掉后只保留常驻的焦点通知</string>
     <string name="connect_popup_title">连接时自动唤出连接弹窗</string>
     <string name="connect_popup_summary">耳机连上后自动弹出连接弹窗（三路电量），同时刷新状态栏通知；需要下面的后台弹出权限，关掉后仍可从通知点开</string>
     <string name="bg_popup_permission_title">后台弹出弹窗权限</string>
     <string name="bg_popup_permission_summary">授予「显示在其他应用上层」/「后台弹出界面」；否则应用在后台时系统会静默拦掉连接弹窗</string>
     <!-- 应用进程自己发的那条耳机状态通知（pods/PodNotification.kt） -->
     <string name="notification_channel_status">耳机状态</string>
-    <string name="island_disconnected">已断开</string>
-    <string name="island_connected">已连接</string>
     <!-- 通知的动作按钮：模板动作栏那一格（pods/PodNotification.kt + PodFocusNotification.kt） -->
     <string name="notification_disconnect">断开连接</string>
-    <string name="notification_channel_island">耳机状态提示（超级岛）</string>
     <string name="notification_channel_status_desc">已连接水月雨耳机的连接状态与电量</string>
 
     <!-- 关于 -->

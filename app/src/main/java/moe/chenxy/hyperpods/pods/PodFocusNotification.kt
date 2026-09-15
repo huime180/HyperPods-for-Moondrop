@@ -9,17 +9,20 @@
  * 模板的实现，HyperPods（dev）分支在同一台 HyperOS 4 平板上用的就是它，所以这里复用同一个库、
  * 同一套 DSL 调用，不自行发明字段。
  *
- * 岛**怎么才不在岛区留下东西**（用户反馈过三次「常驻焦点通知始终有超级岛」，这里是结论）：
- *   1. 岛模板**只写 `bigIslandArea`，不写 `smallIslandArea`** —— 摘要态没有自己的内容，
- *      岛展开一次就没地方待（dev 仓库蓝牙常驻通知就是这个形态，实测不留岛）；
- *   2. **不要写 `islandFirstFloat = false`** —— 那个字段的意思是「第一次出现时的档位」，
- *      false = **摘要态**，正好是岛区小胶囊的地盘；常驻通知被强制成摘要态就会一直挂着；
- *   3. 常驻通知再显式 `dismissIsland = true`（官方字段：摘要态是否消失，true = 消失），
- *      把「留在岛区」这条路彻底关掉；
- *   4. 把 `island` 置空（或不给 `param_island`）**没用**：焦点通知自带摘要态，系统会用默认
- *      形态补一个常驻胶囊 —— 这条走不通，别再试。
- * 临时岛（[PodIslandNotification]，连接 / 断开那一刻）用同一份模板，另外靠 `islandTimeout`
- * （**秒**）让系统按时收起，并挂 `setTimeoutAfter` 做系统侧兜底。
+ * **超级岛挂在常驻通知上**（2026-09 起）：本应用不再单独发「连接 / 断开」的临时岛通知
+ * （原 pods/PodIslandNotification.kt 与设置页「超级岛」开关一并删除），岛跟着
+ * pods/PodNotification.kt 这条常驻焦点通知一起出现（连接、以及电量变化的那一刻），
+ * 几秒内自己收掉。下面四条是踩过三次坑之后留下的结论，别再走回头路：
+ *   1. **把 `island` 置空不管用**：库的 `Json` 配了 `explicitNulls = false`，null 值根本不会写进
+ *      JSON（「显式置空」在代码上早已走到底）；而焦点通知在 HyperOS 上自带摘要态，不给
+ *      `param_island` 时系统会用默认形态补一个**常驻摘要胶囊** —— 这就是最早「岛一直挂着」的来源；
+ *   2. **不要写 `islandFirstFloat = false`**：该字段含义是「通知第一次出现时的档位」，false = **摘要态**
+ *      —— 摘要态正是岛区小胶囊的地盘，常驻通知被强制成摘要态就会一直挂着；
+ *   3. 岛模板**只写 `bigIslandArea`、不写 `smallIslandArea`**：摘要态没有自己的内容，岛不会长住
+ *      （dev 仓库蓝牙常驻通知就是这个形态）；
+ *   4. 再显式 `dismissIsland = true`（官方字段：摘要态是否消失，true = 消失）＋ `islandTimeout`
+ *      （**秒**）让它几秒内自己退场。真正的判定在设备侧：抓 `MiuixMoondropFocus` 的
+ *      `focus param:` 日志可以看到这段 JSON。
  *
  * 普通 ROM 会忽略这些 extra，通知照常显示，因此带上它们没有兼容性代价。
  */
@@ -42,11 +45,10 @@ object PodFocusNotification {
     private const val PIC_KEY = "key_headset"
 
     /**
-     * 没显式传 `islandTimeout` 时的兜底（**秒**）。
-     * 常驻那条不传秒数：万一系统仍把岛渲染出来（比如 dismissIsland 没被认），它也只在岛区露
-     * 几秒就退场，不会一直挂着 —— 用户反馈的就是「一直挂着」。
+     * 岛在岛区露多久（**秒**）——岛模板字段 `islandTimeout`，由系统到点收起。
+     * 别和模板基类的 `timeout` 混：那个单位是**分钟**，管的是整条通知的存活时间。
      */
-    private const val ISLAND_FALLBACK_TIMEOUT_SECONDS = 5
+    private const val ISLAND_TIMEOUT_SECONDS = 5
 
     /**
      * 构造 V3 焦点通知的 extras；拿不到图片 / 库抛异常时返回 null（调用方就不带 extras，
@@ -56,17 +58,6 @@ object PodFocusNotification {
      * @param contentText    岛右栏要显示的内容：连接时是电量，断开时是「已断开」
      * @param aodText        息屏显示用的紧凑电量行（`L 59% | R 64%`）；空串则不写 AOD 字段
      * @param boxBitmap      机型图；为 null 时回落仓库自带的 img_box
-     * @param withIsland     这一份 extras 是不是「只为岛而发」的临时通知（连接 / 断开那一刻）。
-     *                       **常驻通知传 false**：同样带一份 [bigIslandArea] 的岛模板（不给的话
-     *                       系统会补一个常驻的默认摘要胶囊），但额外写 `dismissIsland = true`
-     *                       让摘要态消失
-     * @param islandTimeoutSeconds 岛显示多久后由系统自动收起（岛的 `islandTimeout` 字段，**单位：秒**）；
-     *                       null = 用 [ISLAND_FALLBACK_TIMEOUT_SECONDS]（几秒）。注意别和模板基类的
-     *                       `timeout` 混：那个单位是**分钟**，管的是整条通知的存活时间，不是岛的。
-     * @param showInShade    是否在通知栏也留一条通知。临时岛传 false —— 只借岛显示一下，
-     *                       不在通知栏里多出/闪出一条（库的 `isShowNotification`）
-     * @param floating       是否让它「浮」起来。**常驻通知传 false**：这样每次电量更新
-     *                       （30s 一轮）不会再展开一次岛；只有临时的连接/断开提示才浮。
      * @param disconnectIntent 通知动作「断开连接」的落点（PendingIntent.getBroadcast 指向
      *                       pods/PodDisconnectReceiver）；null = 不带这个按钮（临时岛就不带）
      * @param disconnectLabel 按钮文案（取本应用的 R.string.notification_disconnect）
@@ -77,10 +68,6 @@ object PodFocusNotification {
         contentText: String,
         aodText: String,
         boxBitmap: Bitmap?,
-        withIsland: Boolean,
-        islandTimeoutSeconds: Int? = null,
-        showInShade: Boolean = true,
-        floating: Boolean = true,
         disconnectIntent: PendingIntent? = null,
         disconnectLabel: String = "",
     ): Bundle? = runCatching {
@@ -90,17 +77,15 @@ object PodFocusNotification {
         val picture = Icon.createWithBitmap(bitmap)
         val extras = FocusNotification.buildV3 {
             val logo = createPicture(PIC_KEY, picture)
-            // enableFloat：通知更新时是否自动展开。常驻通知传 false —— 不跟着每 30s 一轮的
-            // 电量更新再展开一次岛；只有临时的连接/断开提示才浮。
+            // enableFloat 恒为 false：通知更新时不再自动展开岛 —— 岛跟着这条常驻通知出现一次、
+            // 几秒内自己收掉就够了，不该每 30s 一轮的电量更新都再展开一次。
             //
             // 注意：**不要写 islandFirstFloat = false**。它的含义是「通知第一次出现时的档位」，
             // false = 摘要态 —— 而摘要态正是岛区那个「一直挂着的小胶囊」的地盘。常驻通知一旦
             // 被强制成摘要态，就变成「常驻焦点通知始终有超级岛」（用户实测，三次都复现）。
-            enableFloat = floating
+            enableFloat = false
             updatable = true
             ticker = titleText
-            // 临时岛：不要在通知栏留痕
-            if (!showInShade) isShowNotification = false
             // AOD（息屏显示）文案：模板基类自带 aodTitle 字段，直接写即可
             //（不需要像 dev 当初那样再往 miui.focus.param 的 JSON 里塞 param_v2.aodTitle）
             if (aodText.isNotBlank()) aodTitle = aodText
@@ -114,18 +99,16 @@ object PodFocusNotification {
                 title = titleText
                 content = contentText
             }
-            // 岛：**两条路都给**，形态照 dev 仓库蓝牙常驻通知那份（只有 bigIslandArea）。
+            // 岛：常驻通知自己带（2026-09 起不再有单独的临时岛通知）。形态照 dev 仓库蓝牙
+            // 常驻通知那份 —— 只有 bigIslandArea。
             //
-            // 为什么不是「常驻就把 island 置空」：焦点通知在 HyperOS 上自带摘要态，不给
-            // param_island 时系统会用默认形态补一个**常驻的摘要胶囊** —— 置空并不能让它没有岛。
-            // 反过来，只写 bigIslandArea、**不写 smallIslandArea** 时，摘要态没有自己的内容，
-            // 岛展开一次就没地方待（dev 那条「没有超级岛」就是这么成立的）。
-            // 常驻那条再显式 dismissIsland = true（官方字段：摘要态是否消失，true = 消失），
-            // 把「留在岛区」这条路彻底关掉；临时岛靠 islandTimeout（**秒**）自己按时收起。
+            // 只写 bigIslandArea、**不写 smallIslandArea**：摘要态没有自己的内容，岛不会长住
+            // （dev 那条「没有超级岛」就是这个形态）。再显式 dismissIsland = true（官方字段：
+            // 摘要态是否消失，true = 消失）＋ islandTimeout（**秒**）让它在几秒内自己退场。
             island {
                 islandProperty = 1
-                if (!withIsland) dismissIsland = true
-                islandTimeout = islandTimeoutSeconds ?: ISLAND_FALLBACK_TIMEOUT_SECONDS
+                dismissIsland = true
+                islandTimeout = ISLAND_TIMEOUT_SECONDS
                 bigIslandArea {
                     // 布局（用户要求）：左 = 图片 + 设备名，右 = 内容（电量 / 已连接 / 已断开）。
                     // 右栏刻意写成 title 而不是 content：实测右栏只渲染 title —— 原来把电量放在

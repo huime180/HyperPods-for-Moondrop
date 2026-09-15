@@ -70,6 +70,12 @@ object PodNotification {
     /** 电量各组件之间的分隔符（紧凑一行）。 */
     private const val PART_SEPARATOR = " · "
 
+    /**
+     * 老版本那条「连接 / 断开瞬时岛」通知的通道（对应的 pods/PodIslandNotification.kt 已删除）。
+     * 装过旧版的用户把它删掉，免得系统通知设置里留一条永远不再产出的空通道。
+     */
+    private const val LEGACY_ISLAND_CHANNEL_ID = "hyperpods_moondrop_island"
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** 判定 + 落地整段串行化：并发事件不会交叉出两条状态不一致的通知。 */
@@ -212,18 +218,14 @@ object PodNotification {
             val disconnectLabel = context.getString(R.string.notification_disconnect)
             val disconnectTarget = disconnectIntent(context)
             // HyperOS 焦点通知 / 超级岛：带上 MIUI 认的那套 extra（普通 ROM 会忽略，通知照常）。
-            // 图片与 largeIcon 用同一张机型图；拿不到图时 buildExtras 返回 null，这里就不带。
+            // 岛就挂在这条常驻通知上（2026-09 起不再有单独的临时岛通知）；图片与 largeIcon 用同一张
+            // 机型图，拿不到图时 buildExtras 返回 null，这里就不带 extras。
             PodFocusNotification.buildExtras(
                 context = context,
                 titleText = title,
                 contentText = content.replace('\n', ' ').trim(),
                 aodText = aodTitleOf(snapshot),
                 boxBitmap = icon?.bitmap,
-                // 常驻通知**不带岛、也不浮**：焦点通知本身就带 param_island，再叠 enableFloat
-                // 就会被渲染成一个一直挂着的岛（用户实测「常驻的焦点通知也会有超级岛」）。
-                // 岛只在连接/断开那一刻由 pods/PodIslandNotification.kt 临时发一次。
-                withIsland = false,
-                floating = false,
                 disconnectIntent = disconnectTarget,
                 disconnectLabel = disconnectLabel,
             )?.let { builder.addExtras(it) }
@@ -310,6 +312,8 @@ object PodNotification {
      */
     private fun ensureChannel(context: Context, manager: NotificationManager) {
         runCatching {
+            // 旧版遗留的空通道（见 LEGACY_ISLAND_CHANNEL_ID）顺手清掉
+            runCatching { manager.deleteNotificationChannel(LEGACY_ISLAND_CHANNEL_ID) }
             val existing = runCatching { manager.getNotificationChannel(CHANNEL_ID) }.getOrNull()
             if (existing != null && existing.importance != CHANNEL_IMPORTANCE) {
                 Log.i(TAG, "recreate channel $CHANNEL_ID: importance ${existing.importance} -> $CHANNEL_IMPORTANCE")

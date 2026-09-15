@@ -17,7 +17,4 @@ object HyperPodsPrefsKey {
 
     /** 耳机连上后自动弹出连接弹窗（设置页「连接时自动唤出连接弹窗」，默认开） */
     const val AUTO_POPUP_ON_CONNECT = "auto_popup_on_connect"
-
-    /** 连接 / 断开时在 HyperOS 超级岛上短暂提示（设置页「超级岛」，默认开） */
-    const val SHOW_ISLAND = "show_island"
 }

@@ -632,30 +632,21 @@ dev 分支同库同版本）—— 手拼 `miui.focus.pics` / `miui.focus.action
   平板上验证过，它那条焦点通知用的就是 DEFAULT）。通道档位改过，[ensureChannel] 会自动删掉重建。
 - 通知 **`setOngoing(true)` 常驻**：耳机连着时不可划掉（划掉后要等下次内容变化才回来，用户会
   以为「通知坏了」），断开连接时由 `cancelNow` 程序化撤掉。
-- **常驻通知怎么才不在岛区留东西**（用户反馈过三次「常驻焦点通知始终有超级岛」，以下是结论）：
-  1. **把 `island` 置空不管用**：焦点通知在 HyperOS 上自带摘要态，不给 `param_island` 时系统会用
-     默认形态补一个**常驻摘要胶囊**（库的 `Json` 配了 `explicitNulls = false`，null 值本就不会写进
-     JSON，所以「显式置空」这条路从代码上就已经走到底了，别再从这头找原因）；
+- **超级岛挂在常驻通知上**（2026-09 起）：本应用**不再**单独发「连接 / 断开」的临时岛通知
+  （原 `pods/PodIslandNotification.kt` 与设置页「超级岛」开关一并删除，见 CHANGELOG），岛跟着
+  `pods/PodNotification.kt` 这条常驻焦点通知一起出现（连接、以及电量每 30s 变化的那一刻），
+  几秒内自己收掉。踩过三次坑之后留下的结论，别再走回头路：
+  1. **把 `island` 置空不管用**：库的 `Json` 配了 `explicitNulls = false`，null 值根本不会写进
+     JSON（「显式置空」在代码上早已走到底）；而焦点通知在 HyperOS 上自带摘要态，不给
+     `param_island` 时系统会用默认形态补一个**常驻摘要胶囊** —— 这就是最早「岛一直挂着」的来源；
   2. **不要写 `islandFirstFloat = false`**：该字段含义是「通知第一次出现时的档位」，`false` = **摘要态**
-     —— 摘要态正是岛区小胶囊的地盘，常驻通知被强制成摘要态就会一直挂着（A 仓库原来就写了这行）；
-  3. 岛模板**只写 `bigIslandArea`、不写 `smallIslandArea`**：摘要态没有自己的内容，岛展开一次就没
-     地方待（dev 仓库蓝牙常驻通知就是这个形态，实测不留岛）；
-  4. 常驻通知再显式 **`dismissIsland = true`**（官方字段：摘要态是否消失，true = 消失），把「留在
-     岛区」这条路彻底关掉。
-  所以 `PodFocusNotification.buildExtras(..., withIsland = false)` 仍然给一份 bigIslandArea 的岛模板，
-  只是额外写 `dismissIsland = true`；真正的判定在设备侧，抓 `MiuixMoondropFocus` 的
-  `focus param:` 日志可以看到这段 JSON 到底写了什么。
-- **超级岛是临时的**（`pods/PodIslandNotification.kt`，独立通道 `hyperpods_moondrop_island`，
-  可单独关）：连接那一刻显示「设备名 + 已连接」（2026-09 起不再显示电量）、断开那一刻显示
-  「设备名 + 已断开」，
-  各用一份 `isShowNotification = false`（不在通知栏留痕，也不闪）+ `islandTimeout = 5`
-  （**岛模板字段，单位是秒**；不是模板基类的 `timeout` —— 那个字段单位是**分钟**，早先误用
-  `timeout = 5` 等于给岛留了 5 分钟寿命，是「岛不走」的帮凶）的 extras 临时发一次；
-  另外给通知挂 **`setTimeoutAfter`**（系统侧撤单，进程被回收也生效），再用协程延时兜底 `cancel`。
-- **岛模板只写 `bigIslandArea`，不写 `smallIslandArea`**（摘要态那块：`SmallIslandArea` 只能放
-  图片 `picInfo`）：dev 仓库蓝牙常驻通知里的岛就是这种写法（用户实测不会被系统一直挂在岛区）；
-  写了 `smallIslandArea` 等于给系统一个可收起的摘要态，岛就有地方长住。收起态本身照样画得出来
-  —— 系统用 `bigIslandArea` 的「左图 + 右 `textInfo.title`」渲染未展开态（实测）。
+     —— 摘要态正是岛区小胶囊的地盘，常驻通知被强制成摘要态就会一直挂着；
+  3. 岛模板**只写 `bigIslandArea`、不写 `smallIslandArea`**（摘要态那块只能放图片 `picInfo`）：
+     摘要态没有自己的内容，岛不会长住（dev 仓库蓝牙常驻通知就是这个形态）；
+  4. 再显式 **`dismissIsland = true`**（官方字段：摘要态是否消失，true = 消失）＋ **`islandTimeout = 5`**
+     （**岛模板字段，单位是秒**；不是模板基类的 `timeout` —— 那个单位是**分钟**，早先误用
+     `timeout = 5` 等于给岛留了 5 分钟寿命，是「岛不走」的帮凶）让它几秒内自己退场。
+  真正的判定在设备侧：抓 `MiuixMoondropFocus` 的 `focus param:` 日志可以看到这段 JSON。
 - 通知上挂一个动作按钮「断开连接」：**模板动作栏** `param_v2.actions` 里一条 `type = 2`
   （文字按钮；0 圆形 / 1 进度 / 2 文字）的 `ActionInfo`，点击目标用库的 `createAction` 放进
   `miui.focus.actions` 那一袋 Parcelable、再由 `ActionInfo.action` 用 key（`key_disconnect`）
@@ -663,9 +654,10 @@ dev 分支同库同版本）—— 手拼 `miui.focus.pics` / `miui.focus.action
   `Notification.Builder.addAction`。落点是 `pods/PodDisconnectReceiver.kt`（`exported="false"`，
   PendingIntent 以本应用身份投递），断的是**应用自己**那条链路（`MoondropLink.disconnect()`）；
   A2DP / HFP 音频链路归系统蓝牙管，普通应用没有 BLUETOOTH_PRIVILEGED，代不了用户断开它。
-- 岛的布局：**左 = 机型图 + 设备名，右 = 内容**（电量 / 已断开）。右栏必须写 `textInfo.title`
+- 岛的布局：**左 = 机型图 + 设备名，右 = 内容**（电量）。右栏必须写 `textInfo.title`
   而不是 `content` —— 实测右栏只渲染 `title`，把电量放进 `content` 时岛上只看得到设备名。
-- `enableFloat` / `updatable` 都开（电量每 30s 变一次，要能原地更新）。
+- `updatable` 开（电量每 30s 变一次，要能原地更新）；`enableFloat` 恒为 **false** ——
+  否则每次更新都会再展开一次岛。
 - AOD 直接写模板基类自带的 **`aodTitle`** 字段（格式 `L 59% | R 64%`，没有读数的组件不写）；
   不需要像下面历史实现那样再往 `miui.focus.param` 的 JSON 里补 `param_v2.aodTitle`。
 - 普通 ROM 会忽略这些 extra，通知照常显示，因此带上它们没有兼容性代价。

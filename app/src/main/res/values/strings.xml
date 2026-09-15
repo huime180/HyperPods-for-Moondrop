@@ -94,19 +94,14 @@
     <string name="notification_section">Notifications</string>
     <string name="notification_display_title">Notification display</string>
     <string name="notification_display_summary">Keep a persistent status-bar notification with the connection and battery state; on HyperOS it is also rendered as a focus notification / Super Island (a plain notification elsewhere)</string>
-    <string name="island_switch_title">Super Island</string>
-    <string name="island_switch_summary">Briefly show a Super Island hint on connect / disconnect; when off, only the persistent focus notification remains</string>
     <string name="connect_popup_title">Show connection popup on connect</string>
     <string name="connect_popup_summary">Automatically show the connection popup (three-way battery) after the earbuds connect, refreshing the status-bar notification at the same time; needs the background pop-up permission below, and you can still open it from the notification when off</string>
     <string name="bg_popup_permission_title">Background pop-up permission</string>
     <string name="bg_popup_permission_summary">Grant “Display over other apps” / “Start activities in background”; otherwise the system silently blocks the popup while the app is in the background</string>
     <!-- 应用进程自己发的那条耳机状态通知（pods/PodNotification.kt） -->
     <string name="notification_channel_status">Earbuds status</string>
-    <string name="island_disconnected">Disconnected</string>
-    <string name="island_connected">Connected</string>
     <!-- notification action: template action bar entry (pods/PodNotification.kt + PodFocusNotification.kt) -->
     <string name="notification_disconnect">Disconnect</string>
-    <string name="notification_channel_island">Earbuds status (Super Island)</string>
     <string name="notification_channel_status_desc">Connection state and battery of the connected Moondrop earbuds</string>
 
     <!-- about -->

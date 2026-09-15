@@ -35,7 +35,6 @@ class ModuleSettingsState internal constructor(private val prefs: SharedPreferen
     private val notificationState = mutableStateOf(prefs.getBoolean(HyperPodsPrefsKey.SHOW_NOTIFICATION, true))
     private val autoPopupState =
         mutableStateOf(prefs.getBoolean(HyperPodsPrefsKey.AUTO_POPUP_ON_CONNECT, true))
-    private val islandState = mutableStateOf(prefs.getBoolean(HyperPodsPrefsKey.SHOW_ISLAND, true))
 
     val showNotification: Boolean get() = notificationState.value
 
@@ -52,13 +51,6 @@ class ModuleSettingsState internal constructor(private val prefs: SharedPreferen
         prefs.edit().putBoolean(HyperPodsPrefsKey.AUTO_POPUP_ON_CONNECT, value).apply()
     }
 
-    /** 「超级岛」：连接 / 断开时是否在 HyperOS 超级岛上短暂提示（pods/ControlBridge.kt 读同一个键）。 */
-    val islandEnabled: Boolean get() = islandState.value
-
-    fun setIslandEnabled(value: Boolean) {
-        islandState.value = value
-        prefs.edit().putBoolean(HyperPodsPrefsKey.SHOW_ISLAND, value).apply()
-    }
 }
 
 @Composable
