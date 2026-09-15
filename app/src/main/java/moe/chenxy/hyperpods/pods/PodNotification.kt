@@ -32,6 +32,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.drawable.Icon
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -204,6 +205,12 @@ object PodNotification {
                 .setOngoing(true)
             // 拿得到这台设备的机型图就带上；拿不到（没图 / 还没拉回来）就照常发，不因为没图不发通知
             if (icon != null) builder.setLargeIcon(icon.bitmap)
+            // 通知动作「断开连接」：与 dev 仓库蓝牙通知里那个按钮同一套语义（动作按钮，不是
+            // 「点通知本体」）。焦点通知那条路走模板动作栏（param_v2.actions，见
+            // PodFocusNotification），普通通知那条路走 Notification.Builder.addAction ——
+            // 两条都挂同一个 PendingIntent，落到 pods/PodDisconnectReceiver。
+            val disconnectLabel = context.getString(R.string.notification_disconnect)
+            val disconnectTarget = disconnectIntent(context)
             // HyperOS 焦点通知 / 超级岛：带上 MIUI 认的那套 extra（普通 ROM 会忽略，通知照常）。
             // 图片与 largeIcon 用同一张机型图；拿不到图时 buildExtras 返回 null，这里就不带。
             PodFocusNotification.buildExtras(
@@ -217,7 +224,19 @@ object PodNotification {
                 // 岛只在连接/断开那一刻由 pods/PodIslandNotification.kt 临时发一次。
                 withIsland = false,
                 floating = false,
+                disconnectIntent = disconnectTarget,
+                disconnectLabel = disconnectLabel,
             )?.let { builder.addExtras(it) }
+            // 普通通知（不带焦点 extra / 焦点权限被关）那条路也要有这个按钮
+            if (disconnectTarget != null) {
+                builder.addAction(
+                    Notification.Action.Builder(
+                        Icon.createWithResource(context, android.R.drawable.ic_delete),
+                        disconnectLabel,
+                        disconnectTarget,
+                    ).build()
+                )
+            }
             manager.notify(NOTIFICATION_TAG, NOTIFICATION_ID, builder.build())
             lastRendered = rendered
             lastIcon = icon
@@ -330,6 +349,22 @@ object PodNotification {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
     }.onFailure { Log.w(TAG, "content intent build failed", it) }.getOrNull()
+
+    /**
+     * 通知动作「断开连接」的落点：显式指向 pods/PodDisconnectReceiver（自己应用里的接收器，
+     * 所以不需要导出、也不用 setPackage）。PendingIntent 以本应用身份投递 —— 系统点按钮时
+     * 执行的是本应用的 receiver。
+     */
+    private fun disconnectIntent(context: Context): PendingIntent? = runCatching {
+        val intent = Intent(context, PodDisconnectReceiver::class.java)
+            .setAction(HyperPodsAction.POD_DISCONNECT)
+        PendingIntent.getBroadcast(
+            context,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }.onFailure { Log.w(TAG, "disconnect intent build failed", it) }.getOrNull()
 
     /** 标题 = 设备名（取不到就型号名，再取不到用仓库既有的「水月雨耳机」占位串）。 */
     private fun titleOf(context: Context, snapshot: PodSnapshot): String =

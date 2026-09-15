@@ -103,6 +103,8 @@
     <!-- 应用进程自己发的那条耳机状态通知（pods/PodNotification.kt） -->
     <string name="notification_channel_status">Earbuds status</string>
     <string name="island_disconnected">Disconnected</string>
+    <!-- notification action: template action bar entry (pods/PodNotification.kt + PodFocusNotification.kt) -->
+    <string name="notification_disconnect">Disconnect</string>
     <string name="notification_channel_island">Earbuds status (Super Island)</string>
     <string name="notification_channel_status_desc">Connection state and battery of the connected Moondrop earbuds</string>
 

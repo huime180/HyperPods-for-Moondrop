@@ -23,6 +23,14 @@ object HyperPodsAction {
     /** 电量变化；载荷是 [EXTRA_BATTERY]。 */
     const val BATTERY_CHANGED = "chen.action.hyperpods.moondrop.battery_changed"
 
+    /**
+     * 通知里「断开连接」按钮的 action。
+     *
+     * 落点是本应用自己的 pods/PodDisconnectReceiver（通知的 action 用
+     * PendingIntent.getBroadcast 指过去；PendingIntent 以本应用身份投递，receiver 不必导出）。
+     */
+    const val POD_DISCONNECT = "chen.action.hyperpods.moondrop.pod_disconnect"
+
     // ── extras ───────────────────────────────────────────────────────────────
     /**
      * 电量 Bundle extra（低 7 位电量 + bit7 充电 + 255 未知，

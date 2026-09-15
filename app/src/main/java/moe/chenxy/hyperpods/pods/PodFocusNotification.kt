@@ -20,6 +20,8 @@
  */
 package moe.chenxy.hyperpods.pods
 
+import android.app.Notification
+import android.app.PendingIntent
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -51,6 +53,9 @@ object PodFocusNotification {
      * @param floating       是否让它「浮」成岛。**常驻通知必须传 false**：焦点通知本身带着
      *                       `param_island`，再叠上 enableFloat 就会被系统渲染成一个岛
      *                       （用户实测：常驻那条也一直带岛）。只有临时的连接/断开提示才浮。
+     * @param disconnectIntent 通知动作「断开连接」的落点（PendingIntent.getBroadcast 指向
+     *                       pods/PodDisconnectReceiver）；null = 不带这个按钮（临时岛就不带）
+     * @param disconnectLabel 按钮文案（取本应用的 R.string.notification_disconnect）
      */
     fun buildExtras(
         context: Context,
@@ -62,6 +67,8 @@ object PodFocusNotification {
         islandTimeoutSeconds: Int? = null,
         showInShade: Boolean = true,
         floating: Boolean = true,
+        disconnectIntent: PendingIntent? = null,
+        disconnectLabel: String = "",
     ): Bundle? = runCatching {
         val bitmap = boxBitmap
             ?: BitmapFactory.decodeResource(context.resources, R.drawable.img_box)
@@ -130,6 +137,27 @@ object PodFocusNotification {
                                 title = contentText
                             }
                         }
+                    }
+                }
+            }
+            // 「断开连接」：挂在**模板动作栏**（param_v2.actions）上，与 dev 仓库蓝牙通知里那个
+            // 按钮同一套写法 —— 不用 textButton（那是内容下方独立一整行的胶囊区，只剩一个按钮时
+            // 会被系统拉满整行）。type = 2 是「文字按钮」（focus-api 的 ActionInfo 注释：
+            // 0 圆形 / 1 进度 / 2 文字；其 getType() 规则同为「无图标 + 有标题 = 2」），
+            // 文案照常显示，不会退化成只有一个图标。
+            // 点击链路：createAction 把 Notification.Action 放进 miui.focus.actions 那一袋
+            // Parcelable，再让 ActionInfo.action 用 key 引用它（MIUI 官方文档「Action 数据参数」）。
+            if (disconnectIntent != null) {
+                actions {
+                    addActionInfo {
+                        type = 2
+                        actionTitle = disconnectLabel
+                        val actionParcel = Notification.Action.Builder(
+                            Icon.createWithResource(context, android.R.drawable.ic_delete),
+                            disconnectLabel,
+                            disconnectIntent,
+                        ).build()
+                        action = createAction("key_disconnect", actionParcel)
                     }
                 }
             }

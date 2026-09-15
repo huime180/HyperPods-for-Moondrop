@@ -28,6 +28,10 @@
   （单位**秒**；模板基类的 `timeout` 是**分钟**，别混）上，并给通知挂 `setTimeoutAfter`
   作系统侧兜底；岛模板**只写 `bigIslandArea`、不写 `smallIslandArea`**（写了会被系统当成
   「这条通知有摘要态」，连接后岛一直挂在岛区）；其它 ROM 忽略这些 extra，通知照常显示。
+  通知上还挂着一个动作按钮 **「断开连接」**（模板动作栏 `param_v2.actions`，`type = 2` 文字按钮；
+  普通通知回落 `Notification.Builder.addAction`），落点是 `pods/PodDisconnectReceiver.kt` →
+  `MoondropLink.disconnect()`：断掉的是**本应用**与耳机的那条链路（A2DP / HFP 音频链路归系统
+  蓝牙管，普通应用没有 BLUETOOTH_PRIVILEGED，代不了用户断开它）。
 * **连接弹窗**（新行为）：耳机连上后**先刷新状态栏通知，再延后 600 ms 弹连接弹窗**
   （`ui/ConnectionPopupActivity.kt`，默认 8s 自动关闭）；后台启动 Activity 可能被系统 BAL
   静默拦掉，因此最多**重试 3 次**（间隔 800 ms，用 `lastShownAt` / `visible` 确认是否真的显示）。

@@ -99,5 +99,16 @@
                 <action android:name="android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
+
+        <!--
+          常驻通知上「断开连接」按钮的落点（pods/PodDisconnectReceiver.kt）。
+          通知那边用 PendingIntent.getBroadcast 显式指向这个类，所以这里不需要 intent-filter；
+          PendingIntent 以本应用身份投递，receiver 因此**不导出**（exported="false"）——
+          别的应用既看不到也调不到它。断的是本应用与耳机的那条链路，说明见该文件头。
+        -->
+        <receiver
+            android:name=".pods.PodDisconnectReceiver"
+            android:exported="false"
+            android:enabled="true" />
     </application>
 </manifest>

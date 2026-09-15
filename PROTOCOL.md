@@ -646,6 +646,13 @@ dev 分支同库同版本）—— 手拼 `miui.focus.pics` / `miui.focus.action
   写了 `smallIslandArea` 反而会被当成「这条通知有摘要态」，连接后岛一直挂在岛区（用户反馈
   「常驻焦点通知还是有超级岛」）。收起态照样画得出来 —— 系统用 `bigIslandArea` 的
   「左图 + 右 `textInfo.title`」渲染未展开态（实测）。
+- 通知上挂一个动作按钮「断开连接」：**模板动作栏** `param_v2.actions` 里一条 `type = 2`
+  （文字按钮；0 圆形 / 1 进度 / 2 文字）的 `ActionInfo`，点击目标用库的 `createAction` 放进
+  `miui.focus.actions` 那一袋 Parcelable、再由 `ActionInfo.action` 用 key（`key_disconnect`）
+  引用（官方文档「Action 数据参数」的做法）；普通通知（无焦点 extra）回落
+  `Notification.Builder.addAction`。落点是 `pods/PodDisconnectReceiver.kt`（`exported="false"`，
+  PendingIntent 以本应用身份投递），断的是**应用自己**那条链路（`MoondropLink.disconnect()`）；
+  A2DP / HFP 音频链路归系统蓝牙管，普通应用没有 BLUETOOTH_PRIVILEGED，代不了用户断开它。
 - 岛的布局：**左 = 机型图 + 设备名，右 = 内容**（电量 / 已断开）。右栏必须写 `textInfo.title`
   而不是 `content` —— 实测右栏只渲染 `title`，把电量放进 `content` 时岛上只看得到设备名。
 - `enableFloat` / `updatable` 都开（电量每 30s 变一次，要能原地更新）。
