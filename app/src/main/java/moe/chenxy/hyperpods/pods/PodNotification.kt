@@ -56,6 +56,7 @@ object PodNotification {
      * （同行项目 dev 分支在同一台 HyperOS 4 平板上验证过：焦点通知那条用的是 DEFAULT 通道）。
      * 关掉 sound / vibration 后仍然「不响铃、不震动」，只是不再被系统归到「静默」最低档。
      * 通道重要性创建后不可修改，所以 [ensureChannel] 发现同名通道档位不对时会删掉重建。
+     */
     private const val CHANNEL_ID = "hyperpods_moondrop_app_status"
 
     private const val NOTIFICATION_TAG = "HyperPodsAppState"
