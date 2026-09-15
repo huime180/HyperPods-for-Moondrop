@@ -49,12 +49,21 @@ private const val TAG = "HyperPods-PodNotify"
 
 object PodNotification {
 
-    /** 通知通道：IMPORTANCE_LOW，状态栏有图标、不响铃不打扰。 */
+    /**
+     * 通知通道：**IMPORTANCE_DEFAULT + 主动关掉声音与震动**。
+     *
+     * 为什么不是 LOW：LOW 档的通知在 HyperOS 上不会走焦点通知 / 超级岛那条渲染路径
+     * （同行项目 dev 分支在同一台 HyperOS 4 平板上验证过：焦点通知那条用的是 DEFAULT 通道）。
+     * 关掉 sound / vibration 后仍然「不响铃、不震动」，只是不再被系统归到「静默」最低档。
+     * 通道重要性创建后不可修改，所以 [ensureChannel] 发现同名通道档位不对时会删掉重建。
     private const val CHANNEL_ID = "hyperpods_moondrop_app_status"
 
     private const val NOTIFICATION_TAG = "HyperPodsAppState"
 
     private const val NOTIFICATION_ID = 10004
+
+    /** 通道档位：见 [CHANNEL_ID] 的说明（要进 HyperOS 焦点通知路径就不能用 LOW）。 */
+    private const val CHANNEL_IMPORTANCE = NotificationManager.IMPORTANCE_DEFAULT
 
     /** 电量各组件之间的分隔符（紧凑一行）。 */
     private const val PART_SEPARATOR = " · "
@@ -189,15 +198,39 @@ object PodNotification {
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setOnlyAlertOnce(true)
                 .setAutoCancel(false)
-                .setOngoing(false)
+                // 常驻：耳机连着的时候这条通知不该被划掉（划掉后要等下一次内容变化才会回来，
+                // 用户会以为「通知坏了」）。断开连接时由 cancelNow 主动撤掉。
+                .setOngoing(true)
             // 拿得到这台设备的机型图就带上；拿不到（没图 / 还没拉回来）就照常发，不因为没图不发通知
             if (icon != null) builder.setLargeIcon(icon.bitmap)
+            // HyperOS 焦点通知 / 超级岛：带上 MIUI 认的那套 extra（普通 ROM 会忽略，通知照常）。
+            // 图片与 largeIcon 用同一张机型图；拿不到图时 buildExtras 返回 null，这里就不带。
+            PodFocusNotification.buildExtras(
+                context = context,
+                titleText = title,
+                contentText = content.replace('\n', ' ').trim(),
+                aodText = aodTitleOf(snapshot),
+                boxBitmap = icon?.bitmap,
+            )?.let { builder.addExtras(it) }
             manager.notify(NOTIFICATION_TAG, NOTIFICATION_ID, builder.build())
             lastRendered = rendered
             lastIcon = icon
             posted = true
             Log.i(TAG, "app notification posted: $title / ${content.replace('\n', ' ')}")
         }.onFailure { Log.e(TAG, "post app notification failed", it) }
+    }
+
+    /**
+     * 息屏显示（AOD）用的紧凑电量行：`L 59% | R 64%`。
+     *
+     * 沿用正文那套「没有读数就不出现」的口径（见 [contentOf]）：未知 / 0% 的组件不写进
+     * AOD 行，绝不显示成 0%。语言无关（L/R + 百分号），因为 AOD 那一行是系统画的。
+     */
+    private fun aodTitleOf(snapshot: PodSnapshot): String {
+        val battery = snapshot.battery
+        val left = if (battery.leftKnown && battery.left > 0) "L ${battery.left}%" else null
+        val right = if (battery.rightKnown && battery.right > 0) "R ${battery.right}%" else null
+        return listOfNotNull(left, right).joinToString(" | ")
     }
 
     /**
@@ -247,22 +280,26 @@ object PodNotification {
     /**
      * 建通道。
      *
-     * 通道的重要性**创建之后不可修改**，所以发现同名通道的档位不是 IMPORTANCE_LOW 时先删掉再
-     * 按 LOW 建一次。通道名/描述只在创建那一刻生效。
+     * 通道的重要性**创建之后不可修改**，所以发现同名通道的档位不是 [CHANNEL_IMPORTANCE] 时先删掉
+     * 再按它建一次（老版本装过的用户从这里迁移到新档位）。通道名/描述只在创建那一刻生效。
      */
     private fun ensureChannel(context: Context, manager: NotificationManager) {
         runCatching {
             val existing = runCatching { manager.getNotificationChannel(CHANNEL_ID) }.getOrNull()
-            if (existing != null && existing.importance != NotificationManager.IMPORTANCE_LOW) {
-                Log.i(TAG, "recreate channel $CHANNEL_ID: importance ${existing.importance} -> IMPORTANCE_LOW")
+            if (existing != null && existing.importance != CHANNEL_IMPORTANCE) {
+                Log.i(TAG, "recreate channel $CHANNEL_ID: importance ${existing.importance} -> $CHANNEL_IMPORTANCE")
                 manager.deleteNotificationChannel(CHANNEL_ID)
             }
             if (runCatching { manager.getNotificationChannel(CHANNEL_ID) }.getOrNull() != null) return
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 context.getString(R.string.notification_channel_status),
-                NotificationManager.IMPORTANCE_LOW,
+                CHANNEL_IMPORTANCE,
             )
+            // 「不响铃不震动」由这两句保证（而不是靠最低档位），这样既能进焦点通知渲染路径，
+            // 又不会打扰用户。enableVibration(false) 需要 API 26+（minSdk 35，安全）。
+            channel.setSound(null, null)
+            channel.enableVibration(false)
             channel.description = context.getString(R.string.notification_channel_status_desc)
             channel.setShowBadge(false)
             manager.createNotificationChannel(channel)

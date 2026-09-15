@@ -10,6 +10,9 @@ kotlinxSerializationJson = "1.9.0"
 miuix = "0.9.3"
 navigation3 = "1.1.0-rc01"
 junit = "4.13.2"
+# HyperOS 焦点通知 / 超级岛的模板库（与 HyperPods 的 dev 分支同一个库、同一版本）：
+# 手拼 miui.focus.* 的两袋 Parcelable 只能靠反汇编试错，这个库就是那套模板的实现。
+focusApi = "1.4"
 
 [plugins]
 agp-app = { id = "com.android.application", version.ref = "agp" }
@@ -28,6 +31,7 @@ compose-ui = { module = "androidx.compose.ui:ui" }
 compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 compose-foundation = { module = "androidx.compose.foundation:foundation" }
+focus-api = { group = "com.xzakota.hyper.notification", name = "focus-api", version.ref = "focusApi" }
 miuix = { group = "top.yukonga.miuix.kmp", name = "miuix-ui-android", version.ref = "miuix" }
 miuix-preference = { group = "top.yukonga.miuix.kmp", name = "miuix-preference-android", version.ref = "miuix" }
 miuix-icons = { group = "top.yukonga.miuix.kmp", name = "miuix-icons-android", version.ref = "miuix" }

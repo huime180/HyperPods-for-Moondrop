@@ -615,14 +615,28 @@ miui.focus.actions= Bundle
   不是我们自己的 Intent action。
 - 图标用 `key_headset`（不是 `miui.focus.pic_*` 那种资源名）。
 
-### 10.5.3 当前实现与已知取舍（**本节只作历史/参考**）
+### 10.5.3 当前实现
 
-> ⚠ 下面描述的实现**已随去模块化删除**：当前的 MiuixMoondrop 只发一条普通的
-> `IMPORTANCE_LOW` 状态通知（`pods/PodNotification.kt`，通道 `hyperpods_moondrop_app_status`），
-> **不写任何 `miui.focus.*` extra，也没有焦点通知 / 超级岛形态**。本节字段知识仍保留，
-> 供将来（如果能重新拿到系统侧入口）参考。
+MiuixMoondrop 现在**自己就把上面这套 extra 写上**（`pods/PodFocusNotification.kt`），用的正是
+本节记录的那个模板库：`com.xzakota.hyper.notification:focus-api`（Maven Central，与 HyperPods
+dev 分支同库同版本）—— 手拼 `miui.focus.pics` / `miui.focus.actions` 两袋 Parcelable 只能靠
+反汇编试错，所以直接复用那套模板的实现。
 
-- 当时的实现在已删除的 `hook/MiBluetoothToastHook.kt` 的 `focusExtras()`：按上面原文复刻，
+- 通知本体 = `pods/PodNotification.kt` 的状态通知，通道 `hyperpods_moondrop_app_status`。
+  档位是 **`IMPORTANCE_DEFAULT` + `setSound(null)` + `enableVibration(false)`**（不响铃不震动）：
+  用 `IMPORTANCE_LOW` 时 HyperOS **不会**走焦点通知那条渲染路径（dev 分支在同一台 HyperOS 4
+  平板上验证过，它那条焦点通知用的就是 DEFAULT）。通道档位改过，[ensureChannel] 会自动删掉重建。
+- 通知 **`setOngoing(true)` 常驻**：耳机连着时不可划掉（划掉后要等下次内容变化才回来，用户会
+  以为「通知坏了」），断开连接时由 `cancelNow` 程序化撤掉。
+- 岛上左图右文：左 = 设备机型图（键仍是 `key_headset`，见 §10.5.2），右 = 设备名 + 连接状态/电量；
+  `enableFloat` / `updatable` 都开（电量每 30s 变一次，要能原地更新）。
+- AOD（`aodTitle` / `aodPic`）按下面历史实现里真机验证过的做法，补进 `miui.focus.param` 的
+  `param_v2`（库的 DSL 没有这个字段）；格式为 `L 59% | R 64%`，没有读数的组件不写。
+- 普通 ROM 会忽略这些 extra，通知照常显示，因此带上它们没有兼容性代价。
+
+历史实现（模块时期，代码已删除）：
+
+- 当时在已删除的 `hook/MiBluetoothToastHook.kt` 的 `focusExtras()`：按上面原文复刻，
   外层 `putString`，内层 `param_v2`；`param_island` 只在「超级岛提示」开关打开时写。
 - 焦点通知与超级岛都只用真机核对过的字段；**没有**凭空构造官方那套 12 字符按键配置串之类的东西。
 - 另有一条「强提示（strong toast）」通路（extra 键 `param` / `island_param` / `strong_toast_action` /

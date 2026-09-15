@@ -78,6 +78,9 @@ dependencies {
 
     implementation(libs.kotlinx.serialization.json)
 
+    // HyperOS 焦点通知 / 超级岛（miui.focus.*）的模板库，与 dev 分支同库同版本
+    implementation(libs.focus.api)
+
     // Compose：统一用 androidx compose（BOM 管理版本），与 miuix 0.9.3 的 -android 产物一致
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

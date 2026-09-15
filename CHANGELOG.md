@@ -17,9 +17,12 @@
   监听系统 A2DP `CONNECTION_STATE_CHANGED` 广播，耳机连上时唤醒应用进程。
   `pods/ControlBridge.kt` **不再做任何跨进程转发**，只把进程内状态分发给应用自己的通知与连接弹窗。
 * **通知**：`pods/PodNotification.kt` 是应用进程自己发的唯一通知来源，通道
-  `hyperpods_moondrop_app_status`（`IMPORTANCE_LOW`，不响铃）、tag `HyperPodsAppState`、id `10004`；
-  由设置页「通知栏显示」开关控制。原先那套 `com.xiaomi.bluetooth` 侧的焦点通知 / 超级岛形态
-  随 hook 删除。
+  `hyperpods_moondrop_app_status`（`IMPORTANCE_DEFAULT` + 关声音/震动，即不响铃不震动）、
+  tag `HyperPodsAppState`、id `10004`；`setOngoing(true)` **常驻**（耳机连着时不可划掉，
+  断开连接时程序化撤掉），由设置页「通知栏显示」开关控制。
+  这条通知同时带上 **HyperOS 焦点通知 / 超级岛**的 extra（`pods/PodFocusNotification.kt`，
+  用 `com.xzakota.hyper.notification:focus-api` 模板库，同 dev 分支）：岛上左图右文 =
+  设备机型图 + 设备名/电量，AOD 行是 `L 59% | R 64%`；其它 ROM 忽略这些 extra，通知照常显示。
 * **连接弹窗**（新行为）：耳机连上后**先刷新状态栏通知，再延后 600 ms 弹连接弹窗**
   （`ui/ConnectionPopupActivity.kt`，默认 8s 自动关闭）；后台启动 Activity 可能被系统 BAL
   静默拦掉，因此最多**重试 3 次**（间隔 800 ms，用 `lastShownAt` / `visible` 确认是否真的显示）。
