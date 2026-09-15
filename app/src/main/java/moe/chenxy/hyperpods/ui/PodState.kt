@@ -93,6 +93,14 @@ fun rememberPodSnapshot(): PodSnapshot {
             }
         }
         snapshot = MoondropLink.snapshot()
+        // 自动机型图：冷启动这条路径也会由 MoondropLink.afterConnected() → emitState() 产生
+        // PodEvent.Connected，ControlBridge 的转发器已经在那里取图；这里再补一次是为了覆盖
+        // 「打开界面时已经连着、但这次进程还没触发过取图」的情况（见 ControlBridge.ensureOfficialImage）。
+        // 是否真的取图由 ControlBridge 内部「同一地址一次会话只试一次」的门闩决定，UI 不重复判断。
+        // ensureInit 是幂等的（上面的 DisposableEffect 里已经调过）：这里再调一次只是为了确保
+        // ControlBridge 的 appContext 已经就绪，否则下一句会静默什么都不做。
+        ControlBridge.ensureInit(context.applicationContext)
+        ControlBridge.ensureOfficialImage(snapshot)
     }
 
     return snapshot

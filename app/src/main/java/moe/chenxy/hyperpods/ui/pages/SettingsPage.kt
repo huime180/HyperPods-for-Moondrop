@@ -17,7 +17,10 @@
  *   · 「连接时自动唤出连接弹窗」—— 控制 pods/ControlBridge.kt 在耳机连上后自动弹出的
  *     ui/ConnectionPopupActivity（三路电量，与状态栏通知同时刷新）；键
  *     HyperPodsPrefsKey.AUTO_POPUP_ON_CONNECT，同样只走 [ModuleSettingsState]。
- *   · 应用级入口：手势操作（能力位门控）、关于。
+ *   · 应用级入口：关于。
+ *
+ * 「手势操作」入口原本也在这张卡里（由 hasGestures 门控），现已删除：手势是耳机相关功能，
+ * 本仓库的约定是耳机相关功能铺在耳机页上（设备页保留了「手势操作」行），设置页只留应用级入口。
  */
 package moe.chenxy.hyperpods.ui.pages
 
@@ -53,9 +56,6 @@ private val SECTION_GAP = 12.dp
  *
  * @param settings 应用侧设置（通知栏显示 / 连接时自动唤出连接弹窗）
  * @param themeMode 0 跟随系统 / 1 浅色 / 2 深色（由 MainActivity 持久化）
- * @param hasGestures 耳机上报了 feature 22（TOUCHV2）时为真 —— 手势入口行只有此时才出现
- *                    （与设备页的「手势操作」行同一套能力门控）
- * @param onOpenGestures 「手势操作」行 → 导航到手势页（由 MainUI 的返回栈负责）
  */
 @Composable
 fun SettingsPage(
@@ -64,8 +64,6 @@ fun SettingsPage(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     themeMode: MutableState<Int> = remember { mutableStateOf(0) },
     onThemeModeChange: (Int) -> Unit = {},
-    hasGestures: Boolean = false,
-    onOpenGestures: () -> Unit = {},
     onOpenAbout: () -> Unit = {},
 ) {
     // 通知开关改完要立刻生效（应用自己发的那条通知由 pods/PodNotification.kt 落地）：
@@ -134,16 +132,9 @@ fun SettingsPage(
             }
         }
 
-        // 应用级入口：手势（能力位门控）/ 关于
+        // 应用级入口：关于（耳机相关功能都在耳机页，见文件头）
         item {
             Card(modifier = Modifier.padding(top = SECTION_GAP)) {
-                if (hasGestures) {
-                    ArrowPreference(
-                        title = stringResource(R.string.gesture_title),
-                        summary = stringResource(R.string.gesture_summary),
-                        onClick = onOpenGestures,
-                    )
-                }
                 ArrowPreference(
                     title = stringResource(R.string.about),
                     onClick = onOpenAbout,

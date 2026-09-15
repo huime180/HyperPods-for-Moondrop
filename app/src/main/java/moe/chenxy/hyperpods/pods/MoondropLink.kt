@@ -113,6 +113,16 @@ object MoondropLink {
     @Volatile private var lhdcConfirmed: Boolean? = null
     @Volatile private var activeCodec = ""
     @Volatile private var dualConnectionOn: Boolean? = null
+    /**
+     * 空间音频（feature 18）开关；null = 还没读到。
+     *
+     * ⚠ 协议语义核实于 PROTOCOL.md 第 8 节：GET/SET = 1/2、payload `0/1`（与指示灯同一口径，
+     * 见 [Gaia.spatialSet] 的写法）；**本应用从未在支持空间音频的真机上跑通它**，PROTOCOL.md
+     * 也把这一节标为「未接线 / 未验证」。所以 UI 只按读回值展示，读不到就不猜。
+     */
+    @Volatile private var spatialEnabled: Boolean? = null
+    /** 头部追踪（同一 feature 18 的 cmd 3/4：GET/SET）；null = 还没读到。同样待真机确认。 */
+    @Volatile private var headTrackingOn: Boolean? = null
     @Volatile private var lowLatencyOn: Boolean? = null
     /**
      * 手势配置（TOUCHV2）的 5 个字节（顺序见 [Gaia.GestureSlot]）；null = 还没读到过。
@@ -236,6 +246,8 @@ object MoondropLink {
         lhdcOn = lhdcOn,
         activeCodec = activeCodec,
         dualConnectionOn = dualConnectionOn,
+        spatialEnabled = spatialEnabled,
+        headTrackingOn = headTrackingOn,
         lowLatencyOn = lowLatencyOn,
         // 手势：拷贝一份，避免把内部可变数组暴露给监听者
         gestureConf = gestureConf?.let { Gaia.GestureConf(it.copyOf()) },
@@ -664,6 +676,10 @@ object MoondropLink {
             if (capabilities.hasPromptTone || capabilities.hasPromptVolume) refreshPromptVoice()
             if (capabilities.hasLhdc) refreshLhdc()
             if (capabilities.hasDualConnection) refreshDualConnection()
+            // 空间音频（feature 18）：只在能力位为真时发 —— 老机型不支持这个 feature，
+            // 发了就是一条无人应答的未知命令（还会白等一次超时）。
+            // 头部追踪是同一 feature 的另一组命令，自己单独门控（refreshSpatial 内部再判一次）。
+            if (capabilities.hasSpatial || capabilities.hasHeadTracking) refreshSpatial()
             // 手势：一次读回 5 个槽位的整份配置（能力位图门控，与其它功能同一套写法）
             if (capabilities.hasGestures) refreshGestures()
             emitState()
@@ -801,6 +817,27 @@ object MoondropLink {
     }
 
     /**
+     * 读空间音频开关（feature 18 / cmd 1），能力位为真时才发。
+     *
+     * 取到的 payload 按与指示灯同一套口径落地：`0`=关 / `1`=开。写在同一个函数里的头部追踪是
+     * 同一 feature 的 cmd 3，只有 [PodCapabilities.hasHeadTracking] 为真才读。
+     *
+     * ⚠ 待真机确认：这两条命令的**命令号与 payload 语义**核实于 PROTOCOL.md 第 8 节
+     * （feature 18：GET/SET = 1/2、payload `0/1`；头动追踪 3/4），但本应用从未在支持空间音频的
+     * 机型上跑通，读不到就保持 null（UI 不猜）。
+     */
+    suspend fun refreshSpatial() {
+        // 两个读各自按自己的能力位门控：不支持那一条就不发（老机型不发未知命令）
+        if (capabilities.hasSpatial) {
+            val sp = request(Gaia.spatialGet(), ANC_TIMEOUT_MS)
+            if (sp != null && sp.isNotEmpty()) spatialEnabled = (sp[0].toInt() and 0xFF) == 1
+        }
+        if (!capabilities.hasHeadTracking) return
+        val ht = request(Gaia.headTrackingGet(), ANC_TIMEOUT_MS)
+        if (ht != null && ht.isNotEmpty()) headTrackingOn = (ht[0].toInt() and 0xFF) == 1
+    }
+
+    /**
      * 读手势配置（TOUCHV2 cmd 2）。
      *
      * 固件只提供「整份 5 字节配置」的读写 —— 既没有单槽位读、也没有按耳读：
@@ -855,6 +892,40 @@ object MoondropLink {
 
     fun setLed(on: Boolean) {
         scope.launch { write(Gaia.ledSet(if (on) 1 else 0)); delay(300); refreshLed(); emitState() }
+    }
+
+    /**
+     * 写空间音频开关（feature 18 / cmd 2）。
+     *
+     * payload 取值沿用 [Gaia.spatialSet] 里唯一的一种写法：`0`=关 / `1`=开（与 [setLed] 同口径，
+     * 与 PROTOCOL.md 第 8 节「payload `0/1`」一致）；这里**不发明映射表**。
+     * 写完按仓库既有写法回读一次再 emitState，读到什么就是什么。
+     *
+     * ⚠ 待真机确认：本应用从未在支持空间音频的机型上验证过这条写入。若真机写不动，
+     * 先看 [refreshSpatial] 的回读值，再回看 PROTOCOL.md 的第 8 节 / 第 8 条未验证清单。
+     */
+    fun setSpatial(enabled: Boolean) {
+        if (!capabilities.hasSpatial) return
+        scope.launch {
+            write(Gaia.spatialSet(if (enabled) 1 else 0))
+            delay(300)
+            refreshSpatial()
+            emitState()
+        }
+    }
+
+    /**
+     * 写头部追踪开关（同一 feature 18 的 cmd 4），payload 同样 `0/1`（[Gaia.headTrackingSet]）。
+     * ⚠ 待真机确认，理由同 [setSpatial]。
+     */
+    fun setHeadTracking(enabled: Boolean) {
+        if (!capabilities.hasHeadTracking) return
+        scope.launch {
+            write(Gaia.headTrackingSet(if (enabled) 1 else 0))
+            delay(300)
+            refreshSpatial()
+            emitState()
+        }
     }
 
     /**
@@ -1096,6 +1167,16 @@ object MoondropLink {
             Gaia.F_ONEBRINGTWO -> if (f.command == Gaia.C_OBT_GET_STATE && f.payload.isNotEmpty()) {
                 dualConnectionOn = (f.payload[0].toInt() and 0xFF) == 1
                 emit(PodEvent.DualConnectionChanged(dualConnectionOn!!))
+            }
+            Gaia.F_SPATIAL_AUDIO -> if (f.payload.isNotEmpty()) {
+                // GET(1)/SET(2) = 空间音频开关；GET(3)/SET(4) = 头部追踪（命令号见 Gaia.kt）。
+                // 与其它 feature 一样，只处理 GET/SET 这两个命令号，payload 按 0/1 解读。
+                when (f.command) {
+                    Gaia.C_SPATIAL_GET_STATE, Gaia.C_SPATIAL_SET_STATE ->
+                        spatialEnabled = (f.payload[0].toInt() and 0xFF) == 1
+                    Gaia.C_SPATIAL_GET_HEAD_TRACKING, Gaia.C_SPATIAL_SET_HEAD_TRACKING ->
+                        headTrackingOn = (f.payload[0].toInt() and 0xFF) == 1
+                }
             }
             Gaia.F_VOICE -> if (f.command == Gaia.C_VOICE_GET_CONF ||
                 f.command == Gaia.C_VOICE_SET_CONF

@@ -112,6 +112,16 @@ data class PodSnapshot(
     val activeCodec: String = "",
     /** 双设备连接；null = 未知 */
     val dualConnectionOn: Boolean? = null,
+    /**
+     * 空间音频（feature 18）开关；null = 还没读到。
+     *
+     * ⚠ 取值语义见 [Gaia.spatialGet] / [Gaia.spatialSet]：payload `0`=关 / `1`=开。
+     * 这份状态**从未在真机上验证过**（PROTOCOL.md 第 8 节把它标为未接线/未验证），
+     * 所以 UI 在 null 时按「关」保守呈现，而不是猜成已开启。
+     */
+    val spatialEnabled: Boolean? = null,
+    /** 头部追踪（同一个 feature 18 的 cmd 3/4）；null = 还没读到。同样待真机确认。 */
+    val headTrackingOn: Boolean? = null,
     /** 低延迟模式（HyperOS 系统侧）；null = 未知 */
     val lowLatencyOn: Boolean? = null,
     /**

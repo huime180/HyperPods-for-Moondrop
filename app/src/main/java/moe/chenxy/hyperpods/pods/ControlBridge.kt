@@ -262,6 +262,23 @@ object ControlBridge {
         }
     }
 
+    /**
+     * UI（ui/PodState.kt 的 rememberPodSnapshot）打开时补一次自动取图。
+     *
+     * 为什么需要这个入口：连接路径上的自动取图只在 [PodEvent.Connected] 事件里触发，
+     * 而 Connected 是**全量状态事件**。存在两种「已经连着、但这次进程里还没人触发过取图」
+     * 的情况：① 用户从通知栏 / 弹窗先打开过一次界面（那时取图失败或还没回来），随后才打开
+     * 主界面；② 用户手动「恢复默认」清掉图片后重新进入界面。
+     *
+     * 刻意**不新写一套取图逻辑**：这里直接复用 [maybeFetchOfficialImage]，所以
+     * 「同一地址一次会话只自动试一次」的门闩 [imageFetchAttemptedFor] 依然生效 ——
+     * 未连接（deviceAddress 为空）时提前返回，也不会消耗那一次尝试机会。
+     */
+    fun ensureOfficialImage(snapshot: PodSnapshot) {
+        val ctx = appContext ?: return
+        maybeFetchOfficialImage(ctx, snapshot)
+    }
+
     /** 撤销还没启动的弹窗任务（断开时调用）。 */
     private fun cancelPendingPopup() {
         pendingPopup?.let { mainHandler.removeCallbacks(it) }

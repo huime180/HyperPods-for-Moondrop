@@ -57,6 +57,12 @@
     <string name="dual_connection_title">Dual device connection</string>
     <string name="dual_connection_summary">Keep two devices connected at the same time</string>
 
+    <!-- spatial audio (feature 18, incl. head tracking) -->
+    <string name="spatial_audio_title">Spatial audio</string>
+    <string name="spatial_audio_summary">Turn spatial audio on or off (supported models only)</string>
+    <string name="head_tracking_title">Head tracking</string>
+    <string name="head_tracking_summary">Follow head movement while spatial audio is on (supported models only)</string>
+
     <!-- LHDC / dual connection mutual exclusion (PUDDING firmware cannot enable both) -->
     <string name="conflict_lhdc_dual_title">LHDC and Dual device connection cannot be enabled at the same time</string>
     <string name="conflict_lhdc_dual_message_lhdc">Enabling LHDC will turn Dual device connection off.</string>
@@ -75,6 +81,8 @@
     <string name="official_image_retry">Retry</string>
     <string name="official_image_apply">Use this image</string>
     <string name="official_image_reset">Reset to default</string>
+    <!-- 机型图选择列表：按设备名匹配出来的当前机型（那一行会置顶） -->
+    <string name="official_image_current">Current model</string>
     <string name="refresh_summary">Re-read the full state from the earbuds</string>
 
     <!-- settings page -->

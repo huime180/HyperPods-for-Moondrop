@@ -54,7 +54,7 @@ sealed interface Screen : NavKey {
     /** 主页面（内含底部两页签：耳机 / 设置） */
     data object Main : Screen
     data object About : Screen
-    /** 手势操作页（TOUCHV2）：入口 = 设置页的「手势操作」行，由 hasGestures 门控 */
+    /** 手势操作页（TOUCHV2）：入口 = 设备页（PodDetailPage）的「手势操作」行，由 hasGestures 门控 */
     data object Gesture : Screen
 }
 

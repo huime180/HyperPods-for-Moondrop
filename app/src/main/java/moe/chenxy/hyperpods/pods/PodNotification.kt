@@ -31,6 +31,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +39,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import moe.chenxy.hyperpods.R
 import moe.chenxy.hyperpods.ui.MODULE_PREFS_GROUP
 import moe.chenxy.hyperpods.utils.data.HyperPodsAction
@@ -67,6 +69,16 @@ object PodNotification {
      * 不判重会把同一条通知反复重发（虽然系统不会响，但会平白刷新时间戳）。
      */
     @Volatile private var lastRendered: String? = null
+
+    /**
+     * 上一条通知带的大图（键 = 地址 + 图片版本号）。
+     *
+     * 判重要一起看它：机型图是异步拉回来的，图到位时标题正文可能一个字都没变，
+     * 只比 [lastRendered] 的话那条通知要等到下一次电量变化才带上图。
+     */
+    private data class LargeIcon(val key: String, val bitmap: Bitmap)
+
+    @Volatile private var lastIcon: LargeIcon? = null
 
     /** 当前是否有一条本应用发出的通知（只用于日志去重，不参与任何判定）。 */
     @Volatile private var posted = false
@@ -139,12 +151,13 @@ object PodNotification {
 
     // ── 通知本体 ─────────────────────────────────────────────────────────────
 
-    /** 建/校正通道，然后 notify。内容与上一条相同则跳过（见 [lastRendered]）。 */
-    private fun post(context: Context, snapshot: PodSnapshot) {
+    /** 建/校正通道，然后 notify。内容与大图都与上一条相同则跳过（见 [lastRendered] / [lastIcon]）。 */
+    private suspend fun post(context: Context, snapshot: PodSnapshot) {
         val title = titleOf(context, snapshot)
         val content = contentOf(context, snapshot)
         val rendered = "$title\n$content"
-        if (posted && rendered == lastRendered) return
+        val icon = largeIconFor(context, snapshot)
+        if (posted && rendered == lastRendered && icon === lastIcon) return
         val manager = notificationManager(context) ?: run {
             Log.w(TAG, "NotificationManager unavailable; app notification skipped")
             return
@@ -163,6 +176,8 @@ object PodNotification {
                 return
             }
             val builder = Notification.Builder(context, CHANNEL_ID)
+                // 状态栏小图必须保持应用图标：系统会把它渲染成**单色剪影**，
+                // 塞一张产品照片只会糊成一团黑块。设备机型图走 largeIcon（右侧大图）。
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setWhen(0L)
                 .setTicker(title)
@@ -175,16 +190,46 @@ object PodNotification {
                 .setOnlyAlertOnce(true)
                 .setAutoCancel(false)
                 .setOngoing(false)
+            // 拿得到这台设备的机型图就带上；拿不到（没图 / 还没拉回来）就照常发，不因为没图不发通知
+            if (icon != null) builder.setLargeIcon(icon.bitmap)
             manager.notify(NOTIFICATION_TAG, NOTIFICATION_ID, builder.build())
             lastRendered = rendered
+            lastIcon = icon
             posted = true
             Log.i(TAG, "app notification posted: $title / ${content.replace('\n', ' ')}")
         }.onFailure { Log.e(TAG, "post app notification failed", it) }
     }
 
+    /**
+     * 通知大图 = 这台设备的机型图（pods/PodImageStore，按设备地址落盘）；没有就返回 null。
+     *
+     * 线程：解码是文件 IO，**绝不能落在主线程**。[onSnapshot] 的整段判定跑在
+     * [scope]（Dispatchers.Default）里，这里再显式切一次 Dispatchers.IO，别把解码压在
+     * 并发度有限的 Default 线程池上。
+     *
+     * 缓存：结果按「地址 + 图片版本号」记住（[PodImageStore.revision] 在换图/恢复默认时会 +1），
+     * 所以每 30s 一轮的电量轮询不会重复解码同一张图；换图后 key 变了会重新读一次。
+     * 这里用 [PodImageStore.loadBitmap]（与详情页英雄图同一张、全尺寸解码）：一台设备只留一张，
+     * 且详情页本来也会持有同一张图，不额外做降采样。
+     */
+    private suspend fun largeIconFor(context: Context, snapshot: PodSnapshot): LargeIcon? {
+        val address = snapshot.deviceAddress
+        if (address.isBlank()) return null
+        val key = "$address@${PodImageStore.revision}"
+        lastIcon?.takeIf { it.key == key }?.let { return it }
+        val bitmap = withContext(Dispatchers.IO) {
+            runCatching { PodImageStore.loadBitmap(context, address) }.getOrNull()
+        } ?: return null
+        val icon = LargeIcon(key, bitmap)
+        lastIcon = icon
+        return icon
+    }
+
     /** 撤掉自己那条；[reason] 只进日志。始终调用 cancel（幂等），日志只在状态翻转时打一条。 */
     private fun cancelNow(context: Context, reason: String) {
         lastRendered = null
+        // lastIcon 刻意保留：它只用于「这一帧要不要重画」的比较（比的是对象身份），留着可以让
+        // 重连同一台设备时直接复用那张已解码的位图（键没变就命中缓存）
         val wasPosted = posted
         posted = false
         notificationManager(context)?.let { manager ->

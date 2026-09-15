@@ -57,6 +57,12 @@
     <string name="dual_connection_title">双设备连接</string>
     <string name="dual_connection_summary">同时保持两台设备连接</string>
 
+    <!-- 空间音频（feature 18，含头部追踪） -->
+    <string name="spatial_audio_title">空间音频</string>
+    <string name="spatial_audio_summary">开启或关闭空间音频（仅支持的机型）</string>
+    <string name="head_tracking_title">头部追踪</string>
+    <string name="head_tracking_summary">开启空间音频后跟随头部转动（仅支持的机型）</string>
+
     <!-- LHDC / 双设备连接互斥（PUDDING 固件实测不能同时开启） -->
     <string name="conflict_lhdc_dual_title">LHDC 与双设备连接不能同时开启</string>
     <string name="conflict_lhdc_dual_message_lhdc">开启 LHDC 会关闭双设备连接。</string>
@@ -75,6 +81,8 @@
     <string name="official_image_retry">重试</string>
     <string name="official_image_apply">使用此图</string>
     <string name="official_image_reset">恢复默认</string>
+    <!-- 机型图选择列表：按设备名匹配出来的当前机型（那一行会置顶） -->
+    <string name="official_image_current">当前机型</string>
     <string name="refresh_summary">重新读取耳机的全部状态</string>
 
     <!-- 设置页 -->

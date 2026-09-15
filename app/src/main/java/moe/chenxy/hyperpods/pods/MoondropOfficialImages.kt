@@ -58,6 +58,20 @@ data class MoondropOfficialProduct(
     fun boxPath(): String? = listOf(
         bannerImgT, bannerImgNightT, bannerImgV2, squareBannerImg, sellpic, bannerImg, bannerImgNight,
     ).firstOrNull { it.isNotBlank() }
+
+    /**
+     * 列表**缩略图**路径（机型图选择列表用）。
+     *
+     * 顺序与 [boxPath] 不同，原因只有一条：缩略图是 48dp 的小格子，方形图的构图最适合它，
+     * 所以方形图优先；官方目录里绝大多数机型没有方形图（布丁的 `squareBannerImg`/`sellpic`
+     * 就是空的），那时退到带底 banner [bannerImgV2]。
+     *
+     * 这里允许取 0% 透明的带底 banner（[bannerImgV2] / [bannerImgNight]）：缩略图只是小格子里的
+     * 展示，不会像英雄图那样叠在别的底色上，带底图在这里不会「透出底色」。
+     */
+    fun thumbnailPath(): String? = listOf(
+        squareBannerImg, squareBannerImgNight, bannerImgV2, bannerImgNight,
+    ).firstOrNull { it.isNotBlank() } ?: boxPath()
 }
 
 /** 目录接口的外层结构：`{"code":0,"desc":"success","data":[…]}`。 */

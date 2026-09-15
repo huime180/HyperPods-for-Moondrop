@@ -125,9 +125,7 @@ internal fun MainTabsScaffold(
                         settings = settings,
                         themeMode = themeMode,
                         onThemeModeChange = onThemeModeChange,
-                        hasGestures = snapshot.capabilities.hasGestures,
                         onOpenAbout = onOpenAbout,
-                        onOpenGestures = onOpenGestures,
                     )
                 }
             }
@@ -184,15 +182,13 @@ private fun EarphonesTabShell(
     }
 }
 
-/** 设置页：应用外观（主题）+ 通知开关 + 手势 / 关于入口。 */
+/** 设置页：应用外观（主题）+ 通知开关 + 关于入口。 */
 @Composable
 private fun SettingsTabShell(
     settings: ModuleSettingsState,
     themeMode: MutableState<Int>,
     onThemeModeChange: (Int) -> Unit,
-    hasGestures: Boolean,
     onOpenAbout: () -> Unit,
-    onOpenGestures: () -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
     Scaffold(
@@ -215,8 +211,6 @@ private fun SettingsTabShell(
             ),
             themeMode = themeMode,
             onThemeModeChange = onThemeModeChange,
-            hasGestures = hasGestures,
-            onOpenGestures = onOpenGestures,
             onOpenAbout = onOpenAbout,
         )
     }

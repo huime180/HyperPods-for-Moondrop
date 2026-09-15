@@ -11,7 +11,7 @@
  *     提示音开关 + 提示音音量合并成一行（components/PromptTone.kt）—— 与 OppoPods 同一套组件词汇。
  *
  * 行顺序（本项目的功能面）：机型 + 传输通道 → 电量 → 降噪（三选一 + 子排）→ 增益
- *   → 指示灯 / 提示音(含音量) / LHDC / 双设备连接
+ *   → 指示灯 / 提示音(含音量) / LHDC / 双设备连接 / **空间音频(含头部追踪)**
  *   → 手势操作（单独一张卡的跳转行，hasGestures 门控）
  *   → 刷新 → 系统蓝牙设置 → 关于。
  * 所有功能行仍由 PodCapabilities 硬门控：能力位为 false 时该行不会出现在组合树里。
@@ -108,7 +108,9 @@ fun PodDetailPage(
         capabilities.hasPromptTone ||
         capabilities.hasPromptVolume ||
         capabilities.hasLhdc ||
-        capabilities.hasDualConnection
+        capabilities.hasDualConnection ||
+        capabilities.hasSpatial ||
+        capabilities.hasHeadTracking
 
     LazyColumn(
         modifier = modifier.fillMaxSize().scrollEndHaptic(),
@@ -200,6 +202,25 @@ fun PodDetailPage(
                                     MoondropLink.setDualConnection(on)
                                 }
                             },
+                        )
+                    }
+                    // 空间音频（feature 18）：只有能力位为真才出现。
+                    // 未读到时 snapshot.spatialEnabled 是 null —— 按「关」保守呈现（不猜成已开启）；
+                    // 头部追踪是同一 feature 的另一组命令，独立门控。
+                    if (capabilities.hasSpatial) {
+                        SwitchPreference(
+                            title = stringResource(R.string.spatial_audio_title),
+                            summary = stringResource(R.string.spatial_audio_summary),
+                            checked = snapshot.spatialEnabled ?: false,
+                            onCheckedChange = { on -> MoondropLink.setSpatial(on) },
+                        )
+                    }
+                    if (capabilities.hasHeadTracking) {
+                        SwitchPreference(
+                            title = stringResource(R.string.head_tracking_title),
+                            summary = stringResource(R.string.head_tracking_summary),
+                            checked = snapshot.headTrackingOn ?: false,
+                            onCheckedChange = { on -> MoondropLink.setHeadTracking(on) },
                         )
                     }
                 }
