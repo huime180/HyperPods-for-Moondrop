@@ -23,7 +23,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import parse_gaia_logcat as P
 
-MARK = re.compile(r"### MARK (\S+)\s+(\d\d:\d\d:\d\d)")
+# 两种来源都认：脚本用 `log -t PODMARK` 打的（推荐，不会被 logcat 覆盖），
+# 以及离线手写的 "### MARK <标签> <时间>"。
+MARK = re.compile(r"(?:PODMARK:?\s*)?### MARK (\S+)\s+(\d\d:\d\d:\d\d)")
 SEND_HEX = re.compile(r"Plugin: send: packet = ((?:0x[0-9A-Fa-f]{2}\s*)+)")
 RECV_HEX = re.compile(r"onPacketReceived received = ((?:0x[0-9A-Fa-f]{2}\s*)+)")
 RECV_ARR = re.compile(r"onReceiveGaiaPacket: received = (\[[^\]]*\])")

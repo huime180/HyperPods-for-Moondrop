@@ -19,12 +19,14 @@ QUIET_S=${QUIET_S:-20}
 NEXT_S=${NEXT_S:-10}
 WAIT_S=${WAIT_S:-8}
 
-mark() { echo "### MARK $1 $(date +%T)" >> "$OUT"; }
+# MARK 必须走 logcat 本身（用系统 log 命令打 tag），不能用 >> 追加：
+# logcat 持有文件 offset，外部追加会被它随后的写入覆盖掉（实测 MARK 全丢）。
+mark() { /system/bin/log -t PODMARK "### MARK $1 $(date +%T)"; }
 
 logcat -c 2>/dev/null
 pkill -f "logcat -s System.out" 2>/dev/null
 : > "$OUT"
-nohup logcat -s System.out >> "$OUT" 2>&1 &
+nohup logcat -s System.out PODMARK >> "$OUT" 2>&1 &
 echo "已开始抓取 -> $OUT"
 echo
 echo "[1/3] 静默 ${QUIET_S}s：手别碰耳机（拿基线噪音）"
