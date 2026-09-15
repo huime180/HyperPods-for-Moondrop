@@ -28,15 +28,13 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK packages
-        # compileSdk 37 由 miuix 0.9.3 的 AAR metadata(minCompileSdk=37) 要求；
-        # 失败也不阻塞（AGP 自身会在需要时自动下载缺失组件）。
-        continue-on-error: true
-        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
-
+      # 刻意**不**用 actions/setup-android、也不手动 sdkmanager：
+      # ① 它内部会跑 `sdkmanager tools`，而 "tools" 包已从 SDK 仓库移除，v3 在新 runner 上
+      #    会以 "Warning: Failed to find package 'tools'" + exit 1 直接失败（2026-09-15 实测，
+      #    整条流水线因此全 skipped）；
+      # ② ubuntu-latest 镜像本来就预装 Android SDK（ANDROID_HOME 已设），compileSdk 37 缺失时
+      #    AGP 会自己下载，且 runner 默认已接受 SDK 许可 —— 与 HyperPods（dev）的工作流做法一致，
+      #    那边也是零 SDK 准备步骤。
       - name: Grant execute permission
         run: chmod +x gradlew
 
