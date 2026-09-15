@@ -619,6 +619,27 @@ miui.focus.actions= Bundle
   不是我们自己的 Intent action。
 - 图标用 `key_headset`（不是 `miui.focus.pic_*` 那种资源名）。
 
+
+### 10.5.4 已排查：音乐 / 游戏模式不走 GAIA（2026-09 实测）
+
+水月雨「布丁」有**音乐 / 游戏两种模式**，官方 APP 没有调控页，只能四击耳机背切换。
+用真机抓包排查过一轮，结论是**它不通过 GAIA 暴露，也没有找到 APP 可读/可控的通道**，
+记录在此免得重复投入：
+
+- 抓法：root 抓 btsnoop（`/data/misc/bluetooth/logs/btsnoop_hci_*.log`，本 ROM 当前**不截断**，
+  可完整解出 GAIA 帧）+ `tools/btsnoop_gaia.py`；时间轴用 `tools/gaia_mode_capture.sh`（MARK 走
+  `log -t PODMARK`，别用 `>>` 追加到 logcat 输出文件 —— 会被 logcat 的文件 offset 覆盖）。
+- 实测：在 APP 保持 GAIA 连接、并确认 A2DP/HFP 都连着的状态下四击，**整段窗口内 GAIA 一条帧
+  都没有**（同期只有每 3s 一次的 `13/BATTERY` 轮询，与四击无关）；把 btsnoop 按 10 秒分桶统计，
+  其它 ACL 链路（含当时被误认为「突发」的那条）只是 A2DP 媒体相关的**稳定**活动 ——
+  断连时活动下降、重连后恢复，与四击**不对齐**。
+- 结论：该模式是**耳机固件内部状态**（切换不需要主机参与、也不上报），目前没有 APP 侧可行路径。
+  若要继续，只剩「模块形态 hook MIUI 自己的耳机服务」这一条不确定的路（dev 仓库已 hook
+  `com.android.bluetooth.ble.app.IMiuiHeadsetService`），普通 APP 无解。
+- 反面记录：曾把某帧里的字节对 `00 1d` 当作 GAIA vendor 0x001D，实为另一协议 24 位序列号的
+  巧合命中 —— 判定 GAIA 帧必须校验完整 header（vendor + commandWord 的 feature/type/cmd 边界），
+  不能只匹配两个字节。
+
 ### 10.5.3 当前实现
 
 MiuixMoondrop 现在**自己就把上面这套 extra 写上**（`pods/PodFocusNotification.kt`），用的正是
