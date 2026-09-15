@@ -207,39 +207,69 @@ adb shell dumpsys notification --noredact | grep -i HyperPodsAppState   # 本应
 
 ## 7. Release 签名
 
-`app/build.gradle.kts` 的 `release` **没有配置 `signingConfig`**，所以
-`./gradlew :app:assembleRelease` 产出的是 `app-release-unsigned.apk`（R8 已开，体积约 2.5 MB）。
-本地这样装之前要自己签；**CI 会替你签**（见第 4 节：先用 secrets 里的正式 keystore，
-没配 secrets 时用缓存的 CI keystore，产物名 `MiuixMoondrop-<versionName>-release.apk`）。
+正式签名的密钥库与口令**不在仓库里**：`.gitignore` 已挡掉 `*.jks` / `*.keystore` / `*.p12` /
+`keystore.properties` / `signing.properties`。两条链路：
 
-自签名步骤（示例，密钥请自行保管、不要提交到仓库）：
+### 7.1 CI（推荐）：GitHub Secrets
+
+`.github/workflows/build.yml` 的 `Sign release APK` 步骤读四个 **repository secrets**：
+
+| secret | 内容 |
+| --- | --- |
+| `SIGNING_KEY` | 密钥库文件的 **base64**（`base64 -w0 xxx.jks` 的结果） |
+| `ALIAS` | 密钥别名 |
+| `KEYSTORE_PASSWORD` | 密钥库口令 |
+| `KEY_PASSWORD` | 私钥口令（JKS 里通常与库口令相同） |
+
+配好后产物 `MiuixMoondrop-<versionName>-release.apk` 就是正式签名包（步骤输出
+`signed=secret`）；**没配**时退回一个由 `actions/cache` 跨 run 复用的 CI 兜底密钥库
+（签名稳定、可覆盖安装，但不是正式签名，输出 `signed=fallback`）。轮换密钥＝重新上传这四个
+secret，**必须重跑一次构建才会生效**。
+
+secret 的写入只有两条路：GitHub 网页，或用仓库 public key 做封箱加密的 API。在 PC 上最省事：
 
 ```bash
-# 1) 生成密钥库（一次性）
-keytool -genkeypair -v -keystore miuixmoondrop.jks \
-  -alias miuixmoondrop -keyalg RSA -keysize 2048 -validity 10000
-
-# 2) 用 apksigner 签名（build-tools 里的工具）
-$ANDROID_HOME/build-tools/36.0.0/apksigner sign \
-  --ks miuixmoondrop.jks --ks-key-alias miuixmoondrop \
-  --out MiuixMoondrop-1.0.0-release.apk \
-  app/build/outputs/apk/release/app-release-unsigned.apk
-
-# 3) 校验
-$ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs MiuixMoondrop-1.0.0-release.apk
+gh secret set SIGNING_KEY -R huime180/MiuixMoondrop < <(base64 -w0 xxx.jks)
+gh secret set ALIAS             -R huime180/MiuixMoondrop --body '<别名>'
+gh secret set KEYSTORE_PASSWORD -R huime180/MiuixMoondrop --body '<库口令>'
+gh secret set KEY_PASSWORD      -R huime180/MiuixMoondrop --body '<私钥口令>'
 ```
 
-若希望 Gradle 直接产出已签名包，在 `app/build.gradle.kts` 里增加
-`signingConfigs { create("release") { … } }` 并在 `buildTypes.release` 中引用
-（**本文档不改动任何 gradle 文件**，仅说明做法）。签名要注意：升级安装必须是**同一个签名**，
-否则会 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`。
+### 7.2 本地构建：Gradle 属性（可选）
+
+`app/build.gradle.kts` 在**四个值都齐**时才创建 `signingConfigs.release`，于是
+`./gradlew :app:assembleRelease` 直接产出已签名包；没配则与以前一致
+（`app-release-unsigned.apk`）。值只从**仓库外**读：Gradle 属性
+（`~/.gradle/gradle.properties` 或命令行 `-P`）优先，其次同名环境变量：
+
+```properties
+# ~/.gradle/gradle.properties —— 不要放进仓库
+KEYSTORE_FILE=/绝对路径/xxx.jks
+KEYSTORE_PASSWORD=…
+KEY_ALIAS=…
+KEY_PASSWORD=…
+```
+
+不想动 gradle 时也可以手工签：
+
+```bash
+BT="$ANDROID_HOME/build-tools/<版本>"
+"$BT/zipalign" -f 4 app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
+"$BT/apksigner" sign --ks xxx.jks --ks-key-alias <别名> \
+  --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD \
+  --out MiuixMoondrop-1.0.0-release.apk aligned.apk
+"$BT/apksigner" verify --print-certs MiuixMoondrop-1.0.0-release.apk
+```
+
+签名要注意：升级安装必须是**同一个签名**，否则 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`；
+换签名等于换应用身份，老用户要卸载重装。
 
 ---
 
 ## 8. 已知构建/运行注意点
 
 1. **没有 native 库**，所以不需要 NDK，也不会有 ABI 拆分问题。
-2. Debug 包可直接安装；Release 包未签名，需要自行签名（第 7 节）。
+2. Debug 包可直接安装；Release 包**要么配好签名（第 7 节），要么自己签**，未签名的包装不上。
 3. 蓝牙权限是运行时权限：全新安装后需要打开过一次应用（或手动在系统设置里授予）
    `POST_NOTIFICATIONS`，否则状态栏通知会被系统静默丢弃（`PodNotification` 只打日志）。
    这是平台规则，任何应用都绕不过。

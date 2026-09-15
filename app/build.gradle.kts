@@ -5,6 +5,23 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+// ── 正式签名（可选；见 BUILD.md 第 7 节）────────────────────────────────────
+// 密钥库与口令只从**仓库外**读：优先 Gradle 属性（~/.gradle/gradle.properties 或 -P），
+// 其次同名环境变量。仓库里不放任何密钥，也不读仓库内的 properties 文件；都没配时
+// release 产物保持未签名 —— CI 的 Build Release APK 会用自己的 apksigner 步骤签。
+val signingStorePath: String? =
+    (findProperty("KEYSTORE_FILE") as String?)?.takeIf { it.isNotBlank() }
+        ?: System.getenv("KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
+val signingStorePassword: String? =
+    (findProperty("KEYSTORE_PASSWORD") as String?)?.takeIf { it.isNotBlank() }
+        ?: System.getenv("KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() }
+val signingKeyAlias: String? =
+    (findProperty("KEY_ALIAS") as String?)?.takeIf { it.isNotBlank() }
+        ?: System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() }
+val signingKeyPassword: String? =
+    (findProperty("KEY_PASSWORD") as String?)?.takeIf { it.isNotBlank() }
+        ?: System.getenv("KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+
 android {
     namespace = "moe.chenxy.hyperpods"
     // Miuix 0.9.3 的 AAR metadata 声明 minCompileSdk=37，低于 37 会在
@@ -19,6 +36,18 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
+    }
+
+    signingConfigs {
+        // 只有「密钥库路径 + 两个口令」都齐了才创建：否则与以前一致（未签名产物）
+        if (signingStorePath != null && signingStorePassword != null && signingKeyPassword != null) {
+            create("release") {
+                storeFile = file(signingStorePath)
+                storePassword = signingStorePassword
+                keyAlias = signingKeyAlias
+                keyPassword = signingKeyPassword
+            }
+        }
     }
 
     buildTypes {
@@ -37,6 +66,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // 配了正式签名就用它；没配则与以前一致（app-release-unsigned.apk）
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
 

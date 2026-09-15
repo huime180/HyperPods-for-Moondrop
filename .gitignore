@@ -32,3 +32,11 @@ __pycache__/
 /release/
 /_shots/
 /_scratch_bt/
+
+# 签名材料：密钥库与本地签名属性绝不入库
+# 正式签名的密钥库与口令放在仓库外（CI 用 GitHub Secrets，见 BUILD.md 第 7 节）
+*.jks
+*.keystore
+*.p12
+/keystore.properties
+/signing.properties
