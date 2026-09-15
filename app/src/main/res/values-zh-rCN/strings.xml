@@ -99,6 +99,8 @@
     <string name="bg_popup_permission_summary">授予「显示在其他应用上层」/「后台弹出界面」；否则应用在后台时系统会静默拦掉连接弹窗</string>
     <!-- 应用进程自己发的那条耳机状态通知（pods/PodNotification.kt） -->
     <string name="notification_channel_status">耳机状态</string>
+    <string name="island_disconnected">已断开</string>
+    <string name="notification_channel_island">耳机状态提示（超级岛）</string>
     <string name="notification_channel_status_desc">已连接水月雨耳机的连接状态与电量</string>
 
     <!-- 关于 -->

@@ -212,6 +212,9 @@ object PodNotification {
                 contentText = content.replace('\n', ' ').trim(),
                 aodText = aodTitleOf(snapshot),
                 boxBitmap = icon?.bitmap,
+                // 常驻通知**不带岛**：带上它 HyperOS 会把超级岛一直挂着（用户实测）。
+                // 岛只在连接/断开那一刻由 pods/PodIslandNotification.kt 临时发一次。
+                withIsland = false,
             )?.let { builder.addExtras(it) }
             manager.notify(NOTIFICATION_TAG, NOTIFICATION_ID, builder.build())
             lastRendered = rendered
@@ -341,12 +344,18 @@ object PodNotification {
      *   · 单设备机型（type 0）只显示一行「整机」；
      *   · 三路都没有读数时第二行回落成「正在读取电量…」，第一行的连接状态仍在。
      */
-    private fun contentOf(context: Context, snapshot: PodSnapshot): String {
+    private fun contentOf(context: Context, snapshot: PodSnapshot): String =
+        context.getString(R.string.conn_connected) + "\n" + batteryTextOf(context, snapshot)
+
+    /**
+     * 只有电量的那一行（不含「已连接」那行）—— 超级岛右栏用。
+     *
+     * internal：pods/ControlBridge.kt 在连接那一刻要把它塞进岛里，避免在别处再抄一套
+     * 「哪几路要显示、离线怎么显示」的判定（口径必须与常驻通知完全一致）。
+     */
+    internal fun batteryTextOf(context: Context, snapshot: PodSnapshot): String {
         val battery = snapshot.battery
-        val state = context.getString(R.string.conn_connected)
-        if (!battery.anyKnown) {
-            return state + "\n" + context.getString(R.string.batt_unknown)
-        }
+        if (!battery.anyKnown) return context.getString(R.string.batt_unknown)
         val parts = if (battery.singleDevice) {
             listOf(
                 batteryPart(
@@ -363,9 +372,8 @@ object PodNotification {
                 batteryPart(context, R.string.batt_case, battery.case, battery.caseCharging),
             )
         }
-        val body = parts.filterNotNull().joinToString(PART_SEPARATOR)
+        return parts.filterNotNull().joinToString(PART_SEPARATOR)
             .ifEmpty { context.getString(R.string.batt_unknown) }
-        return state + "\n" + body
     }
 
     /**

@@ -99,6 +99,8 @@
     <string name="bg_popup_permission_summary">Grant “Display over other apps” / “Start activities in background”; otherwise the system silently blocks the popup while the app is in the background</string>
     <!-- 应用进程自己发的那条耳机状态通知（pods/PodNotification.kt） -->
     <string name="notification_channel_status">Earbuds status</string>
+    <string name="island_disconnected">Disconnected</string>
+    <string name="notification_channel_island">Earbuds status (Super Island)</string>
     <string name="notification_channel_status_desc">Connection state and battery of the connected Moondrop earbuds</string>
 
     <!-- about -->

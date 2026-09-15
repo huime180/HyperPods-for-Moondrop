@@ -628,10 +628,18 @@ dev 分支同库同版本）—— 手拼 `miui.focus.pics` / `miui.focus.action
   平板上验证过，它那条焦点通知用的就是 DEFAULT）。通道档位改过，[ensureChannel] 会自动删掉重建。
 - 通知 **`setOngoing(true)` 常驻**：耳机连着时不可划掉（划掉后要等下次内容变化才回来，用户会
   以为「通知坏了」），断开连接时由 `cancelNow` 程序化撤掉。
-- 岛上左图右文：左 = 设备机型图（键仍是 `key_headset`，见 §10.5.2），右 = 设备名 + 连接状态/电量；
-  `enableFloat` / `updatable` 都开（电量每 30s 变一次，要能原地更新）。
-- AOD（`aodTitle` / `aodPic`）按下面历史实现里真机验证过的做法，补进 `miui.focus.param` 的
-  `param_v2`（库的 DSL 没有这个字段）；格式为 `L 59% | R 64%`，没有读数的组件不写。
+- **常驻通知不带岛**：只要常驻通知上带 `param_island`，HyperOS 就会把超级岛一直挂着（用户实测），
+  所以 `PodFocusNotification.buildExtras(..., withIsland = false)` —— 常驻通知只留 `iconTextInfo`
+  那条焦点通知。
+- **超级岛是临时的**（`pods/PodIslandNotification.kt`，独立通道 `hyperpods_moondrop_island`，
+  可单独关）：连接那一刻显示「设备名 + 电量」、断开那一刻显示「设备名 + 已断开」，
+  各用一份 `isShowNotification = false`（不在通知栏留痕，也不闪）+ `timeout = 5`（模板基类字段，
+  交给系统按时收起）的 extras 临时发一次，另外再用协程延时兜底 `cancel`。
+- 岛的布局：**左 = 机型图 + 设备名，右 = 内容**（电量 / 已断开）。右栏必须写 `textInfo.title`
+  而不是 `content` —— 实测右栏只渲染 `title`，把电量放进 `content` 时岛上只看得到设备名。
+- `enableFloat` / `updatable` 都开（电量每 30s 变一次，要能原地更新）。
+- AOD 直接写模板基类自带的 **`aodTitle`** 字段（格式 `L 59% | R 64%`，没有读数的组件不写）；
+  不需要像下面历史实现那样再往 `miui.focus.param` 的 JSON 里补 `param_v2.aodTitle`。
 - 普通 ROM 会忽略这些 extra，通知照常显示，因此带上它们没有兼容性代价。
 
 历史实现（模块时期，代码已删除）：

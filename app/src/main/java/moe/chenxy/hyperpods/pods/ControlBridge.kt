@@ -104,6 +104,13 @@ object ControlBridge {
     /** 这次连接已经为哪个地址试过拉图（断开时清空，重连可再试）。 */
     @Volatile private var imageFetchAttemptedFor: String? = null
 
+    /** 这次连接是否已经弹过「连接」超级岛（断开时清空，重连可再弹）。 */
+    @Volatile private var islandShownForAddress: String? = null
+
+    /** 最近一次连接的设备名 / 地址：断开那一刻 snapshot 可能已经清空，用它们做岛的内容与图片。 */
+    @Volatile private var lastIslandName: String = ""
+    @Volatile private var lastIslandAddress: String = ""
+
     /** 已排队但还没启动的弹窗任务；断开时撤销（见 [cancelPendingPopup]）。 */
     private var pendingPopup: Runnable? = null
 
@@ -132,6 +139,7 @@ object ControlBridge {
                     PodNotification.onSnapshot(ctx, snap)
                     maybeShowConnectionPopup(ctx, snap)
                     maybeFetchOfficialImage(ctx, snap)
+                    maybeShowConnectedIsland(ctx, snap)
                 }
                 is PodEvent.BatteryChanged -> {
                     val snap = MoondropLink.snapshot()
@@ -145,6 +153,8 @@ object ControlBridge {
                     popupShownForAddress = null
                     imageFetchAttemptedFor = null
                     PodNotification.cancel(ctx)
+                    // 断开也只在超级岛上闪一下「已断开」，不额外留通知
+                    showDisconnectedIsland(ctx)
                 }
                 else -> Unit
             }
@@ -277,6 +287,38 @@ object ControlBridge {
     fun ensureOfficialImage(snapshot: PodSnapshot) {
         val ctx = appContext ?: return
         maybeFetchOfficialImage(ctx, snapshot)
+    }
+
+    /**
+     * 连接那一刻在超级岛上显示一次「设备名 + 电量」。
+     *
+     * [PodEvent.Connected] 是**全量状态事件**（每次电量变化都会发一条），不能直接当「刚连上」，
+     * 所以用「本次连接是否已发过」做边沿判定 —— 与连接弹窗的 popupShownForAddress 同一套思路。
+     */
+    private fun maybeShowConnectedIsland(context: Context, snapshot: PodSnapshot) {
+        val address = snapshot.deviceAddress
+        if (address.isBlank() || address == islandShownForAddress) return
+        islandShownForAddress = address
+        lastIslandAddress = address
+        lastIslandName = snapshot.deviceName.ifBlank { snapshot.modelName }
+        val name = lastIslandName
+        val batteryText = PodNotification.batteryTextOf(context, snapshot)
+        ioScope.launch {
+            val bitmap = PodImageStore.loadBitmap(context, address)
+            PodIslandNotification.showConnected(context, name, batteryText, bitmap)
+        }
+    }
+
+    /** 断开那一刻在超级岛上闪一次「已断开」（用最近一次连接的设备名与机型图）。 */
+    private fun showDisconnectedIsland(context: Context) {
+        val name = lastIslandName
+        val address = lastIslandAddress
+        islandShownForAddress = null
+        if (name.isBlank() && address.isBlank()) return
+        ioScope.launch {
+            val bitmap = if (address.isBlank()) null else PodImageStore.loadBitmap(context, address)
+            PodIslandNotification.showDisconnected(context, name, bitmap)
+        }
     }
 
     /** 撤销还没启动的弹窗任务（断开时调用）。 */
