@@ -11,7 +11,10 @@
  *
  * 岛**不挂在常驻通知上**：常驻通知一旦带 `param_island`，HyperOS 会把岛一直挂着（用户实测）。
  * 所以常驻通知只带 `iconTextInfo`（焦点通知那条小条），岛由 [PodIslandNotification] 用一份
- * 单独的、`isShowNotification = false` + `timeout` 的 extras 在连接/断开那一刻临时发一次。
+ * 单独的、`isShowNotification = false` + `islandTimeout` 的 extras 在连接/断开那一刻临时发一次。
+ * 临时岛那份 extras 里**只写 `bigIslandArea`，不写 `smallIslandArea`**（摘要态）：dev 仓库蓝牙
+ * 常驻通知里的岛就是这么写的，实测不会被系统一直挂在岛区；写了 smallIslandArea 反而会被当成
+ * 「这条通知有摘要态」，连接后岛一直挂在岛区（用户反馈「常驻焦点通知还是有超级岛」）。
  *
  * 普通 ROM 会忽略这些 extra，通知照常显示，因此带上它们没有兼容性代价。
  */
@@ -40,7 +43,9 @@ object PodFocusNotification {
      * @param aodText        息屏显示用的紧凑电量行（`L 59% | R 64%`）；空串则不写 AOD 字段
      * @param boxBitmap      机型图；为 null 时回落仓库自带的 img_box
      * @param withIsland     是否带上「超级岛」那一段。**常驻通知必须传 false**（否则岛一直挂着）
-     * @param timeoutSeconds 岛显示多久（秒）后自动收起；null = 不限制（模板基类的 `timeout` 字段）
+     * @param islandTimeoutSeconds 岛显示多久后由系统自动收起（岛的 `islandTimeout` 字段，**单位：秒**，
+     *                       系统默认 3600 s）；null = 用系统默认。注意别和模板基类的 `timeout` 混：
+     *                       那个单位是**分钟**，管的是整条通知的存活时间，不是岛的。
      * @param showInShade    是否在通知栏也留一条通知。临时岛传 false —— 只借岛显示一下，
      *                       不在通知栏里多出/闪出一条（库的 `isShowNotification`）
      * @param floating       是否让它「浮」成岛。**常驻通知必须传 false**：焦点通知本身带着
@@ -54,7 +59,7 @@ object PodFocusNotification {
         aodText: String,
         boxBitmap: Bitmap?,
         withIsland: Boolean,
-        timeoutSeconds: Int? = null,
+        islandTimeoutSeconds: Int? = null,
         showInShade: Boolean = true,
         floating: Boolean = true,
     ): Bundle? = runCatching {
@@ -76,7 +81,6 @@ object PodFocusNotification {
             // AOD（息屏显示）文案：模板基类自带 aodTitle 字段，直接写即可
             //（不需要像 dev 当初那样再往 miui.focus.param 的 JSON 里塞 param_v2.aodTitle）
             if (aodText.isNotBlank()) aodTitle = aodText
-            timeoutSeconds?.let { timeout = it }
             iconTextInfo {
                 animIconInfo {
                     type = 0
@@ -97,16 +101,15 @@ object PodFocusNotification {
             if (withIsland) {
                 island {
                     islandProperty = 1
-                    // 未展开（小岛）那块的模板**只能放图片**（SmallIslandArea = picInfo /
-                    // combinePicInfo，没有文字字段），所以这里放机型图；文字左右布局在
-                    // bigIslandArea 里 —— 系统把未展开态渲染成大岛区域的「左图 + 右 title」，
-                    // 因此下面那套左图右文同时就是小岛的形态。
-                    smallIslandArea {
-                        picInfo {
-                            type = 1
-                            pic = logo
-                        }
-                    }
+                    // 岛自己多久收起：**秒**（岛模板字段 islandTimeout，系统默认 3600 s）。
+                    // 早先这里把 5 打到了模板基类的 timeout 上 —— 那个字段单位是**分钟**，
+                    // 等于给岛留了 5 分钟寿命，也是「岛不走」的一个帮凶。
+                    islandTimeoutSeconds?.let { islandTimeout = it }
+                    // 刻意**不写 smallIslandArea**（摘要态那块，只能放图片）：dev 仓库蓝牙常驻通知
+                    // 的岛就只有 bigIslandArea，实测不会被系统一直挂在岛区；写了它反而会被当成
+                    // 「有摘要态」，连接后岛一直挂在岛区。收起态照样画得出来 —— 系统用
+                    // bigIslandArea 的「左图 + 右 title」渲染未展开态（真机实测），所以下面这套
+                    // 左图右文同时就是小岛的形态。
                     bigIslandArea {
                         // 布局（用户要求）：左 = 图片 + 设备名，右 = 内容（电量 / 已断开）。
                         // 右栏刻意写成 title 而不是 content：实测右栏只渲染 title —— 原来把电量放在

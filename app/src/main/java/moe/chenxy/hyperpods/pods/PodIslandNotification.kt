@@ -5,7 +5,9 @@
  * 为什么单独一份通知：超级岛要「只出现一会」，而 HyperOS 只要常驻通知上带着 `param_island`
  * 就会把岛一直挂着。所以岛走这条独立的、临时的通知：
  *   · `isShowNotification = false`：只在岛区域浮现，不在通知栏里多出一条（也不会闪一下）；
- *   · `timeout`：交给系统按时收起；另外再用协程兜一层延时撤掉（个别 ROM 不认 timeout）；
+ *   · `islandTimeout`（秒）：交给**系统**按时把岛收起；另外再用协程兜一层延时撤单，并且给
+ *     通知挂 `setTimeoutAfter` 让系统自己撤 —— 进程被回收时这层兜底仍然生效；
+ *   · 只写 `bigIslandArea`、不写 `smallIslandArea`：见 PodFocusNotification 的说明；
  *   · 内容只在连接那一刻（电量）与断开那一刻（「已断开」）各发一次，之后不再刷新。
  *
  * 触发点见 pods/ControlBridge.kt：连接用「本次会话没发过」做边沿判定（PodEvent.Connected 是
@@ -32,11 +34,18 @@ object PodIslandNotification {
     private const val CHANNEL_ID = "hyperpods_moondrop_island"
     private const val NOTIFICATION_ID = 10005
 
-    /** 岛显示多久（秒）。用户要求「只显示一会」——5 秒接近系统级提示的体感。 */
+    /** 岛显示多久（秒）。用户要求「只显示一会」——5 秒接近系统级提示的体感。
+     *  打到岛模板自己的 `islandTimeout` 上（单位**秒**），由系统到点收起。 */
     private const val ISLAND_TIMEOUT_SECONDS = 5
 
-    /** timeout 之外再兜一点时间才撤（避免刚好卡在系统收起的瞬间）。 */
+    /** 系统收起之后再兜一点时间才由本进程主动撤（避免刚好卡在系统收起的瞬间）。 */
     private const val HIDE_EXTRA_SECONDS = 2
+
+    /**
+     * 兜底撤单延时（ms）。两条路都走：通知自己带 `setTimeoutAfter`（系统侧，进程被回收也生效），
+     * 外加本进程一个延时协程（个别 ROM 不认 `setTimeoutAfter`）。
+     */
+    private const val HIDE_DELAY_MS = (ISLAND_TIMEOUT_SECONDS + HIDE_EXTRA_SECONDS) * 1000L
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -66,7 +75,7 @@ object PodIslandNotification {
                     aodText = "",
                     boxBitmap = boxBitmap,
                     withIsland = true,
-                    timeoutSeconds = ISLAND_TIMEOUT_SECONDS,
+                    islandTimeoutSeconds = ISLAND_TIMEOUT_SECONDS,
                     showInShade = false,
                 ) ?: return@launch
                 val manager = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -76,13 +85,16 @@ object PodIslandNotification {
                         .setSmallIcon(R.drawable.ic_launcher_foreground)
                         .setContentTitle(deviceName)
                         .setContentText(contentText)
+                        // 系统侧兜底：到点由 NotificationManagerService 撤掉这条通知（岛随之消失），
+                        // 不依赖本进程活着 —— 进程被回收时协程那层就没了。
+                        .setTimeoutAfter(HIDE_DELAY_MS)
                         .addExtras(extras)
                         .build(),
                 )
                 Log.i(TAG, "island shown: $deviceName / $contentText")
                 pendingHide?.cancel()
                 pendingHide = scope.launch {
-                    delay((ISLAND_TIMEOUT_SECONDS + HIDE_EXTRA_SECONDS) * 1000L)
+                    delay(HIDE_DELAY_MS)
                     runCatching { manager.cancel(NOTIFICATION_ID) }
                 }
             }.onFailure { Log.w(TAG, "island show failed", it) }

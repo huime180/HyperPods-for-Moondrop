@@ -24,7 +24,10 @@
   用 `com.xzakota.hyper.notification:focus-api` 模板库，同 dev 分支），AOD 行是 `L 59% | R 64%`；
   **超级岛不挂在它上面**（挂着会一直显示），而是由 `pods/PodIslandNotification.kt` 在连接
   （设备名 + 电量）与断开（设备名 + 已断开）那一刻各临时发一次，5 秒后自动收起，
-  岛布局为「左 = 机型图 + 设备名，右 = 内容」；其它 ROM 忽略这些 extra，通知照常显示。
+  岛布局为「左 = 机型图 + 设备名，右 = 内容」；岛的收起时间写在岛模板的 `islandTimeout`
+  （单位**秒**；模板基类的 `timeout` 是**分钟**，别混）上，并给通知挂 `setTimeoutAfter`
+  作系统侧兜底；岛模板**只写 `bigIslandArea`、不写 `smallIslandArea`**（写了会被系统当成
+  「这条通知有摘要态」，连接后岛一直挂在岛区）；其它 ROM 忽略这些 extra，通知照常显示。
 * **连接弹窗**（新行为）：耳机连上后**先刷新状态栏通知，再延后 600 ms 弹连接弹窗**
   （`ui/ConnectionPopupActivity.kt`，默认 8s 自动关闭）；后台启动 Activity 可能被系统 BAL
   静默拦掉，因此最多**重试 3 次**（间隔 800 ms，用 `lastShownAt` / `visible` 确认是否真的显示）。

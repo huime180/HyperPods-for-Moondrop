@@ -637,8 +637,15 @@ dev 分支同库同版本）—— 手拼 `miui.focus.pics` / `miui.focus.action
   那条焦点通知。
 - **超级岛是临时的**（`pods/PodIslandNotification.kt`，独立通道 `hyperpods_moondrop_island`，
   可单独关）：连接那一刻显示「设备名 + 电量」、断开那一刻显示「设备名 + 已断开」，
-  各用一份 `isShowNotification = false`（不在通知栏留痕，也不闪）+ `timeout = 5`（模板基类字段，
-  交给系统按时收起）的 extras 临时发一次，另外再用协程延时兜底 `cancel`。
+  各用一份 `isShowNotification = false`（不在通知栏留痕，也不闪）+ `islandTimeout = 5`
+  （**岛模板字段，单位是秒**；不是模板基类的 `timeout` —— 那个字段单位是**分钟**，早先误用
+  `timeout = 5` 等于给岛留了 5 分钟寿命，是「岛不走」的帮凶）的 extras 临时发一次；
+  另外给通知挂 **`setTimeoutAfter`**（系统侧撤单，进程被回收也生效），再用协程延时兜底 `cancel`。
+- **岛模板只写 `bigIslandArea`，不写 `smallIslandArea`**（摘要态那块：`SmallIslandArea` 只能放
+  图片 `picInfo`）：dev 仓库蓝牙常驻通知里的岛就是这种写法（用户实测不会被系统一直挂在岛区）；
+  写了 `smallIslandArea` 反而会被当成「这条通知有摘要态」，连接后岛一直挂在岛区（用户反馈
+  「常驻焦点通知还是有超级岛」）。收起态照样画得出来 —— 系统用 `bigIslandArea` 的
+  「左图 + 右 `textInfo.title`」渲染未展开态（实测）。
 - 岛的布局：**左 = 机型图 + 设备名，右 = 内容**（电量 / 已断开）。右栏必须写 `textInfo.title`
   而不是 `content` —— 实测右栏只渲染 `title`，把电量放进 `content` 时岛上只看得到设备名。
 - `enableFloat` / `updatable` 都开（电量每 30s 变一次，要能原地更新）。
