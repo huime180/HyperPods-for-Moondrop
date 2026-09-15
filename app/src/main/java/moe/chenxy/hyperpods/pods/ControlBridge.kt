@@ -5,8 +5,9 @@
  * 为什么还需要它：
  *   协议客户端（MoondropLink）跑在应用进程，但它的状态变化要分发给应用里的两个消费者：
  *     · pods/PodNotification.kt —— 应用自己那条耳机状态通知（连上/电量变化重画，断开撤掉）；
- *     · ui/ConnectionPopupActivity —— 首次拿到有效电量时弹一次「连接弹窗」（三路电量）；
- *       状态栏通知在同一条事件里一起刷新（见下），所以两者是**同时**出现的。
+ *     · ui/PopupActivity —— 首次拿到有效电量时自动弹出「点通知那个弹窗」（电量 / 降噪 /
+ *       快捷控制）。2026-09 起不再有单独的「连接弹窗」：两条触发（点通知 / 连上自动）统一成
+ *       同一个界面，状态栏通知在同一条事件里一起刷新（见下），所以两者是**同时**出现的。
  *   这两件事都要一个长期存活的 [PodListener]，而 listener 只能在初始化那一刻注册，
  *   所以由本对象在 [ensureInit] 里注册一次，之后一直转发。
  *
@@ -22,7 +23,6 @@ package moe.chenxy.hyperpods.pods
 
 import android.content.Context
 import android.content.Intent
-import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -31,11 +31,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import moe.chenxy.hyperpods.ui.ConnectionPopupActivity
+import moe.chenxy.hyperpods.ui.PopupActivity
 import moe.chenxy.hyperpods.ui.MODULE_PREFS_GROUP
 import moe.chenxy.hyperpods.ui.canStartActivityFromBackground
 import moe.chenxy.hyperpods.utils.data.HyperPodsPrefsKey
-import moe.chenxy.hyperpods.utils.data.HyperPodsAction
 
 private const val TAG = "ControlBridge"
 
@@ -58,26 +57,6 @@ private const val POPUP_SETTLE_DELAY_MS = 600L
  */
 private const val POPUP_RETRY_DELAY_MS = 800L
 private const val POPUP_MAX_ATTEMPTS = 3
-
-/** 电量 Bundle 编码：255 = 未知；置 bit7 表示充电中（与 MIUI 原生耳机页的约定一致）。 */
-private object BatteryCodecWire {
-    const val UNKNOWN = 255
-
-    fun encode(level: Int, charging: Boolean): Int = when {
-        level < 0 -> UNKNOWN
-        charging -> (level.coerceIn(0, 100)) or 128
-        else -> level.coerceIn(0, 100)
-    }
-
-    fun toBundle(b: BatterySnapshot): Bundle = Bundle().apply {
-        putInt("left", encode(b.left, b.leftCharging))
-        putInt("right", encode(b.right, b.rightCharging))
-        putInt("case", encode(b.case, b.caseCharging))
-        putBoolean("left_charging", b.leftCharging)
-        putBoolean("right_charging", b.rightCharging)
-        putBoolean("case_charging", b.caseCharging)
-    }
-}
 
 object ControlBridge {
 
@@ -152,7 +131,7 @@ object ControlBridge {
     }
 
     /**
-     * 首次拿到有效电量时**排队**弹出「连接弹窗」（ui/ConnectionPopupActivity，三路电量），
+     * 首次拿到有效电量时**排队**弹出弹窗（ui/PopupActivity —— 与点通知唤出的是同一个界面），
      * 延后 [POPUP_SETTLE_DELAY_MS] 让首批电量帧落定。
      *
      * 与状态栏通知的关系：同一条事件里先 [PodNotification.onSnapshot] 刷新通知、再排这一次弹窗，
@@ -178,8 +157,8 @@ object ControlBridge {
     /**
      * 弹出「连接弹窗」，并在被系统拦掉时**重试**（「重新弹窗」）。
      *
-     * 判定落地的方式：启动前后取 [ConnectionPopupActivity.lastShownAt] /
-     * [ConnectionPopupActivity.visible] 对比 —— 弹窗进 onResume 时会写这两个标记。
+     * 判定落地的方式：启动前后取 [PopupActivity.lastShownAt] / [PopupActivity.visible] 对比
+     * —— 弹窗进 onResume 时会写这两个标记。
      * 没写说明这一次启动没落地（BAL 静默拦截），再试一次；试满 [POPUP_MAX_ATTEMPTS] 次
      * 仍未落地就放弃并留下明确日志。
      *
@@ -196,15 +175,11 @@ object ControlBridge {
                 Log.w(TAG, "连接弹窗可能被 BAL 拦掉：缺「显示在其他应用上层」/「后台弹出界面」权限")
             }
             val startedAt = SystemClock.elapsedRealtime()
-            val snapshot = MoondropLink.snapshot()
             runCatching {
+                // 不带任何载荷 extra：弹窗自己订阅进程内快照（rememberPodSnapshot），
+                // 首帧就是最新的设备名 / 电量 —— 比 Intent 里塞一份启动瞬间的副本更准。
                 context.startActivity(
-                    Intent(context, ConnectionPopupActivity::class.java)
-                        .putExtra(
-                            ConnectionPopupActivity.EXTRA_STATUS,
-                            BatteryCodecWire.toBundle(snapshot.battery),
-                        )
-                        .putExtra(HyperPodsAction.EXTRA_DEVICE_NAME, snapshot.deviceName)
+                    Intent(context, PopupActivity::class.java)
                         .addFlags(
                             Intent.FLAG_ACTIVITY_NEW_TASK or
                                 Intent.FLAG_ACTIVITY_CLEAR_TOP or
@@ -218,9 +193,7 @@ object ControlBridge {
                 return
             }
             mainHandler.postDelayed({
-                if (ConnectionPopupActivity.visible ||
-                    ConnectionPopupActivity.lastShownAt >= startedAt
-                ) {
+                if (PopupActivity.visible || PopupActivity.lastShownAt >= startedAt) {
                     Log.i(TAG, "连接弹窗已在第 $attempt 次尝试后显示")
                 } else {
                     attemptOnce()

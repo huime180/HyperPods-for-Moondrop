@@ -33,12 +33,18 @@
   普通通知回落 `Notification.Builder.addAction`），落点是 `pods/PodDisconnectReceiver.kt` →
   `MoondropLink.disconnect()`：断掉的是**本应用**与耳机的那条链路（A2DP / HFP 音频链路归系统
   蓝牙管，普通应用没有 BLUETOOTH_PRIVILEGED，代不了用户断开它）。
-* **连接弹窗**（新行为）：耳机连上后**先刷新状态栏通知，再延后 600 ms 弹连接弹窗**
-  （`ui/ConnectionPopupActivity.kt`，默认 8s 自动关闭）；后台启动 Activity 可能被系统 BAL
-  静默拦掉，因此最多**重试 3 次**（间隔 800 ms，用 `lastShownAt` / `visible` 确认是否真的显示）。
+* **弹窗只有一个**（2026-09 起）：耳机连上后**先刷新状态栏通知，再延后 600 ms 自动弹窗**
+  （`ui/PopupActivity.kt` —— 与点通知唤出的是**同一个**界面：电量 / 降噪 / 增益 / 快捷控制）。
+  原来是两条界面（连接时弹一个简单的三路电量小窗 `ConnectionPopupActivity` + 点通知弹这个），
+  现已统一成一条，`ConnectionPopupActivity` 整个删除，连同它读的那组连接状态 / 电量 Bundle
+  常量（`PODS_CONNECTED` / `PODS_DISCONNECTED` / `BATTERY_CHANGED` / `EXTRA_BATTERY` /
+  `EXTRA_DEVICE_NAME`）与 `BatteryCodecWire` 编码器：弹窗直接从进程内快照取数。
+  后台启动 Activity 可能被系统 BAL **静默**拦掉，因此最多**重试 3 次**（间隔 800 ms，用
+  `PopupActivity.lastShownAt` / `visible` 确认是否真的显示）。自动弹出的那个不再自己关闭
+  （旧小窗是 8s 自动关）—— 与点通知那个一致：点卡片外或「关闭」退出。
 * **后台弹出权限**：为让应用在后台也能弹连接弹窗，声明了 `SYSTEM_ALERT_WINDOW`
   （「显示在其他应用上层」），并在设置页提供跳转入口；**HyperOS 上还需手动开启「后台弹出界面」**。
-* **设置页收窄**：只剩「主题」+ 通知卡三项（通知栏显示 / 连接时自动唤出连接弹窗 /
+* **设置页收窄**：只剩「主题」+ 通知卡三项（通知栏显示 / 连接时自动唤出弹窗 /
   后台弹出弹窗权限入口）+ 关于；手势入口只留在详情页（耳机相关功能都在耳机页），
   原来的「模块」页签（LSPosed 状态卡、模块开关、重启作用域）整组删除。
 * **降噪子排图标**：主排「通透 / 降噪 / 关闭」图标在上、文案在下；降噪生效时展开

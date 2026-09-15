@@ -94,8 +94,8 @@
     <string name="notification_section">Notifications</string>
     <string name="notification_display_title">Notification display</string>
     <string name="notification_display_summary">Keep a persistent status-bar notification with the connection and battery state; on HyperOS it is also rendered as a focus notification / Super Island (a plain notification elsewhere)</string>
-    <string name="connect_popup_title">Show connection popup on connect</string>
-    <string name="connect_popup_summary">Automatically show the connection popup (three-way battery) after the earbuds connect, refreshing the status-bar notification at the same time; needs the background pop-up permission below, and you can still open it from the notification when off</string>
+    <string name="connect_popup_title">Show popup on connect</string>
+    <string name="connect_popup_summary">Automatically show the same popup as the notification (battery / ANC / gain / quick controls) after the earbuds connect, refreshing the status-bar notification at the same time; needs the background pop-up permission below, and you can still open it from the notification when off</string>
     <string name="bg_popup_permission_title">Background pop-up permission</string>
     <string name="bg_popup_permission_summary">Grant “Display over other apps” / “Start activities in background”; otherwise the system silently blocks the popup while the app is in the background</string>
     <!-- 应用进程自己发的那条耳机状态通知（pods/PodNotification.kt） -->
@@ -115,7 +115,6 @@
     <string name="more_settings">More settings</string>
     <string name="close">Close</string>
     <!-- connection popup: bottom button -->
-    <string name="done">Done</string>
     <string name="quick_controls">Quick controls</string>
     <!-- quick controls collapsible header: chevron accessibility text -->
     <string name="quick_controls_expand">Expand quick controls</string>

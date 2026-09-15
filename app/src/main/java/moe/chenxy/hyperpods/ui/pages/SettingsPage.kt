@@ -14,9 +14,10 @@
  *   · 「通知栏显示」—— 控制**应用自己**发的那条耳机状态通知（pods/PodNotification.kt）。
  *     本应用已不是 Xposed 模块，这条通知不需要任何 hook，因此这个开关仍然有意义；
  *     键是 HyperPodsPrefsKey.SHOW_NOTIFICATION，读写仍然只走 [ModuleSettingsState]。
- *   · 「连接时自动唤出连接弹窗」—— 控制 pods/ControlBridge.kt 在耳机连上后自动弹出的
- *     ui/ConnectionPopupActivity（三路电量，与状态栏通知同时刷新）；键
- *     HyperPodsPrefsKey.AUTO_POPUP_ON_CONNECT，同样只走 [ModuleSettingsState]。
+ *   · 「连接时自动唤出弹窗」—— 控制 pods/ControlBridge.kt 在耳机连上后自动弹出的
+ *     ui/PopupActivity（与点通知唤出的是**同一个**弹窗：电量 / 降噪 / 快捷控制，
+ *     与状态栏通知同时刷新）；键 HyperPodsPrefsKey.AUTO_POPUP_ON_CONNECT，
+ *     同样只走 [ModuleSettingsState]。
  *   · 应用级入口：关于。
  *
  * 「手势操作」入口原本也在这张卡里（由 hasGestures 门控），现已删除：手势是耳机相关功能，

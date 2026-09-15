@@ -94,8 +94,8 @@
     <string name="notification_section">通知</string>
     <string name="notification_display_title">通知栏显示</string>
     <string name="notification_display_summary">在状态栏常驻显示耳机的连接与电量状态；HyperOS 上同时按焦点通知 / 超级岛渲染（其它 ROM 就是一条普通通知）</string>
-    <string name="connect_popup_title">连接时自动唤出连接弹窗</string>
-    <string name="connect_popup_summary">耳机连上后自动弹出连接弹窗（三路电量），同时刷新状态栏通知；需要下面的后台弹出权限，关掉后仍可从通知点开</string>
+    <string name="connect_popup_title">连接时自动唤出弹窗</string>
+    <string name="connect_popup_summary">耳机连上后自动弹出与点通知同一个弹窗（电量 / 降噪 / 增益 / 快捷控制），同时刷新状态栏通知；需要下面的后台弹出权限，关掉后仍可从通知点开</string>
     <string name="bg_popup_permission_title">后台弹出弹窗权限</string>
     <string name="bg_popup_permission_summary">授予「显示在其他应用上层」/「后台弹出界面」；否则应用在后台时系统会静默拦掉连接弹窗</string>
     <!-- 应用进程自己发的那条耳机状态通知（pods/PodNotification.kt） -->
@@ -115,7 +115,6 @@
     <string name="more_settings">更多设置</string>
     <string name="close">关闭</string>
     <!-- 连接弹窗：底部按钮 -->
-    <string name="done">完成</string>
     <string name="quick_controls">快捷控制</string>
     <!-- 快捷控制折叠头：箭头指示器的无障碍文案 -->
     <string name="quick_controls_expand">展开快捷控制</string>

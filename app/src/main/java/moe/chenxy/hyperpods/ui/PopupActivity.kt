@@ -36,6 +36,7 @@ package moe.chenxy.hyperpods.ui
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
@@ -130,6 +131,30 @@ class PopupActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 「这一次启动到底有没有落地」：pods/ControlBridge.kt 在后台 startActivity 时会被
+        // Android 10+ 的 BAL **静默**拦掉（不抛异常），只能靠这两个标记回头确认。
+        visible = true
+        lastShownAt = SystemClock.elapsedRealtime()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // 离开前台（关闭 / 被别的界面盖住）＝不再可见，下一次连接可以再弹
+        visible = false
+    }
+
+    companion object {
+        /**
+         * 弹窗最近一次真正显示的时刻 / 当前是否可见。只给 pods/ControlBridge.kt 用：
+         * 它按「连接时自动唤出弹窗」开关在后台启动本弹窗，启动后要确认有没有落地，
+         * 没落地就重试（见 ControlBridge.launchConnectionPopupWithRetry）。
+         */
+        @Volatile internal var lastShownAt: Long = 0L
+        @Volatile internal var visible: Boolean = false
     }
 }
 
