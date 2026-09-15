@@ -43,6 +43,9 @@ object PodFocusNotification {
      * @param timeoutSeconds 岛显示多久（秒）后自动收起；null = 不限制（模板基类的 `timeout` 字段）
      * @param showInShade    是否在通知栏也留一条通知。临时岛传 false —— 只借岛显示一下，
      *                       不在通知栏里多出/闪出一条（库的 `isShowNotification`）
+     * @param floating       是否让它「浮」成岛。**常驻通知必须传 false**：焦点通知本身带着
+     *                       `param_island`，再叠上 enableFloat 就会被系统渲染成一个岛
+     *                       （用户实测：常驻那条也一直带岛）。只有临时的连接/断开提示才浮。
      */
     fun buildExtras(
         context: Context,
@@ -53,6 +56,7 @@ object PodFocusNotification {
         withIsland: Boolean,
         timeoutSeconds: Int? = null,
         showInShade: Boolean = true,
+        floating: Boolean = true,
     ): Bundle? = runCatching {
         val bitmap = boxBitmap
             ?: BitmapFactory.decodeResource(context.resources, R.drawable.img_box)
@@ -60,8 +64,11 @@ object PodFocusNotification {
         val picture = Icon.createWithBitmap(bitmap)
         FocusNotification.buildV3 {
             val logo = createPicture(PIC_KEY, picture)
-            // enableFloat：允许在状态栏/岛区域浮动显示；updatable：允许后续再发一次更新它
-            enableFloat = true
+            // enableFloat：允许在状态栏/岛区域浮动显示。常驻通知传 false —— 它不带岛，
+            // 也不该浮起来；只有临时的连接/断开提示才浮。
+            // islandFirstFloat 一起关掉：库默认会让焦点通知「先浮一下」，那也是岛。
+            enableFloat = floating
+            if (!floating) islandFirstFloat = false
             updatable = true
             ticker = titleText
             // 临时岛：不要在通知栏留痕
@@ -83,6 +90,16 @@ object PodFocusNotification {
             if (withIsland) {
                 island {
                     islandProperty = 1
+                    // 未展开（小岛）那块的模板**只能放图片**（SmallIslandArea = picInfo /
+                    // combinePicInfo，没有文字字段），所以这里放机型图；文字左右布局在
+                    // bigIslandArea 里 —— 系统把未展开态渲染成大岛区域的「左图 + 右 title」，
+                    // 因此下面那套左图右文同时就是小岛的形态。
+                    smallIslandArea {
+                        picInfo {
+                            type = 1
+                            pic = logo
+                        }
+                    }
                     bigIslandArea {
                         // 布局（用户要求）：左 = 图片 + 设备名，右 = 内容（电量 / 已断开）。
                         // 右栏刻意写成 title 而不是 content：实测右栏只渲染 title —— 原来把电量放在

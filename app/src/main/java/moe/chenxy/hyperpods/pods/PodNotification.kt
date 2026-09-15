@@ -212,9 +212,11 @@ object PodNotification {
                 contentText = content.replace('\n', ' ').trim(),
                 aodText = aodTitleOf(snapshot),
                 boxBitmap = icon?.bitmap,
-                // 常驻通知**不带岛**：带上它 HyperOS 会把超级岛一直挂着（用户实测）。
+                // 常驻通知**不带岛、也不浮**：焦点通知本身就带 param_island，再叠 enableFloat
+                // 就会被渲染成一个一直挂着的岛（用户实测「常驻的焦点通知也会有超级岛」）。
                 // 岛只在连接/断开那一刻由 pods/PodIslandNotification.kt 临时发一次。
                 withIsland = false,
+                floating = false,
             )?.let { builder.addExtras(it) }
             manager.notify(NOTIFICATION_TAG, NOTIFICATION_ID, builder.build())
             lastRendered = rendered

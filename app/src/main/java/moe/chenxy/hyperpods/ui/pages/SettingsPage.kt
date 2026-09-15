@@ -124,6 +124,13 @@ fun SettingsPage(
                         }
                     },
                 )
+                // 超级岛开关：关掉后连接 / 断开都不再发那条临时岛（常驻的焦点通知不受影响）
+                SwitchPreference(
+                    title = stringResource(R.string.island_switch_title),
+                    summary = stringResource(R.string.island_switch_summary),
+                    checked = settings.islandEnabled,
+                    onCheckedChange = { settings.setIslandEnabled(it) },
+                )
                 ArrowPreference(
                     title = stringResource(R.string.bg_popup_permission_title),
                     summary = stringResource(R.string.bg_popup_permission_summary),

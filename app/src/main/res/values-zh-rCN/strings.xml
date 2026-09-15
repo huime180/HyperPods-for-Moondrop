@@ -93,6 +93,8 @@
     <!-- 通知栏显示：耳机状态在系统通知栏 / 蓝牙设置里的常驻显示（默认开） -->
     <string name="notification_display_title">通知栏显示</string>
     <string name="notification_display_summary">在状态栏常驻显示耳机的连接与电量状态；HyperOS 上同时按焦点通知 / 超级岛渲染（其它 ROM 就是一条普通通知）</string>
+    <string name="island_switch_title">超级岛</string>
+    <string name="island_switch_summary">连接 / 断开时在 HyperOS 超级岛上短暂提示；关掉后只保留常驻的焦点通知</string>
     <string name="connect_popup_title">连接时自动唤出连接弹窗</string>
     <string name="connect_popup_summary">耳机连上后自动弹出连接弹窗（三路电量），同时刷新状态栏通知；需要下面的后台弹出权限，关掉后仍可从通知点开</string>
     <string name="bg_popup_permission_title">后台弹出弹窗权限</string>

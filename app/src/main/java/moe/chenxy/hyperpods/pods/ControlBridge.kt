@@ -296,6 +296,7 @@ object ControlBridge {
      * 所以用「本次连接是否已发过」做边沿判定 —— 与连接弹窗的 popupShownForAddress 同一套思路。
      */
     private fun maybeShowConnectedIsland(context: Context, snapshot: PodSnapshot) {
+        if (!islandEnabled(context)) return
         val address = snapshot.deviceAddress
         if (address.isBlank() || address == islandShownForAddress) return
         islandShownForAddress = address
@@ -311,6 +312,7 @@ object ControlBridge {
 
     /** 断开那一刻在超级岛上闪一次「已断开」（用最近一次连接的设备名与机型图）。 */
     private fun showDisconnectedIsland(context: Context) {
+        if (!islandEnabled(context)) return
         val name = lastIslandName
         val address = lastIslandAddress
         islandShownForAddress = null
@@ -319,6 +321,18 @@ object ControlBridge {
             val bitmap = if (address.isBlank()) null else PodImageStore.loadBitmap(context, address)
             PodIslandNotification.showDisconnected(context, name, bitmap)
         }
+    }
+
+    /**
+     * 设置页「超级岛」开关（默认开）。
+     *
+     * 与 [autoPopupEnabled] 同一套宽容策略：偏好读不到时按 true 处理。实时读，改完即生效。
+     */
+    private fun islandEnabled(context: Context): Boolean {
+        val prefs = runCatching {
+            context.getSharedPreferences(MODULE_PREFS_GROUP, Context.MODE_PRIVATE)
+        }.getOrNull() ?: return true
+        return runCatching { prefs.getBoolean(HyperPodsPrefsKey.SHOW_ISLAND, true) }.getOrDefault(true)
     }
 
     /** 撤销还没启动的弹窗任务（断开时调用）。 */
