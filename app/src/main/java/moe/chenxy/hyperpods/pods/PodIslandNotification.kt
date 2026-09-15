@@ -52,9 +52,9 @@ object PodIslandNotification {
     /** 上一次「延时收起」的协程：新的岛来了就取消它，免得把新岛一起撤掉。 */
     private var pendingHide: Job? = null
 
-    /** 连接时：岛上显示设备名 + 电量。 */
-    fun showConnected(context: Context, deviceName: String, batteryText: String, boxBitmap: Bitmap?) {
-        show(context, deviceName, batteryText, boxBitmap)
+    /** 连接时：岛上显示设备名 + 「已连接」（用户要求：不再显示电量）。 */
+    fun showConnected(context: Context, deviceName: String, boxBitmap: Bitmap?) {
+        show(context, deviceName, context.getString(R.string.island_connected), boxBitmap)
     }
 
     /** 断开时：岛上显示设备名 + 「已断开」。 */

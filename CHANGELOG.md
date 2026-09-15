@@ -22,12 +22,15 @@
   断开连接时程序化撤掉），由设置页「通知栏显示」开关控制。
   这条通知同时带上 **HyperOS 焦点通知**的 extra（`pods/PodFocusNotification.kt`，
   用 `com.xzakota.hyper.notification:focus-api` 模板库，同 dev 分支），AOD 行是 `L 59% | R 64%`；
-  **超级岛不挂在它上面**（挂着会一直显示），而是由 `pods/PodIslandNotification.kt` 在连接
-  （设备名 + 电量）与断开（设备名 + 已断开）那一刻各临时发一次，5 秒后自动收起，
+  **超级岛只在连接 / 断开那一刻出现**（`pods/PodIslandNotification.kt`：连接显示「设备名 +
+  已连接」、断开显示「设备名 + 已断开」），5 秒后自动收起，
   岛布局为「左 = 机型图 + 设备名，右 = 内容」；岛的收起时间写在岛模板的 `islandTimeout`
   （单位**秒**；模板基类的 `timeout` 是**分钟**，别混）上，并给通知挂 `setTimeoutAfter`
-  作系统侧兜底；岛模板**只写 `bigIslandArea`、不写 `smallIslandArea`**（写了会被系统当成
-  「这条通知有摘要态」，连接后岛一直挂在岛区）；其它 ROM 忽略这些 extra，通知照常显示。
+  作系统侧兜底。常驻那条要「不留岛」靠三条（详见 `PROTOCOL.md` §10.5.3）：岛模板**只写
+  `bigIslandArea`、不写 `smallIslandArea`**、**不写 `islandFirstFloat = false`**（那是强制
+  摘要态，正中小胶囊的地盘）、并显式 `dismissIsland = true` 让摘要态消失 —— 单纯把 `island`
+  置空没用（焦点通知自带摘要态，系统会用默认形态补一个常驻胶囊）。其它 ROM 忽略这些 extra，
+  通知照常显示。
   通知上还挂着一个动作按钮 **「断开连接」**（模板动作栏 `param_v2.actions`，`type = 2` 文字按钮；
   普通通知回落 `Notification.Builder.addAction`），落点是 `pods/PodDisconnectReceiver.kt` →
   `MoondropLink.disconnect()`：断掉的是**本应用**与耳机的那条链路（A2DP / HFP 音频链路归系统

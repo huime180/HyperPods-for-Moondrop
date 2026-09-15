@@ -303,10 +303,10 @@ object ControlBridge {
         lastIslandAddress = address
         lastIslandName = snapshot.deviceName.ifBlank { snapshot.modelName }
         val name = lastIslandName
-        val batteryText = PodNotification.batteryTextOf(context, snapshot)
         ioScope.launch {
             val bitmap = PodImageStore.loadBitmap(context, address)
-            PodIslandNotification.showConnected(context, name, batteryText, bitmap)
+            // 岛上不显示电量（用户要求）：连接那一刻只写「已连接」
+            PodIslandNotification.showConnected(context, name, bitmap)
         }
     }
 
