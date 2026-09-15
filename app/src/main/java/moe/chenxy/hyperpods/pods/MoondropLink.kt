@@ -826,16 +826,27 @@ object MoondropLink {
      * （feature 18：GET/SET = 1/2、payload `0/1`；头动追踪 3/4），但本应用从未在支持空间音频的
      * 机型上跑通，读不到就保持 null（UI 不猜）。
      */
-    suspend fun refreshSpatial() {
+    suspend fun refreshSpatial() = spatialReadLock.withLock {
         // 两个读各自按自己的能力位门控：不支持那一条就不发（老机型不发未知命令）
         if (capabilities.hasSpatial) {
             val sp = request(Gaia.spatialGet(), ANC_TIMEOUT_MS)
             if (sp != null && sp.isNotEmpty()) spatialEnabled = (sp[0].toInt() and 0xFF) == 1
         }
-        if (!capabilities.hasHeadTracking) return
+        if (!capabilities.hasHeadTracking) return@withLock
         val ht = request(Gaia.headTrackingGet(), ANC_TIMEOUT_MS)
         if (ht != null && ht.isNotEmpty()) headTrackingOn = (ht[0].toInt() and 0xFF) == 1
     }
+
+    /**
+     * feature 18 两条读命令的串行锁。
+     *
+     * 为什么需要：[responses] 的等待表**只按 feature 建键**（见 [request]），而 feature 18 上
+     * 同时有 cmd 1（空间音频）与 cmd 3（头部追踪）两条读命令。[refreshSpatial] 有三个调用点
+     * （refreshAll 的轮询、[setSpatial]、[setHeadTracking] 写完后的回读），完全可能并发：
+     * 那时一条命令的回包会唤醒**另一条**命令的等待者，把空间音频的值当成头部追踪写进状态。
+     * 加锁只串行化这两条读，不动 [responses] 的键结构（那会牵动其它功能）。
+     */
+    private val spatialReadLock = Mutex()
 
     /**
      * 读手势配置（TOUCHV2 cmd 2）。
