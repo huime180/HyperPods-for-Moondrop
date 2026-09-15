@@ -46,6 +46,7 @@ import moe.chenxy.hyperpods.ui.rememberModuleSettings
 import moe.chenxy.hyperpods.ui.canStartActivityFromBackground
 import moe.chenxy.hyperpods.ui.openBackgroundPopupPermissionSettings
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
@@ -100,9 +101,11 @@ fun SettingsPage(
             }
         }
 
-        // 通知：「通知栏显示」——控制应用自己发的耳机电量状态通知
+        // 通知：应用自己发的状态通知 + 超级岛 + 连接弹窗，统一收在「通知」小标题下
+        item { SmallTitle(text = stringResource(R.string.notification_section)) }
+
         item {
-            Card(modifier = Modifier.padding(top = SECTION_GAP)) {
+            Card {
                 SwitchPreference(
                     title = stringResource(R.string.notification_display_title),
                     summary = stringResource(R.string.notification_display_summary),

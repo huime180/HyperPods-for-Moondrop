@@ -87,6 +87,13 @@ object PodFocusNotification {
                 title = titleText
                 content = contentText
             }
+            if (!withIsland) {
+                // 关键：库默认会带一个空的 IslandTemplate（序列化到 miui.focus.param 的
+                // param_island），系统只要看到这个字段就会给通知渲染一个小岛 —— 光是不写
+                // island {} 块并不够（用户实测「常驻的焦点通知也会一直显示超级岛」）。
+                // 属性名是 island（@SerialName("param_island")），可空，显式置空才真的没有岛。
+                island = null
+            }
             if (withIsland) {
                 island {
                     islandProperty = 1

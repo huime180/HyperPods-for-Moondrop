@@ -91,6 +91,7 @@
     <string name="theme_light">浅色</string>
     <string name="theme_dark">深色</string>
     <!-- 通知栏显示：耳机状态在系统通知栏 / 蓝牙设置里的常驻显示（默认开） -->
+    <string name="notification_section">通知</string>
     <string name="notification_display_title">通知栏显示</string>
     <string name="notification_display_summary">在状态栏常驻显示耳机的连接与电量状态；HyperOS 上同时按焦点通知 / 超级岛渲染（其它 ROM 就是一条普通通知）</string>
     <string name="island_switch_title">超级岛</string>

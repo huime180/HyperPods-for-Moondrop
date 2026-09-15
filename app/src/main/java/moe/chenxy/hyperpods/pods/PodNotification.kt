@@ -347,7 +347,9 @@ object PodNotification {
      *   · 三路都没有读数时第二行回落成「正在读取电量…」，第一行的连接状态仍在。
      */
     private fun contentOf(context: Context, snapshot: PodSnapshot): String =
-        context.getString(R.string.conn_connected) + "\n" + batteryTextOf(context, snapshot)
+        // 不带「已连接」那一行：这条通知只在**连接着**的时候存在（断开时会被撤掉），
+        // 状态行纯属冗余，用户明确要求去掉（焦点通知/通知栏里都只留电量）。
+        batteryTextOf(context, snapshot)
 
     /**
      * 只有电量的那一行（不含「已连接」那行）—— 超级岛右栏用。
